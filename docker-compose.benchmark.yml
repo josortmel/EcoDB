@@ -1,0 +1,6 @@
+# Overlay for LongMemEval benchmark. Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.benchmark.yml up -d
+services:
+  worker:
+    volumes:
+      - ./eval/longmemeval/sessions_md:/benchmark-data:ro
