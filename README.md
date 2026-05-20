@@ -200,19 +200,22 @@ Connect any MCP-compatible client:
 
 ## Benchmarks
 
-EcoDB includes an internal evaluation framework ([`eval/`](eval/)) that measures search quality at the **paragraph level** — each query must retrieve a specific memory from the full corpus, not just the right document.
+<p align="center">
+  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks — LoCoMo (ICLR 2025)" width="100%">
+</p>
 
-This is significantly harder than document-level retrieval benchmarks like LongMemEval (which EcoDB has not yet been evaluated against). Paragraph-level R@5 scores are not directly comparable to document-level R@5 scores.
-
-Results on production dataset (1400+ memories, 60 queries):
+Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753) (ICLR 2025), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
 
 | Metric | Score |
 |--------|:-----:|
-| **R@5** (paragraph-level) | **0.56** |
-| **MRR** | **0.39** |
-| **Multimodal R@5** | **0.70** |
+| **Recall@5** | **0.77** |
+| **Recall@10** | **0.89** |
+| **Recall_all@5** | **0.71** |
+| **NDCG@5** | **0.57** |
 
-> **Note:** These are internal benchmarks with a strict evaluation methodology. Standard benchmark evaluation (LongMemEval) is planned. See [`eval/`](eval/) for methodology, scripts, and reproduction instructions.
+**By query type** (Recall@5): single-hop 0.83 · adversarial 0.78 · open-domain 0.77 · temporal 0.73 · multi-hop 0.61
+
+10 conversations, no exclusions. Full methodology, scripts, and per-conversation breakdown in [`eval/`](eval/).
 
 ## Roadmap
 
