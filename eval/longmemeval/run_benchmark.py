@@ -2,6 +2,7 @@
 
 Tests the FULL pipeline: Docling ingestion -> chunking -> NER -> embedding -> GAMR search.
 """
+import functools
 import json
 import math
 import os
@@ -10,6 +11,8 @@ import time
 from collections import defaultdict
 
 import httpx
+
+print = functools.partial(print, flush=True)
 
 API_URL = os.environ.get("ECODB_API_URL", "http://localhost:8080")
 API_KEY = os.environ.get("ECODB_API_KEY", "")
@@ -24,19 +27,19 @@ def headers():
 
 def load_config():
     path = os.path.join(DATA_DIR, "benchmark_config.json")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_dataset():
     path = os.path.join(DATA_DIR, "longmemeval_s_cleaned.json")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_doc_mapping():
     path = os.path.join(DATA_DIR, "doc_id_mapping.json")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

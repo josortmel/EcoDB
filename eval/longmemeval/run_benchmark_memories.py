@@ -2,6 +2,7 @@
 
 Each session stored as one memory. GAMR searches memories directly.
 """
+import functools
 import json
 import math
 import os
@@ -10,6 +11,8 @@ import time
 from collections import defaultdict
 
 import httpx
+
+print = functools.partial(print, flush=True)
 
 API_URL = os.environ.get("ECODB_API_URL", "http://localhost:8080")
 API_KEY = os.environ.get("ECODB_API_KEY", "")
@@ -25,13 +28,13 @@ def headers():
 
 def load_config():
     path = os.path.join(DATA_DIR, "benchmark_config.json")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_dataset():
     path = os.path.join(DATA_DIR, "longmemeval_s_cleaned.json")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -49,17 +52,28 @@ def load_sessions_as_memories(client: httpx.Client, dataset: list, workspace_id:
             print(f"  WARNING: session {sid} truncated ({len(text)} -> {MAX_CONTENT} chars)")
             text = text[:MAX_CONTENT]
 
-        r = client.post(f"{API_URL}/memories", headers=headers(),
-                         json={
-                             "content": text,
-                             "type": "tecnico",
-                             "workspace_id": workspace_id,
-                             "project_id": project_id,
-                             "tags": [f"session:{sid}", "longmemeval"],
-                         })
-        r.raise_for_status()
+        for attempt in range(5):
+            r = client.post(f"{API_URL}/memories", headers=headers(),
+                             json={
+                                 "content": text,
+                                 "type": "tecnico",
+                                 "workspace_id": workspace_id,
+                                 "project_id": project_id,
+                                 "tags": [f"session:{sid}", "longmemeval"],
+                             })
+            if r.status_code == 503:
+                wait = 2 ** attempt
+                print(f"  503 on session {sid}, retry in {wait}s...")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            break
+        else:
+            print(f"  FAILED after 5 retries: session {sid}")
+            continue
         mem_id = r.json()["id"]
         mapping[mem_id] = sid
+        time.sleep(0.5)
         if (i + 1) % 10 == 0:
             print(f"  Loaded {i+1}/{len(sessions)} sessions")
 
