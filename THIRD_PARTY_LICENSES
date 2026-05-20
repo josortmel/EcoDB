@@ -1,0 +1,24 @@
+EcoDB depends on the following open-source software:
+
+Component                  License           URL
+─────────────────────────  ────────────────  ──────────────────────────────────────
+PostgreSQL 16              PostgreSQL Lic.   https://www.postgresql.org/about/licence/
+pgvector                   BSD               https://github.com/pgvector/pgvector
+Apache AGE                 Apache 2.0        https://github.com/apache/age
+FastAPI                    MIT               https://github.com/fastapi/fastapi
+Pydantic                   MIT               https://github.com/pydantic/pydantic
+psycopg2                   LGPL 3.0          https://github.com/psycopg/psycopg2
+uvicorn                    BSD 3-Clause      https://github.com/encode/uvicorn
+httpx                      BSD 3-Clause      https://github.com/encode/httpx
+
+GLiNER                     Apache 2.0        https://github.com/urchade/GLiNER
+Jina Embeddings v4         Apache 2.0        https://huggingface.co/jinaai/jina-embeddings-v4
+Qwen 2.5 (3B Instruct)    Apache 2.0        https://huggingface.co/Qwen/Qwen2.5-3B-Instruct
+llama.cpp                  MIT               https://github.com/ggerganov/llama.cpp
+Hugging Face Transformers  Apache 2.0        https://github.com/huggingface/transformers
+PyTorch                    BSD 3-Clause      https://github.com/pytorch/pytorch
+
+Docling                    MIT               https://github.com/DS4SD/docling
+Whisper (OpenAI)           MIT               https://github.com/openai/whisper
+
+Docker                     Apache 2.0        https://github.com/moby/moby

@@ -1,0 +1,54 @@
+# Credentials — NEVER commit
+.env
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Models — downloaded at first boot, too large for git
+models/*.gguf
+models/*.bin
+models/*.safetensors
+
+# HuggingFace cache
+.cache/
+
+# Data directories — user data, not source
+backups/
+scripts/backups/
+media/
+
+# Database dumps and binary data — never publish
+*.dump
+*.sqlite3
+*.pickle
+
+# Internal plans and development artifacts
+docs/plans/
+.faro/
+
+# Test artifacts
+test_media.png
+test_vrf.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+*.log
+*.deb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Phase briefs (originals — sanitized versions in docs/architecture/)
+fase*_brief.md

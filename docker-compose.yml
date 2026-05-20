@@ -1,0 +1,252 @@
+# EcoDB Docker Compose
+#
+# Collective AI memory infrastructure for organizations.
+# See README.md for setup instructions.
+#
+# Basic usage:
+#   docker compose up -d
+#
+# With document ingestion worker:
+#   docker compose --profile with-ingestion up -d
+#
+# With local LLM (classifier, HyDE):
+#   docker compose --profile with-llm up -d
+
+services:
+
+  postgres:
+    image: ecodb-postgres:1.0.0
+    container_name: ecodb-postgres
+    environment:
+      POSTGRES_DB: ecodb
+      POSTGRES_USER: ecodb
+      POSTGRES_PASSWORD: ${ECODB_DB_PASSWORD:-ecodb_test_pass}
+    ports:
+      # Bind to localhost only — postgres should not be reachable from the network.
+      # Auth is enforced at the API/JWT layer, not the DB layer.
+      # Remote access: use `docker exec ecodb-postgres psql`.
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - ecodb_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecodb -d ecodb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ecodb-net
+
+  embeddings:
+    image: ecodb-embeddings:0.2.5
+    container_name: ecodb-embeddings
+    environment:
+      MODEL_NAME: jinaai/jina-embeddings-v4
+      EMBEDDING_BACKEND: local
+      EMBEDDING_DIM: "512"
+      MAX_TEXT_LEN: "32000"
+    # NO exponemos puerto al host — solo accesible internamente desde api via
+    # red ecodb-net. Si se quiere exponer para debugging, anadir aqui:
+    #   ports:
+    #     - "8090:8090"
+    volumes:
+      # HF cache via bind mount — avoids re-downloading the model (~7GB) on rebuild.
+      # Mounted :ro because trust_remote_code=True could otherwise execute code that
+      # modifies the host cache. With the revision pinned to a cached SHA, HF only
+      # needs read access.
+      - ${HF_CACHE_PATH:-hf_cache}:/cache/huggingface:ro
+      # torch.inductor kernel cache — named volume, persists across rebuilds.
+      - torch_cache:/home/apiuser/.cache/torch
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: '1g'
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8090/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    restart: unless-stopped
+    networks:
+      - ecodb-net
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: ecodb-api:0.23.0
+    container_name: ecodb-api
+    environment:
+      ENVIRONMENT: ${ECODB_ENV:-development}
+      DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:-ecodb_test_pass}@postgres:5432/ecodb
+      EMBEDDINGS_URL: http://embeddings:8090
+      EMBEDDINGS_TIMEOUT: "60.0"
+      JWT_SECRET: ${ECODB_JWT_SECRET}
+      JWT_TTL_SECONDS: "3600"
+      API_KEY_PEPPER: ${ECODB_API_KEY_PEPPER}
+      CORS_ORIGINS: ${ECODB_CORS_ORIGINS:-http://localhost:8080,http://localhost:8091}
+      NER_SERVICE_URL: http://ner:8091
+      LLAMA_CPP_URL: http://llm:8080
+      ECODB_LLM_PROVIDER: ${ECODB_LLM_PROVIDER:-local}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_URL: ${DEEPSEEK_URL:-https://api.deepseek.com}
+      ENABLE_HYDE: "false"
+      ENABLE_LLM_TELEMETRY: "true"
+      ENABLE_POST_HOC_CLASSIFIER: "true"
+      ENABLE_BM25: "true"
+      ENABLE_BM25_EXPANSION: "true"
+      ENABLE_AUTO_LINK: "true"
+      ENABLE_WEIGHT_DYNAMIC: "false"
+      ENABLE_TRUST_TIERS: "true"
+      ENABLE_STOP_ENTITIES_DYNAMIC: "true"
+      ENABLE_TENSION_DETECTION: "true"
+      RATE_LIMIT_SEARCH: "200"
+      RATE_LIMIT_DEFAULT: "400"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+      ner:
+        condition: service_healthy
+      llm:
+        condition: service_started
+        required: false
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ecodb-net
+
+  mcp:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    image: ecodb-mcp:1.6.0
+    container_name: ecodb-mcp
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8091"
+      ECODB_API_URL: http://ecodb-api:8080
+      ECODB_API_KEY: ${ECODB_API_KEY}
+      ECODB_TIMEOUT: "60.0"
+      ENABLE_CONTEXT_INJECTION: "true"
+    ports:
+      - "8091:8091"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ecodb-net
+
+  ner:
+    build:
+      context: ./ner
+    image: ecodb-ner:1.0.0
+    container_name: ecodb-ner
+    ports:
+      # Host 8092 — mcp already owns 8091. Internal: http://ner:8091
+      - "8092:8091"
+    volumes:
+      - api_hf_cache:/app/.cache/huggingface
+    environment:
+      - HF_HOME=/app/.cache/huggingface
+      - CUDA_VISIBLE_DEVICES=
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - ecodb-net
+
+  worker:
+    image: ecodb-api:0.23.0
+    container_name: ecodb-worker
+    entrypoint: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:-ecodb_test_pass}@postgres:5432/ecodb
+      EMBEDDINGS_URL: http://embeddings:8090
+      ECODB_API_INTERNAL_URL: http://ecodb-api:8080
+      MEDIA_STORE_DIR: /app/media
+      CUDA_VISIBLE_DEVICES: ""
+      NER_SERVICE_URL: http://ner:8091
+    volumes:
+      - ecodb_media:/app/media:ro
+    healthcheck:
+      test: ["CMD-SHELL", "cat /proc/1/cmdline 2>/dev/null | tr '\\0' ' ' | grep -q worker || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+      ner:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - with-ingestion
+    networks:
+      - ecodb-net
+
+  llm:
+    # ghcr.io/ggml-org/llama.cpp:server pulled 2026-05-14
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: ecodb-llm
+    volumes:
+      - ./models:/models:ro
+    command:
+      - "-m"
+      - "/models/qwen2.5-3b-instruct-q4_k_m.gguf"
+      - "-c"
+      - "2048"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--threads"
+      - "${LLM_THREADS:-4}"
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    profiles:
+      - with-llm
+    networks:
+      - ecodb-net
+
+volumes:
+  ecodb_data:
+  torch_cache:
+  api_hf_cache:
+  ecodb_media:
+  hf_cache:
+
+networks:
+  ecodb-net:
+    driver: bridge

@@ -1,0 +1,7 @@
+# Optional demo dataset overlay.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.seed.yml up -d
+# Loads ONCE on first postgres boot only (docker-entrypoint-initdb.d).
+services:
+  postgres:
+    volumes:
+      - ./scripts/seed-demo.sql:/docker-entrypoint-initdb.d/99-seed-demo.sql:ro
