@@ -52,3 +52,8 @@ Thumbs.db
 
 # Phase briefs (originals — sanitized versions in docs/architecture/)
 fase*_brief.md
+
+# LongMemEval benchmark data and results
+eval/longmemeval/data/
+eval/longmemeval/sessions_md/
+eval/longmemeval/results/
