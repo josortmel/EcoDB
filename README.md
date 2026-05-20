@@ -39,15 +39,19 @@ EcoDB's **GAMR engine** (Graph-Augmented Memory Retrieval) combines **8 scoring 
 
 ### Benchmarks
 
-Production dataset — 1400+ memories, 60 queries ([methodology and scripts](eval/)):
+EcoDB includes an internal evaluation framework ([`eval/`](eval/)) that measures search quality at the **paragraph level** — each query must retrieve a specific memory from the full corpus, not just the right document.
 
-| Metric | EcoDB GAMR | Typical RAG (cosine only) |
-|--------|:---------:|:------------------------:|
-| **R@5** | **0.56** | ~0.30–0.40 |
-| **MRR** | **0.39** | ~0.20–0.30 |
-| **Multimodal R@5** | **0.70** | N/A |
+This is significantly harder than document-level retrieval benchmarks like LongMemEval (which EcoDB has not yet been evaluated against). Paragraph-level R@5 scores are not directly comparable to document-level R@5 scores.
 
-GAMR outperforms pure vector search because it combines 6 independent signals. The knowledge graph and temporal scoring surface memories that cosine similarity alone would miss.
+Results on production dataset (1400+ memories, 60 queries):
+
+| Metric | Score |
+|--------|:-----:|
+| **R@5** (paragraph-level) | **0.56** |
+| **MRR** | **0.39** |
+| **Multimodal R@5** | **0.70** |
+
+> **Note:** These are internal benchmarks with a strict evaluation methodology. Standard benchmark evaluation (LongMemEval) is planned. See [`eval/`](eval/) for methodology, scripts, and reproduction instructions.
 
 ## Features
 
