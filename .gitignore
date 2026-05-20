@@ -57,3 +57,7 @@ fase*_brief.md
 eval/longmemeval/data/
 eval/longmemeval/sessions_md/
 eval/longmemeval/results/
+
+# LoCoMo benchmark data and results
+eval/locomo/data/
+eval/locomo/results/
