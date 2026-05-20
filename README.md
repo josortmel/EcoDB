@@ -1,11 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.svg" alt="" width="32" height="32"><br>
-  <strong>EcoDB</strong>
-</p>
-
-<p align="center">
-  Collective AI memory infrastructure.<br>
-  Multiple agents, teams, and projects — one governed knowledge base.
+  <img src="docs/images/banner.png" alt="EcoDB — Collective AI memory infrastructure" width="100%">
 </p>
 
 <p align="center">
@@ -15,8 +9,6 @@
   <img src="https://img.shields.io/badge/MCP-22%2B%20tools-0d9488" alt="MCP Tools">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
 </p>
-
----
 
 Personal AI memory tools serve one agent, one session. EcoDB is the step beyond: a shared memory system where **multiple agents** store, search, connect, and govern knowledge across teams and projects — with workspace isolation, role-based permissions, and a knowledge graph that connects everything.
 
