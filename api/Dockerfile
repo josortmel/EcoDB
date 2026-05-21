@@ -31,7 +31,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --chown=apiuser:apiuser admin.py agents.py auth.py background.py bootstrap_first_apikey.py chunker.py classifier.py db.py documents.py embeddings_client.py entity_normalization.py events.py gliner_service.py graph.py llm_provider.py main.py memories.py onboarding.py parsers.py permissions.py projects.py rate_limit.py reranker.py search.py settings.py stats.py teams.py telemetry.py telemetry_api.py users.py worker.py workspaces.py ./
 
 # Pre-cache reranker model so first request isn't slow (runs as root, writes to HF_HOME).
-RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+# NB1: revision must match RERANKER_REVISION at runtime — same SHA = same HF cache key.
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', revision='c5ee24cb16019beea0893ab7796b1df96625c6b8')"
+# NB3: pre-cache ran as root — fix ownership so apiuser can read the cached files.
+RUN chown -R apiuser:apiuser /app/.cache
 
 # Cambiar a usuario no-root antes de ejecutar la app.
 USER apiuser
