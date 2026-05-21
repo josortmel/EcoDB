@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="EcoDB — Collective AI memory infrastructure" width="100%">
+  <img src="docs/images/banner.png" alt="EcoDB: Collective AI memory infrastructure" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.8.1"><img src="https://img.shields.io/badge/release-v0.8.1-orange" alt="Release"></a>
+  <a href="https://github.com/josortmel/ecodb/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v0.8-orange" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
   <img src="https://img.shields.io/badge/MCP-22%2B%20tools-0d9488" alt="MCP Tools">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
 </p>
 
-Personal AI memory tools serve one agent, one session. EcoDB is the step beyond: a shared memory system where **multiple agents** store, search, connect, and govern knowledge across teams and projects — with workspace isolation, role-based permissions, and a knowledge graph that connects everything.
+Personal AI memory tools serve one agent, one session. EcoDB is the step beyond: a shared memory system where **multiple agents** store, search, connect, and govern knowledge across teams and projects, with workspace isolation, role-based permissions, and a knowledge graph that links entities across memories and documents.
 
 The vision: move from personal developer memory to **enterprise competitive intelligence**. One system, multiple users, governed knowledge.
 
@@ -18,7 +18,7 @@ The vision: move from personal developer memory to **enterprise competitive inte
 
 ## Why not just vector search?
 
-Standard RAG retrieves by cosine similarity. That works for simple recall — but falls apart when you need:
+Standard RAG retrieves by cosine similarity. That works for simple recall, but falls apart when you need:
 
 | Problem | Vector search | EcoDB GAMR |
 |---------|:---:|:---:|
@@ -28,17 +28,74 @@ Standard RAG retrieves by cosine similarity. That works for simple recall — bu
 | Text query finding an image | Not possible | Cross-modal search (text ↔ image) |
 | Agent A's notes vs. Agent B's | No distinction | Governed visibility by workspace/project |
 
-EcoDB's **GAMR engine** (Graph-Augmented Memory Retrieval) solves this with an **8-stage scoring pipeline**:
+EcoDB's **GAMR engine** (Graph-Augmented Memory Retrieval) solves this with a **10-stage scoring pipeline**:
 
 <p align="center">
-  <img src="docs/images/gamr-pipeline.png" alt="GAMR — 8-stage search pipeline" width="100%">
+  <img src="docs/images/gamr-pipeline.png" alt="GAMR: 10-stage scoring pipeline" width="100%">
 </p>
 
-Each stage adds a signal that pure vector search doesn't have: graph relationships, temporal freshness, trust tiers, contradiction detection, and cross-modal matching. The query type (factual, analytical, historical, contextual) adjusts the weight of each signal automatically.
+Query classification → embedding → vector retrieval (with UltraSearch multiplier) → BM25 lexical → graph expansion → source resolution → freshness → contradiction detection → multiplicative composite scoring → optional cross-encoder reranking. Each stage adds a signal that pure vector search doesn't have. The query type (factual, analytical, historical, contextual) adjusts signal weights automatically.
+
+### UltraSearch
+
+Standard search returns K results from a pool of K candidates. UltraSearch multiplies the internal candidate pool without changing the output size.
+
+`search(limit=5, deep_factor=4)` fetches 20 candidates internally, runs the full GAMR pipeline on all 20, and returns only the best 5. You get **K=20 retrieval quality at K=5 token cost**: the LLM consuming the results processes 5 memories instead of 20.
+
+`deep_factor` ranges from 1 (standard) to 10. Hard cap at 200 internal candidates. The only trade-off is compute time, not output cost.
+
+## Knowledge Graph
+
+<p align="center">
+  <img src="docs/images/knowledge-graph.png" alt="Knowledge graph as a make-sense layer" width="100%">
+</p>
+
+Most AI memory systems use knowledge graphs as a retrieval signal, a score bonus in the ranking formula. **EcoDB uses the graph differently.** The graph is a **make-sense layer**: it provides curated context so the consuming LLM understands the ecosystem and the user's request *before* searching.
+
+Vector search finds what's **similar**. The graph finds what's **related**. A decision made last month about database schema has zero semantic similarity to today's question about API design, but they're connected through shared entities. The graph surfaces that connection.
+
+- **Apache AGE**: Cypher queries inside PostgreSQL, no separate database
+- **~100 canonical predicates** with ontological metadata (symmetry, inverses, transitivity, domain/range)
+- **Traversal tools**: `neighbors` (depth N), `path_between` (shortest path), `search_nodes` (fuzzy), co-occurrence analysis
+- **Graph bonus = 5% of GAMR composite score**, deliberately low. The graph's value is in exploration, not ranking
+
+### Automatic entity extraction
+
+[GLiNER](https://github.com/urchade/GLiNER) extracts entities from every memory and document chunk at ingestion time and links them to the graph automatically. But automatic extraction alone generates noise. EcoDB combines GLiNER with an **entity dictionary**, a curated list of allowed entities with canonical names and aliases. Dictionary matches take priority over raw NER predictions. Entities that don't match the dictionary are flagged as candidates for human review.
+
+Automatic linking feeds the graph. It never substitutes a healthy, curated graph. The system detects and suggests; the human decides.
+
+## Multimodal Memory
+
+EcoDB stores and searches across **text, images, and documents** in the same system.
+
+[Jina v4](https://jina.ai) embeds text and images into the same 512-dimensional vector space. A text query retrieves relevant images. An image query retrieves relevant text. Search results mix memories, document chunks, and graph discoveries in a single ranked response, with images returned inline.
+
+- **Store**: `save_memory(content="...", file_path="image.png")` embeds both text and image, copies to media store
+- **Search**: `search(query_text="...")` returns text and image memories ranked together
+- **View**: `view_image(memory_id)` returns the actual image inline, visible to the consuming LLM
+
+Documents (PDF, DOCX, PPTX, audio) are parsed, chunked, embedded, and searchable alongside memories. The GAMR pipeline scores everything uniformly; it doesn't distinguish between a memory saved by an agent and a chunk extracted from a PDF.
+
+## Ingestion
+
+Two pipelines for two content types. Both produce memories with embeddings that feed into the same GAMR search.
+
+### Documents (Docling)
+
+[Docling](https://github.com/DS4SD/docling) parses PDFs, Word documents, HTML, and PowerPoint into structured chunks. Audio files go through Whisper for transcription. Each chunk inherits document metadata (tags, project, workspace) and is tracked through a lifecycle: pending → processing → indexed → error.
+
+Pipeline: **parse → chunk (960 tokens) → NER (GLiNER) → embed (Jina v4) → graph link → index**
+
+### Conversational sessions (Session Parser)
+
+Raw Claude Code sessions (JSON with speaker/text turns) are split into **5-turn sliding windows with 1-turn overlap** before embedding. Each window becomes one memory tagged with session ID and chunk index. On retrieval, chunks are deduplicated back to session level.
+
+In an isolated experiment on the same LoCoMo benchmark, this single ingestion change took Recall@5 from **0.769 to 0.922 (+19.9%)** without any changes to the GAMR pipeline. The overall system score (0.77 R@5 in the Benchmarks table below) reflects the full pipeline with all content types, not just sessions. For conversational data, ingestion granularity matters more than ranking sophistication.
 
 ## Governance
 
-EcoDB isn't just storage — it's governed knowledge. The system controls who sees what, who can write where, and how knowledge flows between teams.
+The system controls who sees what, who can write where, and how knowledge flows between teams.
 
 <p align="center">
   <img src="docs/images/governance.png" alt="Governance model and roadmap" width="100%">
@@ -56,48 +113,11 @@ EcoDB isn't just storage — it's governed knowledge. The system controls who se
 
 Every memory has a visibility scope:
 
-- **Public** — visible to all members of the workspace
-- **Private** — visible only to the author (agent or user)
-- **Workspace-scoped** — cascading permissions from workspace → project
+- **Public**: visible to all members of the workspace
+- **Private**: visible only to the author (agent or user)
+- **Workspace-scoped**: cascading permissions from workspace → project
 
 Agents operate within their assigned workspace and project. A sales agent can't read engineering memories unless explicitly granted access.
-
-### Knowledge graph governance
-
-The graph uses a **closed vocabulary** of ~100 canonical predicates with ontological metadata (symmetry, inverses, transitivity, domain/range types). Automatic entity extraction via GLiNER feeds the graph, but every entity goes through a normalization pipeline with confidence scoring. Low-confidence mappings are flagged for human review — the system detects and suggests, the human decides.
-
-## Features
-
-### Search — GAMR Engine
-- 8-stage pipeline: semantic (pgvector HNSW) → BM25 → graph expansion (Apache AGE) → freshness → weight → trust → contradiction detection → cross-modal
-- Cross-modal: text queries find image memories and vice versa
-- Configurable via feature flags (BM25, HyDE, trust tiers)
-- Query type auto-classification adjusts signal weights
-
-### Knowledge Graph
-- Apache AGE — Cypher queries inside PostgreSQL, no separate database
-- Automatic entity extraction via GLiNER NER
-- Entity linking with dictionary-first lookup
-- ~100 canonical predicates with ontological metadata
-- Graph traversal: neighbors, shortest path, fuzzy node search, co-occurrence analysis
-
-### Document Ingestion
-- Pipeline: parse → chunk (960 tokens) → NER → embed → graph link
-- PDF, DOCX, PPTX (via Docling), audio (via Whisper)
-- Async processing with LISTEN/NOTIFY and SSE status events
-- Trust tiers per document source
-
-### Agent Identities
-- Ordered narrative fragments per agent — not metadata, but identity
-- Version history for identity evolution
-- Multi-agent support with governed visibility (workspace/project scoping)
-
-### Memory System
-- 7 memory types: momento, decision, acuerdo, tecnico, descubrimiento, observacion, referencia
-- Automatic embedding (Jina v4, 512-dim Matryoshka)
-- Soft delete with recycle bin, weight system with semantic attenuation
-- Multimodal: text and image storage with cross-modal retrieval
-- Public/private visibility per memory
 
 ## Architecture
 
@@ -105,10 +125,10 @@ The graph uses a **closed vocabulary** of ~100 canonical predicates with ontolog
   <img src="docs/images/architecture.png" alt="EcoDB architecture" width="100%">
 </p>
 
-**Two interfaces — same data:**
+**Two interfaces, same data:**
 
-- **REST API** — 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
-- **MCP Server** — 22+ tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
+- **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
+- **MCP Server**: 22+ tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
 
 **Six Docker services:**
 
@@ -175,47 +195,53 @@ Connect any MCP-compatible client:
 
 | Tool | What it does |
 |------|-------------|
-| `buscar` | GAMR search — 8-stage semantic + graph + temporal scoring |
-| `buscar_recientes` | Recent memories with filters (agent, tags, date range) |
-| `guardar_memoria` | Store memory (auto-embeds, auto-extracts entities, auto-links graph) |
-| `leer_memoria` | Read a memory by ID |
-| `borrar_memoria` | Soft-delete to recycle bin |
-| `guardar_tripleta` | Add relationship to knowledge graph |
-| `guardar_tripletas_lote` | Batch add triples (max 100) |
-| `vecinos` | Graph neighbors at depth N |
-| `camino_entre` | Shortest path between two nodes |
-| `buscar_nodos` | Fuzzy search nodes by name |
-| `borrar_tripleta` | Remove a graph relationship |
-| `estado_grafo` | Graph statistics (nodes, edges, predicates) |
-| `cargar_identidad` | Load agent identity (ordered narrative fragments) |
-| `guardar_identidad` | Save agent identity snapshot |
-| `ver_imagen` | Retrieve embedded image |
-| `registrar_documento` | Register document for ingestion |
-| `estado_documento` | Check ingestion pipeline status |
-| `buscar_en_documento` | Search within a specific document |
-| `leer_documento` | Read document content |
-| `listar_documentos` | List registered documents |
-| `reindexar_documento` | Re-index a document |
-| `desvincular_documento` | Unlink a document |
+| `search` | GAMR search. Returns text and image memories ranked together |
+| `search_recent` | Recent memories with filters (agent, tags, date range) |
+| `save_memory` | Store memory (auto-embeds, auto-extracts entities, auto-links graph) |
+| `read_memory` | Read a memory by ID |
+| `delete_memory` | Soft-delete to recycle bin |
+| `save_triple` | Add relationship to knowledge graph |
+| `save_triples_batch` | Batch add triples (max 100) |
+| `neighbors` | Graph neighbors at depth N |
+| `path_between` | Shortest path between two nodes |
+| `search_nodes` | Fuzzy search nodes by name |
+| `delete_triple` | Remove a graph relationship |
+| `graph_status` | Graph statistics (nodes, edges, predicates) |
+| `load_identity` | Load agent identity (ordered narrative fragments) |
+| `save_identity` | Save agent identity snapshot |
+| `view_image` | Retrieve embedded image, visible inline to the LLM |
+| `register_document` | Register document for ingestion |
+| `document_status` | Check ingestion pipeline status |
+| `search_in_document` | Search within a specific document |
+| `read_document` | Read document content |
+| `list_documents` | List registered documents |
+| `reindex_document` | Re-index a document |
+| `unlink_document` | Unlink a document |
 
 ## Benchmarks
 
+### LoCoMo (ICLR 2025)
+
 <p align="center">
-  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks — LoCoMo (ICLR 2025)" width="100%">
+  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks on LoCoMo (ICLR 2025)" width="100%">
 </p>
 
-Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753) (ICLR 2025), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
+Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
 
-| Metric | Score |
-|--------|:-----:|
-| **Recall@5** | **0.77** |
-| **Recall@10** | **0.89** |
-| **Recall_all@5** | **0.71** |
-| **NDCG@5** | **0.57** |
+| Metric | K=5 | K=10 | K=20 |
+|--------|:---:|:----:|:----:|
+| **Recall@5** | 0.914 | 0.906 | **0.922** |
+| **Recall@10** | * | 0.931 | **0.959** |
 
-**By query type** (Recall@5): single-hop 0.83 · adversarial 0.78 · open-domain 0.77 · temporal 0.73 · multi-hop 0.61
+\* K=5 returns only 5 results, so R@10 cannot improve beyond R@5.
 
-10 conversations, no exclusions. Full methodology, scripts, and per-conversation breakdown in [`eval/`](eval/).
+**By query type** (Recall@5, K=20): adversarial 0.95 · open-domain 0.94 · temporal 0.92 · single-hop 0.91 · multi-hop 0.73
+
+10 conversations, no exclusions. Full methodology and scripts in [`eval/`](eval/).
+
+### Internal golden set
+
+We also maintain a harder internal benchmark against EcoDB's production corpus: 1,400+ memories across multiple languages and dozens of topics, paragraph-level retrieval instead of session-level. This is where we explore our margin of improvement. It's the benchmark that still challenges the system. Detailed methodology and results in [`eval/BENCHMARKS.md`](eval/BENCHMARKS.md).
 
 ## Roadmap
 
@@ -227,9 +253,9 @@ Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753) (ICLR 2025), a long-cont
 
 ## Documentation
 
-- [`docs/architecture/`](docs/architecture/) — System briefs: governance, ingestion, intelligence, product design
-- [`eval/`](eval/) — Benchmark framework and golden set evaluation
-- [`CHANGELOG.md`](CHANGELOG.md) — Version history
+- [`docs/architecture/`](docs/architecture/): System briefs on governance, ingestion, intelligence, product design
+- [`eval/`](eval/): Benchmark framework and golden set evaluation
+- [`CHANGELOG.md`](CHANGELOG.md): Version history
 
 ## Development
 
@@ -247,7 +273,7 @@ cd api && uvicorn main:app --reload --port 8080
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, educational, and noncommercial use. Commercial deployment requires a separate license from Eco Consulting.
+[PolyForm Noncommercial 1.0.0](LICENSE). Free for personal, educational, and noncommercial use. Commercial deployment requires a separate license from Eco Consulting.
 
 Third-party dependencies: [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES)
 
