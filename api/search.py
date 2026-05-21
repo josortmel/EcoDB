@@ -701,6 +701,7 @@ class SearchRequest(BaseModel):
     max_document_results: int = Field(3, ge=0, le=20, description="Max chunks de documentos a incluir (0-20). Solo aplica si include_documents=true.")
     tags: Optional[list[str]] = Field(None, max_length=20, description="Filtrar por tags (AND logic). Max 20 tags, each max 128 chars.")
     include_dormant: bool = Field(False, description="Si true, incluye memorias dormant/archived en resultados. Default false.")
+    deep_factor: int = Field(2, ge=1, le=10, description="Internal pool multiplier. fetch_k = limit * deep_factor. Default 2.")
 
     @field_validator("query_text")
     @classmethod
@@ -1017,8 +1018,10 @@ async def search_memories(
 
         # LIMIT — use expanded fetch pool when reranker active
         from reranker import is_available as reranker_available
-        from settings import RERANK_FETCH_K
-        fetch_k = max(body.limit, RERANK_FETCH_K) if reranker_available() else body.limit
+        from settings import RERANK_FETCH_K, MAX_FETCH_K
+        fetch_k = min(body.limit * body.deep_factor, MAX_FETCH_K)
+        if reranker_available():
+            fetch_k = max(fetch_k, RERANK_FETCH_K)
         params.append(fetch_k)
         limit_idx = idx
 

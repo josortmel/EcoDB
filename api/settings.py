@@ -165,6 +165,7 @@ GAMR_WEIGHTS_BM25: dict[str, dict[str, float]] = {
 }
 
 RERANK_FETCH_K = int(os.environ.get("RERANK_FETCH_K", "50"))
+MAX_FETCH_K = int(os.environ.get("MAX_FETCH_K", "200"))
 
 RERANKER_MODEL_ALLOWLIST = {
     "cross-encoder/ms-marco-MiniLM-L-6-v2",

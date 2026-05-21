@@ -431,6 +431,7 @@ def buscar(
     include_documents: bool = True,
     max_document_results: int = 3,
     tags: Optional[list[str]] = None,
+    deep_factor: int = 2,
 ) -> list:
     """Busqueda semantica multimodal con motor GAMR (8 etapas).
 
@@ -518,6 +519,8 @@ def buscar(
         payload["max_document_results"] = max_document_results
     if tags:
         payload["tags"] = tags
+    if deep_factor != 2:
+        payload["deep_factor"] = deep_factor
     try:
         data = _api_call("POST", "/search", json=payload)
     except RuntimeError as e:
