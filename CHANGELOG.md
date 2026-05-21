@@ -2,6 +2,37 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — 2026-05-22
+
+### Added
+- **10-stage GAMR pipeline** — cross-encoder reranker as Etapa 10 (MiniLM-L-6-v2, SHA-pinned, fail-closed)
+- **UltraSearch** — `deep_factor` parameter in search API (default=2, max=10). Multiplies internal candidate pool without changing result count. `search(limit=5, deep_factor=4)` returns 5 results with K=20 quality
+- **MAX_FETCH_K=200** hard cap prevents DoS amplification via deep_factor
+- **Reranker model allowlist** — only pre-approved models can load (supply chain protection)
+- **Reranker safetensors enforcement** — prevents pickle RCE via model weights
+- **Chunked benchmark scripts** — `run_benchmark_chunked.py` (5-turn windows, overlap 1, session dedup) and `run_benchmark_query_only.py` (K ablation without re-ingestion)
+- Differentiated GAMR freshness weights by query type (factual/contextual=0.08, historical=0.02, analytical=0.05)
+
+### Changed
+- **All 32 MCP tools renamed from Spanish to English** — `buscar`→`search`, `guardar_memoria`→`save_memory`, `vecinos`→`neighbors`, etc. Breaking change for existing CLAUDE.md references (all updated)
+- GAMR_WEIGHTS_BM25 dict now actually connected to `compute_composite_score` (was dead code)
+- Reranker pre-cached in Docker image with SHA pin (eliminates first-request download delay)
+- Content truncated to 2000 chars before cross-encoder (prevents CPU spike on large memories)
+
+### Fixed
+- **GLiNER/NER in search path** — entity extraction was silently failing (bare `except` swallowing errors). Now logs WARNING and degrades gracefully
+- UltraSearch limit enforcement — results count now exactly matches `limit` after graph_discovery and document chunk appends
+- `deep_factor` correctly wired to SQL LIMIT (was computed but not used)
+- Dockerfile pre-cache SHA matches runtime revision (HF cache key mismatch caused re-download)
+- Dockerfile cache file ownership (pre-cache ran as root, apiuser couldn't write metadata)
+
+### Benchmarks (LoCoMo, 10 conversations, ~1982 queries)
+- Baseline (monolithic sessions): R@5=0.769, R@10=0.894
+- P1 reranker (no chunking): R@5=0.793, R@1=0.578
+- **Chunked K=20: R@5=0.922, R@10=0.959** (+15.3pp from chunking alone)
+- Chunked K=10: R@5=0.906, R@10=0.931
+- Chunked K=5: R@5=0.914, R@10=0.914
+
 ## [0.8.1] — 2026-05-21
 
 ### Fixed
