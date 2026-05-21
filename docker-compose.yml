@@ -144,6 +144,7 @@ services:
       ECODB_API_KEY: ${ECODB_API_KEY}
       ECODB_TIMEOUT: "60.0"
       ENABLE_CONTEXT_INJECTION: "true"
+      ECODB_MEDIA_DIR: /app/media
     ports:
       - "8091:8091"
     depends_on:
@@ -187,6 +188,7 @@ services:
       MEDIA_STORE_DIR: /app/media
       CUDA_VISIBLE_DEVICES: ""
       NER_SERVICE_URL: http://ner:8091
+      WINDOWS_MEDIA_PREFIX: ${WINDOWS_MEDIA_PREFIX:-}
     volumes:
       - ecodb_media:/app/media:ro
     healthcheck:

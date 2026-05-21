@@ -2,7 +2,21 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.0] — 2026-05-19
+## [0.8.1] — 2026-05-21
+
+### Fixed
+- Media path validation broken after public release sanitization — `ver_imagen` and inline images in `buscar` failed with "media_path outside of media store"
+- Hardcoded `C:\EcoDB\media` replaced with project-relative default (`<project>/media/`)
+- Path traversal vulnerability in worker document validation — `startswith(allowed + "/")` replaced with `pathlib.is_relative_to()`
+- Worker bridge empty-string trap — `WINDOWS_MEDIA_PREFIX=""` caused `startswith("")` to match all URIs
+- Worker bridge forward-slash mismatch — separate handling for backslash and forward-slash URI variants
+- Docker MCP container missing `ECODB_MEDIA_DIR` — project-relative default resolved to `/media` instead of `/app/media`
+
+### Changed
+- `setup.sh` now creates `media/` directory during bootstrap
+- `.env.example` documents `ECODB_MEDIA_DIR` and `WINDOWS_MEDIA_PREFIX` for native MCP deployments
+
+## [0.8.0] — 2026-05-19
 
 First public release. EcoDB has been in production use since May 2026.
 

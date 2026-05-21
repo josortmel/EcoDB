@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import time
 
@@ -72,13 +73,13 @@ def _validate_document_path(uri: str) -> str:
     """Validate uri is a real file within allowed base dir. Raises ValueError on violation."""
     if _URL_SCHEME_RE.match(uri):
         raise ValueError(f"URL schemes not allowed in document URI: {uri[:50]}")
-    real_path = os.path.realpath(uri)
-    allowed = os.path.realpath(MEDIA_STORE_DIR)
-    if not real_path.startswith(allowed + "/"):
+    real = Path(os.path.realpath(uri))
+    allowed = Path(os.path.realpath(MEDIA_STORE_DIR))
+    if not real.is_relative_to(allowed):
         raise ValueError(f"Document path outside media store: {uri[:50]}")
-    if not os.path.isfile(real_path):
+    if not real.is_file():
         raise ValueError(f"Document file not found: {uri[:50]}")
-    return real_path
+    return str(real)
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +151,13 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
     uri = row["uri"]
 
     # Translate Windows media path to Docker mount path
-    _WIN_MEDIA = os.environ.get("WINDOWS_MEDIA_PREFIX", r"C:\EcoDB\media")
-    if uri.startswith(_WIN_MEDIA) or uri.startswith(_WIN_MEDIA.replace("\\", "/")):
-        uri = uri.replace(_WIN_MEDIA, MEDIA_STORE_DIR).replace("\\", "/")
+    _WIN_MEDIA = os.environ.get("WINDOWS_MEDIA_PREFIX", "")
+    if _WIN_MEDIA:
+        _win_fwd = _WIN_MEDIA.replace("\\", "/")
+        if uri.startswith(_WIN_MEDIA):
+            uri = uri.replace(_WIN_MEDIA, MEDIA_STORE_DIR).replace("\\", "/")
+        elif uri.startswith(_win_fwd):
+            uri = uri.replace(_win_fwd, MEDIA_STORE_DIR)
 
     try:
         safe_path = _validate_document_path(uri)

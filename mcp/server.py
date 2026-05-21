@@ -76,8 +76,10 @@ if not ECODB_API_KEY:
 # (red Docker, localhost, host.docker.internal son trusted dentro del entorno).
 _INTERNAL_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal", "ecodb-api", "api"}
 
-# Stable copy of embedded media files (images, audio, etc.)
-MEDIA_STORE_DIR = Path(os.environ.get("ECODB_MEDIA_DIR", "/app/media"))
+# Media store: default is <project_root>/media/. Override with ECODB_MEDIA_DIR env var.
+# Docker MCP sets ECODB_MEDIA_DIR=/app/media in docker-compose.yml.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MEDIA_STORE_DIR = Path(os.environ.get("ECODB_MEDIA_DIR", str(_PROJECT_ROOT / "media"))).resolve()
 MAX_MEDIA_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 _DENIED_EXTENSIONS = {".env", ".key", ".pem", ".pfx", ".p12", ".p8", ".ppk", ".der", ".yaml", ".toml", ".ini", ".config", ".exe", ".dll", ".bat", ".ps1", ".sh", ".cmd"}
 _EMBEDDABLE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}
@@ -552,7 +554,7 @@ def buscar(
         p = _Path(os.path.realpath(media_path))
         if not p.exists():
             continue
-        in_store = str(p).startswith(str(MEDIA_STORE_DIR))
+        in_store = p.is_relative_to(MEDIA_STORE_DIR)
         suffix = p.suffix.lower()
         mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                 ".gif": "image/gif", ".webp": "image/webp",
@@ -645,7 +647,7 @@ def buscar_recientes(
         p = _Path(os.path.realpath(media_path))
         if not p.exists():
             continue
-        in_store = str(p).startswith(str(MEDIA_STORE_DIR))
+        in_store = p.is_relative_to(MEDIA_STORE_DIR)
         suffix = p.suffix.lower()
         mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                 ".gif": "image/gif", ".webp": "image/webp",
@@ -784,7 +786,7 @@ def leer_memoria(memory_id: str, expand_scope: bool = False) -> list:
     media_path = data.get("media_path")
     if media_path:
         p = _Path(os.path.realpath(media_path))
-        in_store = str(p).startswith(str(MEDIA_STORE_DIR))
+        in_store = p.is_relative_to(MEDIA_STORE_DIR)
         if p.exists():
             suffix = p.suffix.lower()
             mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -1013,7 +1015,7 @@ def ver_imagen(memory_id: str) -> Image:
     if not media_path:
         raise ValueError(f"memory {memory_id} has no media_path")
     p = Path(os.path.realpath(media_path))
-    if not str(p).startswith(str(MEDIA_STORE_DIR)):
+    if not p.is_relative_to(MEDIA_STORE_DIR):
         raise ValueError(f"media_path outside of media store")
     if not p.exists():
         raise ValueError(f"image file not found: {media_path}")

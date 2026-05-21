@@ -78,6 +78,9 @@ fi
 chmod 600 .env
 info ".env generated with random secrets."
 
+mkdir -p media
+info "Created media/ directory for image storage."
+
 echo ""
 info "Setup complete. Next steps:"
 echo ""

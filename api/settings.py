@@ -19,7 +19,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "production").lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
 IS_DEVELOPMENT = ENVIRONMENT == "development"
 
-API_VERSION = os.environ.get("API_VERSION", "0.1.0")
+API_VERSION = os.environ.get("API_VERSION", "0.8.1")
 SCHEMA_VERSION = "5.0.1"
 
 DATABASE_URL = os.environ.get(
