@@ -28,7 +28,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia explicita de modulos del API. bootstrap_first_apikey.py se incluye para
 # poder ejecutarlo con `docker exec` contra el postgres en el primer arranque.
-COPY --chown=apiuser:apiuser admin.py agents.py auth.py background.py bootstrap_first_apikey.py chunker.py classifier.py db.py documents.py embeddings_client.py entity_normalization.py events.py gliner_service.py graph.py llm_provider.py main.py memories.py onboarding.py parsers.py permissions.py projects.py rate_limit.py search.py settings.py stats.py teams.py telemetry.py telemetry_api.py users.py worker.py workspaces.py ./
+COPY --chown=apiuser:apiuser admin.py agents.py auth.py background.py bootstrap_first_apikey.py chunker.py classifier.py db.py documents.py embeddings_client.py entity_normalization.py events.py gliner_service.py graph.py llm_provider.py main.py memories.py onboarding.py parsers.py permissions.py projects.py rate_limit.py reranker.py search.py settings.py stats.py teams.py telemetry.py telemetry_api.py users.py worker.py workspaces.py ./
+
+# Pre-cache reranker model so first request isn't slow (runs as root, writes to HF_HOME).
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
 # Cambiar a usuario no-root antes de ejecutar la app.
 USER apiuser

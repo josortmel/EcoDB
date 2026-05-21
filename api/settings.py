@@ -164,6 +164,14 @@ GAMR_WEIGHTS_BM25: dict[str, dict[str, float]] = {
     "contextual": {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},
 }
 
+RERANK_FETCH_K = int(os.environ.get("RERANK_FETCH_K", "50"))
+
+RERANKER_MODEL_ALLOWLIST = {
+    "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "cross-encoder/ms-marco-MiniLM-L-12-v2",
+    "BAAI/bge-reranker-base",
+}
+
 # LLM provider for HyDE, telemetry, classifier (Adendum A, 2026-05-14)
 ECODB_LLM_PROVIDER = os.environ.get("ECODB_LLM_PROVIDER", "local")
 LLAMA_CPP_URL = os.environ.get("LLAMA_CPP_URL", "http://llm:8080")

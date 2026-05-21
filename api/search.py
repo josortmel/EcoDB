@@ -1015,8 +1015,11 @@ async def search_memories(
         params.extend([user_id_actor, is_super, is_ceo, org_id, lead_ws, body.expand_scope])
         idx += 6
 
-        # LIMIT
-        params.append(body.limit)
+        # LIMIT — use expanded fetch pool when reranker active
+        from reranker import is_available as reranker_available
+        from settings import RERANK_FETCH_K
+        fetch_k = max(body.limit, RERANK_FETCH_K) if reranker_available() else body.limit
+        params.append(fetch_k)
         limit_idx = idx
 
         # .
@@ -1185,6 +1188,15 @@ async def search_memories(
 
     # Re-sort por score compuesto (puede diferir del orden semántico puro)
     results.sort(key=lambda x: x.score, reverse=True)
+
+    # Etapa 9 — Cross-encoder reranking (Option A: memories only, before graph bonus)
+    from reranker import rerank, is_available as reranker_available
+    if reranker_available() and body.query_text and resolved_query_type != "cross_modal":
+        rerank_dicts = [{"content": r.content, "_idx": i} for i, r in enumerate(results)]
+        reranked = rerank(body.query_text, rerank_dicts, top_k=body.limit)
+        results = [results[d["_idx"]] for d in reranked]
+    else:
+        results = results[:body.limit]
 
     # GC1 — Discovery: fetch memorias descubiertas por grafo (opt-in)
     if body.graph_discovery:

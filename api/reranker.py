@@ -26,14 +26,23 @@ def _load_model():
     if not RERANKER_ENABLED:
         log.info("Reranker disabled by RERANKER_ENABLED=false")
         return
+    from settings import RERANKER_MODEL_ALLOWLIST
+    if RERANKER_MODEL not in RERANKER_MODEL_ALLOWLIST:
+        log.error("RERANKER_MODEL %r not in allowlist — refusing to load", RERANKER_MODEL)
+        return
+    if not RERANKER_REVISION:
+        log.error("RERANKER_REVISION must be set — pin model SHA for supply chain safety")
+        return
     try:
         from sentence_transformers import CrossEncoder
-        kwargs = {"trust_remote_code": False}
-        if RERANKER_REVISION:
-            kwargs["revision"] = RERANKER_REVISION
+        kwargs = {
+            "trust_remote_code": False,
+            "revision": RERANKER_REVISION,
+            "model_kwargs": {"use_safetensors": True},
+        }
         _model = CrossEncoder(RERANKER_MODEL, **kwargs)
         _available = True
-        log.info("Reranker loaded: %s (revision=%s)", RERANKER_MODEL, RERANKER_REVISION or "latest")
+        log.info("Reranker loaded: %s (revision=%s)", RERANKER_MODEL, RERANKER_REVISION)
     except Exception as e:
         log.warning("Reranker unavailable — serving without reranking: %s", e)
         _model = None
@@ -55,7 +64,7 @@ def rerank(query: str, results: list[dict], top_k: int) -> list[dict]:
     if not _available or not results:
         return results[:top_k]
 
-    pairs = [(query, r.get("content", "")) for r in results]
+    pairs = [(query, (r.get("content") or "")[:2000]) for r in results]
     try:
         scores = _model.predict(pairs)
     except Exception as e:
