@@ -21,8 +21,9 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "locomo10.json")
 RESULTS_PATH = os.path.join(os.path.dirname(__file__), "results", "locomo_results.jsonl")
 OUT_PATH = os.path.join(os.path.dirname(__file__), "results", "locomo_qa_results.jsonl")
 
-ANSWERER_MODEL = "claude-haiku-4-5-20251001"
+ANSWERER_MODEL = "claude-sonnet-4-6"
 JUDGE_MODEL = "claude-sonnet-4-6"
+MAX_QUERIES = int(os.environ.get("MAX_QUERIES", "0"))  # 0 = unlimited
 
 CAT_NAMES = {1: "single-hop", 2: "temporal", 3: "multi-hop", 4: "open-domain", 5: "adversarial"}
 
@@ -31,7 +32,7 @@ def run_claude(prompt: str, model: str, timeout: int = 120) -> str:
     """Call `claude -p --model <model>` with prompt on stdin. Returns stdout text."""
     try:
         result = subprocess.run(
-            ["claude", "-p", "--model", model],
+            [os.environ.get("CLAUDE_CMD", "claude"), "-p", "--model", model],
             input=prompt.encode("utf-8"),
             capture_output=True,
             timeout=timeout,
@@ -57,7 +58,7 @@ def load_retrieval_results() -> dict:
         print(f"ERROR: {RESULTS_PATH} not found. Run run_benchmark.py first.")
         sys.exit(1)
     mapping = {}
-    with open(RESULTS_PATH, encoding="utf-8") as f:
+    with open(RESULTS_PATH, encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -119,6 +120,7 @@ def main():
     scores_accum = defaultdict(list)
     total_evaluated = 0
     total_errors = 0
+    total_done = 0
 
     with open(OUT_PATH, "w", encoding="utf-8") as out_f:
         for sample_id, conv_entry in sorted(dataset.items()):
@@ -126,7 +128,9 @@ def main():
             print(f"\n--- {sample_id} ({len(qa_pairs)} QA pairs) ---")
             conv_scores = []
 
-            for q in qa_pairs:
+            for qi, q in enumerate(qa_pairs):
+                if MAX_QUERIES > 0 and total_done >= MAX_QUERIES:
+                    break
                 question = q["question"]
                 gold_answer = q.get("answer", "")
                 category = q.get("category", 0)
@@ -166,6 +170,7 @@ def main():
                 scores_accum["overall"].append(score)
                 conv_scores.append(score)
                 total_evaluated += 1
+                total_done += 1
 
                 print(f"  cat={cat_name} score={score} | Q: {question[:70]}")
 
