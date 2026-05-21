@@ -9,7 +9,6 @@ Must run locally — never call external reranking APIs.
 """
 import logging
 import os
-from typing import Optional
 
 log = logging.getLogger("ecodb.reranker")
 

@@ -55,3 +55,23 @@ def test_all_weights_come_from_dict():
     assert result["breakdown"]["graph"] == pytest.approx(w["graph"], abs=0.001)
     assert result["breakdown"]["weight"] == pytest.approx(w["weight"], abs=0.001)
     assert result["breakdown"]["freshness"] == pytest.approx(w["freshness"], abs=0.001)
+
+
+def test_unknown_query_type_falls_back_to_contextual():
+    """Unknown query_type must fall back to contextual weights."""
+    from search import compute_composite_score
+    from settings import GAMR_WEIGHTS_BM25
+
+    w = GAMR_WEIGHTS_BM25["contextual"]
+    result = compute_composite_score(
+        semantic_score=0.5,
+        graph_score=1.0,
+        memory_weight=1.0,
+        freshness_score=1.0,
+        query_type="unknown_type",
+        bm25_score=1.0,
+    )
+    assert result["breakdown"]["bm25"] == pytest.approx(w["bm25"], abs=0.001)
+    assert result["breakdown"]["graph"] == pytest.approx(w["graph"], abs=0.001)
+    assert result["breakdown"]["weight"] == pytest.approx(w["weight"], abs=0.001)
+    assert result["breakdown"]["freshness"] == pytest.approx(w["freshness"], abs=0.001)

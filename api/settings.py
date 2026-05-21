@@ -158,10 +158,10 @@ COOCCURRENCE_THRESHOLD = int(os.environ.get("COOCCURRENCE_THRESHOLD", "3"))
 NER_SERVICE_URL = os.environ.get("NER_SERVICE_URL", "http://ner:8091")
 
 GAMR_WEIGHTS_BM25: dict[str, dict[str, float]] = {
-    "factual":    {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.05, "bm25": 0.10},
-    "historical": {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.05, "bm25": 0.10},
+    "factual":    {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},
+    "historical": {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.02, "bm25": 0.10},
     "analytical": {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.05, "bm25": 0.10},
-    "contextual": {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.05, "bm25": 0.10},
+    "contextual": {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},
 }
 
 # LLM provider for HyDE, telemetry, classifier (Adendum A, 2026-05-14)
