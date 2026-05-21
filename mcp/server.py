@@ -1317,7 +1317,7 @@ def read_document(
 
 
 @mcp.tool()
-def validar_link(memory_id: str, document_id: str) -> dict:
+def validate_link(memory_id: str, document_id: str) -> dict:
     """Validar un auto-link entre memoria y documento.
 
     Confirma que el vínculo automático es correcto. Cambia validated=true,
