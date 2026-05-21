@@ -35,17 +35,35 @@ def headers():
 
 
 def discover_workspaces(client: httpx.Client) -> dict[str, tuple[int, int]]:
-    """Return {sample_id: (workspace_id, project_id)} for all locomo-chunked-* workspaces."""
+    """Return {sample_id: (workspace_id, project_id)} for locomo-chunked-* workspaces.
+
+    When multiple workspaces exist for the same conv_id (aborted runs),
+    picks the one with the highest workspace_id (most recently created).
+    """
     r = client.get(f"{API_URL}/workspaces", headers=headers(), params={"limit": 200})
     r.raise_for_status()
-    result = {}
+
+    # Group by canonical conv_id (strip any timestamp suffix after the conv id)
+    # Name formats: "locomo-chunked-conv-26" or "locomo-chunked-conv-26-1748..."
+    # Canonical key: everything up to optional timestamp = the conv-XX part
+    candidates: dict[str, list[tuple[int, str]]] = defaultdict(list)  # conv_id -> [(ws_id, name)]
     for ws in r.json().get("items", []):
         name = ws["name"]
         if not name.startswith("locomo-chunked-"):
             continue
-        sample_id = name[len("locomo-chunked-"):]
-        ws_id = ws["id"]
+        suffix = name[len("locomo-chunked-"):]  # e.g. "conv-26" or "conv-26-17483..."
+        # Extract conv id: take up to the second hyphen group "conv-XX"
+        parts = suffix.split("-")
+        if len(parts) >= 2 and parts[0] == "conv":
+            conv_id = f"conv-{parts[1]}"  # "conv-26"
+        else:
+            conv_id = suffix
+        candidates[conv_id].append((ws["id"], name))
 
+    result = {}
+    for conv_id, ws_list in candidates.items():
+        # Pick highest ws_id = most recently created
+        ws_id, ws_name = max(ws_list, key=lambda x: x[0])
         rp = client.get(f"{API_URL}/workspaces/{ws_id}/projects", headers=headers())
         rp.raise_for_status()
         projects = rp.json().get("items", [])
@@ -53,37 +71,31 @@ def discover_workspaces(client: httpx.Client) -> dict[str, tuple[int, int]]:
         if bench is None and projects:
             bench = projects[0]
         if bench:
-            result[sample_id] = (ws_id, bench["id"])
-            print(f"  Found: {name} → ws={ws_id} proj={bench['id']}")
+            result[conv_id] = (ws_id, bench["id"])
+            skipped = len(ws_list) - 1
+            suffix = f" (skipped {skipped} older)" if skipped else ""
+            print(f"  Found: {ws_name} → ws={ws_id} proj={bench['id']}{suffix}")
     return result
 
 
 def reconstruct_session_mapping(client: httpx.Client, ws_id: int,
-                                 sample_id: str) -> dict[str, list[str]]:
-    """Fetch all memories in workspace and rebuild session_key -> [mem_ids] from tags."""
-    mapping: dict[str, list[str]] = defaultdict(list)
-    prefix = f"session:{sample_id}_"
+                                 sample_id: str, session_keys: list[str]) -> dict[str, list[str]]:
+    """Rebuild session_key -> [mem_ids] by querying per-session tag.
 
-    offset = 0
-    while True:
+    Uses tag filter (one call per session) to avoid limit/pagination issues.
+    /memories/recent max limit=100; each session has far fewer chunks.
+    """
+    mapping: dict[str, list[str]] = {}
+    for sk in session_keys:
+        tag = f"session:{sample_id}_{sk}"
         r = client.get(f"{API_URL}/memories/recent", headers=headers(), params={
-            "workspace_id": ws_id, "limit": 200, "expand_scope": "true"
+            "workspace_id": ws_id, "tag": tag, "limit": 100, "expand_scope": "true"
         })
         r.raise_for_status()
         items = r.json().get("items", [])
-        if not items:
-            break
-        for m in items:
-            for tag in (m.get("tags") or []):
-                if tag.startswith(prefix):
-                    sk = tag[len(prefix):]  # e.g. "session_1"
-                    mapping[sk].append(m["id"])
-                    break
-        if len(items) < 200:
-            break
-        offset += 200
-
-    return dict(mapping)
+        if items:
+            mapping[sk] = [m["id"] for m in items]
+    return mapping
 
 
 def evidence_to_sessions(evidence: list[str]) -> set[str]:
@@ -236,17 +248,22 @@ def main():
         print(f"Found {len(ws_map)} workspaces\n")
 
         with open(out_path, "w") as out_f:
-            for conv_idx, (sample_id, (ws_id, proj_id)) in enumerate(sorted(ws_map.items())):
-                conv = conv_by_id.get(sample_id)
+            for conv_idx, (conv_id, (ws_id, proj_id)) in enumerate(sorted(ws_map.items())):
+                conv = conv_by_id.get(conv_id)
                 if conv is None:
-                    print(f"WARNING: No conv data for {sample_id}, skipping")
+                    print(f"WARNING: No conv data for {conv_id}, skipping")
                     continue
 
+                c = conv["conversation"]
+                session_keys = sorted(
+                    [k for k in c if k.startswith("session_") and not k.endswith("_date_time")],
+                    key=lambda x: int(x.split("_")[1])
+                )
                 qa_count = len(conv["qa"])
-                print(f"--- Conversation {conv_idx+1}/{len(ws_map)}: {sample_id} (ws={ws_id}, {qa_count} QA) ---")
+                print(f"--- Conversation {conv_idx+1}/{len(ws_map)}: {conv_id} (ws={ws_id}, {qa_count} QA) ---")
 
                 print(f"  Reconstructing session mapping from tags...")
-                session_mapping = reconstruct_session_mapping(client, ws_id, sample_id)
+                session_mapping = reconstruct_session_mapping(client, ws_id, conv_id, session_keys)
                 total_chunks = sum(len(v) for v in session_mapping.values())
                 print(f"  {len(session_mapping)} sessions, {total_chunks} chunks")
 
@@ -254,14 +271,14 @@ def main():
                     print(f"  SKIPPING — no sessions found in workspace")
                     continue
 
-                conv_results = search_and_evaluate(client, conv, ws_id, session_mapping, sample_id)
+                conv_results = search_and_evaluate(client, conv, ws_id, session_mapping, conv_id)
 
                 r5_vals = [r["metrics"].get("recall_any@5", 0) for r in conv_results if r["metrics"]]
                 r5_avg = sum(r5_vals) / len(r5_vals) if r5_vals else 0
-                print(f"  {sample_id} R@5={r5_avg:.4f} ({len(conv_results)} queries)\n")
+                print(f"  {conv_id} R@5={r5_avg:.4f} ({len(conv_results)} queries)\n")
 
                 for r in conv_results:
-                    r["sample_id"] = sample_id
+                    r["sample_id"] = conv_id
                     json.dump(r, out_f, ensure_ascii=False)
                     out_f.write("\n")
 
