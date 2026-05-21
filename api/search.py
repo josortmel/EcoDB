@@ -1016,12 +1016,14 @@ async def search_memories(
         params.extend([user_id_actor, is_super, is_ceo, org_id, lead_ws, body.expand_scope])
         idx += 6
 
-        # LIMIT — use expanded fetch pool when reranker active
+        # LIMIT — fetch_k = limit * deep_factor (hard-capped at MAX_FETCH_K).
+        # deep_factor (default=2) is the explicit pool-size knob; RERANK_FETCH_K
+        # is no longer applied as a floor here because it silently overrides the
+        # caller's intent for small limits (e.g. limit=5, deep_factor=4 → 20,
+        # but max(20, 50)=50 = same as deep_factor=1).
         from reranker import is_available as reranker_available
-        from settings import RERANK_FETCH_K, MAX_FETCH_K
+        from settings import MAX_FETCH_K
         fetch_k = min(body.limit * body.deep_factor, MAX_FETCH_K)
-        if reranker_available():
-            fetch_k = max(fetch_k, RERANK_FETCH_K)
         params.append(fetch_k)
         limit_idx = idx
 
@@ -1321,6 +1323,10 @@ async def search_memories(
                     trust_warnings=[],
                 ))
         results.sort(key=lambda x: x.score, reverse=True)
+
+    # Final cap — memories + graph_discovery + document chunks all compete;
+    # enforce body.limit as the contract regardless of which paths appended.
+    results = results[:body.limit]
 
     # Buffer last_accessed updates — flushed hourly by governance + every 5 min
     returned_ids = [str(r.id) for r in results if r.source_type == "memory"]
