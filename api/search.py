@@ -596,8 +596,8 @@ async def get_bm25_query(query_text: str) -> str:
         entities = await extract_entities(query_text)
         if entities:
             return " ".join(e["text"] for e in entities)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logging.getLogger("ecodb.gamr").warning("GLiNER BM25 query extraction failed: %r — using raw query", _exc)
     return query_text
 
 
