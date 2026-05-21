@@ -1,18 +1,17 @@
 """EcoDB MCP wrapper — .
 
-Traductor stdio MCP → HTTP API. Sin lógica de negocio. Cada tool empuja a un
-endpoint del API correspondiente y devuelve JSON.
+MCP → HTTP API translator. No business logic. Each tool proxies to the
+corresponding API endpoint and returns JSON.
 
-6 tools (las basicas del flujo de un agente — guardar, buscar, leer, grafo):
-- guardar_memoria       → POST /memories
-- buscar                → POST /search       (Etapa 3 GAMR)
-- buscar_recientes      → GET  /memories/recent
-- leer_memoria          → GET  /memories/{id}
-- guardar_tripleta      → POST /graph/triples
-- vecinos               → GET  /graph/neighbors/{node}
+Core tools (agent workflow — save, search, read, graph):
+- save_memory       → POST /memories
+- search            → POST /search       (GAMR Etapa 3)
+- search_recent     → GET  /memories/recent
+- read_memory       → GET  /memories/{id}
+- save_triple       → POST /graph/triples
+- neighbors         → GET  /graph/neighbors/{node}
 
-Las 16 tools del plan v3 §3.1 son la version completa de Fase 2+. Aqui
-arrancamos con 6 que cubren el use case primario.
+Full 31-tool set covers all GAMR phases (memory, graph, documents, identity).
 
 Auth:
 - ECODB_API_KEY en env (formato `ecodb_<32-bytes-base64url>`).
@@ -312,7 +311,7 @@ mcp = FastMCP("ecodb", host=MCP_HOST, port=MCP_PORT)
 
 
 @mcp.tool()
-def guardar_memoria(
+def save_memory(
     content: str,
     type: str = "observacion",
     workspace_id: int = 1,
@@ -412,7 +411,7 @@ def guardar_memoria(
 
 
 @mcp.tool()
-def buscar(
+def search(
     query_text: Optional[str] = None,
     query_image: Optional[str] = None,
     query_type: Optional[str] = None,
@@ -539,7 +538,7 @@ def buscar(
             if doc_id:
                 doc_counts[doc_id] = doc_counts.get(doc_id, 0) + 1
     recommendations = [
-        f"Documento {doc_id} aparece {cnt} veces en top resultados — considera leerlo completo con leer_documento o buscar_en_documento"
+        f"Document {doc_id} appears {cnt} times in top results — consider reading it fully with read_document or search_in_document"
         for doc_id, cnt in doc_counts.items()
         if cnt >= 2
     ]
@@ -588,7 +587,7 @@ def buscar(
 
 
 @mcp.tool()
-def buscar_recientes(
+def search_recent(
     limit: int = 20,
     max_images: int = 3,
     workspace_id: Optional[int] = None,
@@ -681,7 +680,7 @@ def buscar_recientes(
 
 
 @mcp.tool()
-def obtener_contexto_relevante(
+def get_relevant_context(
     prompt_text: str,
     max_results: int = 3,
     threshold: float = 0.6,
@@ -763,7 +762,7 @@ def obtener_contexto_relevante(
 
 
 @mcp.tool()
-def leer_memoria(memory_id: str, expand_scope: bool = False) -> list:
+def read_memory(memory_id: str, expand_scope: bool = False) -> list:
     """Leer una memoria por ID. Incrementa access_count.
 
     Args:
@@ -815,7 +814,7 @@ def leer_memoria(memory_id: str, expand_scope: bool = False) -> list:
 
 
 @mcp.tool()
-def guardar_tripleta(
+def save_triple(
     subject: str,
     predicate: str,
     object: str,
@@ -866,7 +865,7 @@ def guardar_tripleta(
 
 
 @mcp.tool()
-def vecinos(node: str, depth: int = 1) -> dict:
+def neighbors(node: str, depth: int = 1) -> dict:
     """Vecinos de un nodo en el grafo a 1-N saltos (default 1).
 
     Args:
@@ -892,7 +891,7 @@ def vecinos(node: str, depth: int = 1) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def cargar_identidad(agent_identifier: str, version: Optional[int] = None) -> dict:
+def load_identity(agent_identifier: str, version: Optional[int] = None) -> dict:
     """Cargar identidad de un agente desde EcoDB.
 
     Devuelve los fragmentos de identidad concatenados como un único string,
@@ -930,7 +929,7 @@ def cargar_identidad(agent_identifier: str, version: Optional[int] = None) -> di
 
 
 @mcp.tool()
-def guardar_identidad(agent_identifier: str, fragments: list[str]) -> dict:
+def save_identity(agent_identifier: str, fragments: list[str]) -> dict:
     """Guardar nueva version de identidad (snapshot completo) para un agente.
 
     Args:
@@ -955,7 +954,7 @@ def guardar_identidad(agent_identifier: str, fragments: list[str]) -> dict:
 
 
 @mcp.tool()
-def camino_entre(source: str, target: str, max_depth: int = 6) -> dict:
+def path_between(source: str, target: str, max_depth: int = 6) -> dict:
     """Camino mas corto entre dos nodos del grafo (BFS via Cypher).
 
     Args:
@@ -976,7 +975,7 @@ def camino_entre(source: str, target: str, max_depth: int = 6) -> dict:
 
 
 @mcp.tool()
-def buscar_nodos(query: str, limit: int = 20) -> dict:
+def search_nodes(query: str, limit: int = 20) -> dict:
     """Fuzzy search de nodos del grafo por nombre (pg_trgm).
 
     Args:
@@ -984,7 +983,7 @@ def buscar_nodos(query: str, limit: int = 20) -> dict:
         requiere >=3 chars para extraer trigramas eficientemente).
       limit: max resultados 1-100 (default 20).
 
-    Util antes de pedir vecinos o caminos cuando no recuerdas el nombre exacto
+    Util antes de pedir neighbors o caminos cuando no recuerdas el nombre exacto
     del nodo. Devuelve ranking por similitud trigrama.
     """
     if len(query.strip()) < 3:
@@ -999,7 +998,7 @@ def buscar_nodos(query: str, limit: int = 20) -> dict:
 
 
 @mcp.tool()
-def ver_imagen(memory_id: str) -> Image:
+def view_image(memory_id: str) -> Image:
     """Ver la imagen asociada a una memoria. Devuelve la imagen REAL que Claude
     puede ver directamente — no texto, no base64, la imagen renderizada.
 
@@ -1007,7 +1006,7 @@ def ver_imagen(memory_id: str) -> Image:
       memory_id: UUID de la memoria que tiene media_path con imagen.
 
     Si la memoria no tiene media_path o el archivo no existe, devuelve error.
-    Usa tras buscar() cuando un resultado tiene matched_modality='image' o
+    Usa tras search() cuando un resultado tiene matched_modality='image' o
     media_path no null.
     """
     try:
@@ -1030,7 +1029,7 @@ def ver_imagen(memory_id: str) -> Image:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def guardar_tripletas_lote(
+def save_triples_batch(
     triples: list[dict],
 ) -> dict:
     """Guardar multiples tripletas en una sola transaccion atomica (batch).
@@ -1072,7 +1071,7 @@ def guardar_tripletas_lote(
 
 
 @mcp.tool()
-def borrar_memoria(memory_id: str) -> dict:
+def delete_memory(memory_id: str) -> dict:
     """Soft-delete de una memoria (va a papelera). Requiere permisos de escritura.
 
     Args:
@@ -1086,7 +1085,7 @@ def borrar_memoria(memory_id: str) -> dict:
 
 
 @mcp.tool()
-def desarchivar_memoria(memory_id: str) -> dict:
+def unarchive_memory(memory_id: str) -> dict:
     """Desarchivar una memoria archivada. Transición archived→active.
 
     Args:
@@ -1100,7 +1099,7 @@ def desarchivar_memoria(memory_id: str) -> dict:
 
 
 @mcp.tool()
-def borrar_tripleta(triple_id: int) -> dict:
+def delete_triple(triple_id: int) -> dict:
     """Elimina una tripleta del grafo (SQL + AGE atomico).
 
     Args:
@@ -1114,7 +1113,7 @@ def borrar_tripleta(triple_id: int) -> dict:
 
 
 @mcp.tool()
-def estado_grafo() -> dict:
+def graph_status() -> dict:
     """Estadisticas del grafo: numero de nodos, tripletas y predicados unicos.
     Util como GPS para saber el tamaño y forma del grafo actual.
     """
@@ -1140,7 +1139,7 @@ _DOC_EXT_MAP: dict[str, str] = {
 
 
 @mcp.tool()
-def registrar_documento(
+def register_document(
     uri: str,
     project_id: int,
     doc_type: Optional[str] = None,
@@ -1205,7 +1204,7 @@ def registrar_documento(
 
 
 @mcp.tool()
-def estado_documento(document_id: str) -> dict:
+def document_status(document_id: str) -> dict:
     """Estado de procesamiento de un documento: status, metricas, última indexacion.
 
     Args:
@@ -1227,7 +1226,7 @@ def estado_documento(document_id: str) -> dict:
 
 
 @mcp.tool()
-def listar_documentos(
+def list_documents(
     project_id: Optional[int] = None,
     workspace_id: Optional[int] = None,
     status: Optional[str] = None,
@@ -1259,7 +1258,7 @@ def listar_documentos(
 
 
 @mcp.tool()
-def buscar_en_documento(
+def search_in_document(
     document_id: str,
     query_text: str,
     limit: int = 5,
@@ -1284,7 +1283,7 @@ def buscar_en_documento(
 
 
 @mcp.tool()
-def leer_documento(
+def read_document(
     document_id: str,
     start_chunk: int = 0,
     limit: int = 50,
@@ -1333,7 +1332,7 @@ def validar_link(memory_id: str, document_id: str) -> dict:
 
 
 @mcp.tool()
-def revisar_alias_candidato(candidate_id: int, decision: str, merge: bool = False, reason: str = "") -> dict:
+def review_alias_candidate(candidate_id: int, decision: str, merge: bool = False, reason: str = "") -> dict:
     """Revisar candidato de alias de entidad. Super-only.
 
     Aprueba o rechaza un candidato detectado por GLiNER.
@@ -1378,7 +1377,7 @@ def merge_entities(source_node_id: int, target_node_id: int, reason: str = "") -
 
 
 @mcp.tool()
-def deshacer_merge(source_node_id: int) -> dict:
+def undo_merge(source_node_id: int) -> dict:
     """Deshacer el último merge activo de un nodo. Super-only.
 
     Restaura source_node_id a status='active' y limpia merged_into.
@@ -1395,7 +1394,7 @@ def deshacer_merge(source_node_id: int) -> dict:
 
 
 @mcp.tool()
-def clasificar_documento(document_id: str, trust_tier: int) -> dict:
+def classify_document(document_id: str, trust_tier: int) -> dict:
     """Establecer nivel de confianza de un documento. Super-only.
 
     trust_tier: 0=no confiable, 1=default, 2=verificado, 3=gold.
@@ -1416,7 +1415,7 @@ def clasificar_documento(document_id: str, trust_tier: int) -> dict:
 
 
 @mcp.tool()
-def confirmar_relacion_documento(source_id: str, target_id: str) -> dict:
+def confirm_document_relation(source_id: str, target_id: str) -> dict:
     """Confirmar relación detectada entre dos documentos. Super-only.
 
     Marca confirmed_by con el usuario actual. Las relaciones no confirmadas
@@ -1435,7 +1434,7 @@ def confirmar_relacion_documento(source_id: str, target_id: str) -> dict:
 
 
 @mcp.tool()
-def reindexar_documento(document_id: str) -> dict:
+def reindex_document(document_id: str) -> dict:
     """Reencola un documento para que el worker lo procese de nuevo.
 
     Util para forzar re-indexacion tras un fallo o cambio de configuracion.
@@ -1452,7 +1451,7 @@ def reindexar_documento(document_id: str) -> dict:
 
 
 @mcp.tool()
-def desvincular_documento(document_id: str) -> dict:
+def unlink_document(document_id: str) -> dict:
     """Elimina (soft delete) un documento de EcoDB.
 
     El documento queda con status='deleted' y deja de aparecer en busquedas.
@@ -1469,7 +1468,7 @@ def desvincular_documento(document_id: str) -> dict:
 
 
 @mcp.tool()
-def seedear_diccionario(
+def seed_dictionary(
     name: str,
     entity_type: str,
     notes: Optional[str] = None,
@@ -1499,7 +1498,7 @@ def seedear_diccionario(
 
 
 @mcp.tool()
-def obtener_vocabulario_grafo() -> dict:
+def get_graph_vocabulary() -> dict:
     """Vocabulario del grafo: entidades del diccionario + predicados aprobados.
 
     Devuelve las entidades aceptadas (name + type) y los predicados
