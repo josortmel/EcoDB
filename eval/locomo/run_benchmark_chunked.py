@@ -31,7 +31,7 @@ CAT_NAMES = {1: "single-hop", 2: "temporal", 3: "multi-hop", 4: "open-domain", 5
 
 CHUNK_WINDOW = 5
 CHUNK_OVERLAP = 1
-SEARCH_LIMIT = 100
+SEARCH_LIMIT = 20
 
 
 def headers():
@@ -266,7 +266,7 @@ def main():
     print(f"Chunking: window={CHUNK_WINDOW}, overlap={CHUNK_OVERLAP}, search_limit={SEARCH_LIMIT}, reranker=OFF")
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    out_path = os.path.join(RESULTS_DIR, "locomo_chunked_results.jsonl")
+    out_path = os.path.join(RESULTS_DIR, f"locomo_chunked_k{SEARCH_LIMIT}_results.jsonl")
 
     all_results = []
 
@@ -279,7 +279,7 @@ def main():
 
             print(f"\n--- Conversation {conv_idx+1}/10: {sample_id} ({len(session_keys)} sessions, {qa_count} QA) ---")
 
-            ws_name = f"locomo-chunked-{sample_id}"
+            ws_name = f"locomo-chunked-{sample_id}-{int(time.time())}"
             ws_id, proj_id = create_workspace(client, ws_name)
             print(f"  Workspace: {ws_id}, Project: {proj_id}")
 
