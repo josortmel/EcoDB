@@ -36,13 +36,64 @@ EcoDB's **GAMR engine** (Graph-Augmented Memory Retrieval) solves this with a **
 
 Query classification → embedding → vector retrieval (with UltraSearch multiplier) → BM25 lexical → graph expansion → source resolution → freshness → contradiction detection → multiplicative composite scoring → optional cross-encoder reranking. Each stage adds a signal that pure vector search doesn't have. The query type (factual, analytical, historical, contextual) adjusts signal weights automatically.
 
-### UltraSearch
+## Benchmarks
 
-Standard search returns K results from a pool of K candidates. UltraSearch multiplies the internal candidate pool without changing the output size.
+### LoCoMo (ICLR 2025)
 
-`search(limit=5, deep_factor=4)` fetches 20 candidates internally, runs the full GAMR pipeline on all 20, and returns only the best 5. You get **K=20 retrieval quality at K=5 token cost**: the LLM consuming the results processes 5 memories instead of 20.
+<p align="center">
+  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks on LoCoMo (ICLR 2025)" width="100%">
+</p>
 
-`deep_factor` ranges from 1 (standard) to 10. Hard cap at 200 internal candidates. The only trade-off is compute time, not output cost.
+Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
+
+| Metric | K=5 | K=10 | K=20 |
+|--------|:---:|:----:|:----:|
+| **Recall@5** | 0.914 | 0.906 | **0.922** |
+| **Recall@10** | * | 0.931 | **0.959** |
+
+\* K=5 returns only 5 results, so R@10 cannot improve beyond R@5.
+
+**By query type** (Recall@5, K=20): adversarial 0.95 · open-domain 0.94 · temporal 0.92 · single-hop 0.91 · multi-hop 0.73
+
+10 conversations, no exclusions. Full methodology and scripts in [`eval/`](eval/).
+
+### Internal golden set
+
+We also maintain a harder internal benchmark against EcoDB's production corpus: 1,400+ memories across multiple languages and dozens of topics, paragraph-level retrieval instead of session-level. This is where we explore our margin of improvement. It's the benchmark that still challenges the system. Detailed methodology and results in [`eval/BENCHMARKS.md`](eval/BENCHMARKS.md).
+
+## Architecture
+
+<p align="center">
+  <img src="docs/images/architecture.png" alt="EcoDB architecture" width="100%">
+</p>
+
+**Two interfaces, same data:**
+
+- **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
+- **MCP Server**: 22+ tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
+
+**Six Docker services:**
+
+| Service | Role | Size |
+|---------|------|-----:|
+| `postgres` | Storage + vector index + knowledge graph | 640 MB |
+| `api` | FastAPI, GAMR engine, auth, CRUD | 10 GB |
+| `embeddings` | Jina v4 embedding model (GPU) | 10 GB |
+| `ner` | GLiNER named entity recognition | 8.3 GB |
+| `mcp` | MCP protocol server | 280 MB |
+| `llm` | llama.cpp + Qwen 2.5 3B (optional) | 2.2 GB |
+
+## Multimodal Memory
+
+EcoDB stores and searches across **text, images, and documents** in the same system.
+
+[Jina v4](https://jina.ai) embeds text and images into the same 512-dimensional vector space. A text query retrieves relevant images. An image query retrieves relevant text. Search results mix memories, document chunks, and graph discoveries in a single ranked response, with images returned inline.
+
+- **Store**: `save_memory(content="...", file_path="image.png")` embeds both text and image, copies to media store
+- **Search**: `search(query_text="...")` returns text and image memories ranked together
+- **View**: `view_image(memory_id)` returns the actual image inline, visible to the consuming LLM
+
+Documents (PDF, DOCX, PPTX, audio) are parsed, chunked, embedded, and searchable alongside memories. The GAMR pipeline scores everything uniformly; it doesn't distinguish between a memory saved by an agent and a chunk extracted from a PDF.
 
 ## Knowledge Graph
 
@@ -64,18 +115,6 @@ Vector search finds what's **similar**. The graph finds what's **related**. A de
 [GLiNER](https://github.com/urchade/GLiNER) extracts entities from every memory and document chunk at ingestion time and links them to the graph automatically. But automatic extraction alone generates noise. EcoDB combines GLiNER with an **entity dictionary**, a curated list of allowed entities with canonical names and aliases. Dictionary matches take priority over raw NER predictions. Entities that don't match the dictionary are flagged as candidates for human review.
 
 Automatic linking feeds the graph. It never substitutes a healthy, curated graph. The system detects and suggests; the human decides.
-
-## Multimodal Memory
-
-EcoDB stores and searches across **text, images, and documents** in the same system.
-
-[Jina v4](https://jina.ai) embeds text and images into the same 512-dimensional vector space. A text query retrieves relevant images. An image query retrieves relevant text. Search results mix memories, document chunks, and graph discoveries in a single ranked response, with images returned inline.
-
-- **Store**: `save_memory(content="...", file_path="image.png")` embeds both text and image, copies to media store
-- **Search**: `search(query_text="...")` returns text and image memories ranked together
-- **View**: `view_image(memory_id)` returns the actual image inline, visible to the consuming LLM
-
-Documents (PDF, DOCX, PPTX, audio) are parsed, chunked, embedded, and searchable alongside memories. The GAMR pipeline scores everything uniformly; it doesn't distinguish between a memory saved by an agent and a chunk extracted from a PDF.
 
 ## Ingestion
 
@@ -119,27 +158,7 @@ Every memory has a visibility scope:
 
 Agents operate within their assigned workspace and project. A sales agent can't read engineering memories unless explicitly granted access.
 
-## Architecture
 
-<p align="center">
-  <img src="docs/images/architecture.png" alt="EcoDB architecture" width="100%">
-</p>
-
-**Two interfaces, same data:**
-
-- **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
-- **MCP Server**: 22+ tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
-
-**Six Docker services:**
-
-| Service | Role | Size |
-|---------|------|-----:|
-| `postgres` | Storage + vector index + knowledge graph | 640 MB |
-| `api` | FastAPI, GAMR engine, auth, CRUD | 10 GB |
-| `embeddings` | Jina v4 embedding model (GPU) | 10 GB |
-| `ner` | GLiNER named entity recognition | 8.3 GB |
-| `mcp` | MCP protocol server | 280 MB |
-| `llm` | llama.cpp + Qwen 2.5 3B (optional) | 2.2 GB |
 
 ## Quick Start
 
@@ -218,30 +237,14 @@ Connect any MCP-compatible client:
 | `reindex_document` | Re-index a document |
 | `unlink_document` | Unlink a document |
 
-## Benchmarks
+### UltraSearch
 
-### LoCoMo (ICLR 2025)
+Standard search returns K results from a pool of K candidates. UltraSearch multiplies the internal candidate pool without changing the output size.
 
-<p align="center">
-  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks on LoCoMo (ICLR 2025)" width="100%">
-</p>
+`search(limit=5, deep_factor=4)` fetches 20 candidates internally, runs the full GAMR pipeline on all 20, and returns only the best 5. You get **K=20 retrieval quality at K=5 token cost**: the LLM consuming the results processes 5 memories instead of 20.
 
-Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
+`deep_factor` ranges from 1 (standard) to 10. Hard cap at 200 internal candidates. The only trade-off is compute time, not output cost.
 
-| Metric | K=5 | K=10 | K=20 |
-|--------|:---:|:----:|:----:|
-| **Recall@5** | 0.914 | 0.906 | **0.922** |
-| **Recall@10** | * | 0.931 | **0.959** |
-
-\* K=5 returns only 5 results, so R@10 cannot improve beyond R@5.
-
-**By query type** (Recall@5, K=20): adversarial 0.95 · open-domain 0.94 · temporal 0.92 · single-hop 0.91 · multi-hop 0.73
-
-10 conversations, no exclusions. Full methodology and scripts in [`eval/`](eval/).
-
-### Internal golden set
-
-We also maintain a harder internal benchmark against EcoDB's production corpus: 1,400+ memories across multiple languages and dozens of topics, paragraph-level retrieval instead of session-level. This is where we explore our margin of improvement. It's the benchmark that still challenges the system. Detailed methodology and results in [`eval/BENCHMARKS.md`](eval/BENCHMARKS.md).
 
 ## Roadmap
 
