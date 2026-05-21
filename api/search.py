@@ -635,10 +635,11 @@ def compute_composite_score(
     bm25_score: float = 0.0,
 ) -> dict:
     """Multiplicative bonus: semantic is BASE, extras can only IMPROVE, never replace."""
-    bm25_bonus = min(bm25_score, 1.0) * 0.10
-    graph_bonus = min(graph_score, 1.0) * 0.05
-    weight_bonus = min(memory_weight, 1.0) * 0.05
-    freshness_bonus = min(freshness_score, 1.0) * 0.02
+    w = GAMR_WEIGHTS_BM25.get(query_type, GAMR_WEIGHTS_BM25["contextual"])
+    bm25_bonus = min(bm25_score, 1.0) * w["bm25"]
+    graph_bonus = min(graph_score, 1.0) * w["graph"]
+    weight_bonus = min(memory_weight, 1.0) * w["weight"]
+    freshness_bonus = min(freshness_score, 1.0) * w["freshness"]
 
     composite = semantic_score * (1.0 + bm25_bonus + graph_bonus + weight_bonus + freshness_bonus)
 
