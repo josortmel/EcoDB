@@ -85,6 +85,10 @@ We also maintain a harder internal benchmark against EcoDB's production corpus: 
 
 ## Multimodal Memory
 
+<p align="center">
+  <img src="docs/images/multimodal.png" alt="EcoDB multimodal memory — what goes in" width="100%">
+</p>
+
 EcoDB stores and searches across **text, images, and documents** in the same system.
 
 [Jina v4](https://jina.ai) embeds text and images into the same 512-dimensional vector space. A text query retrieves relevant images. An image query retrieves relevant text. Search results mix memories, document chunks, and graph discoveries in a single ranked response, with images returned inline.
