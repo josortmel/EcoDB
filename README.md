@@ -57,6 +57,28 @@ Evaluated on [LoCoMo](https://arxiv.org/abs/2402.17753) (Maharana et al., ACL 20
 
 10 conversations, no exclusions. Full methodology and scripts in [`eval/`](eval/).
 
+#### Context: paper baselines
+
+The LoCoMo authors (Snap Research) evaluated [DRAGON](https://arxiv.org/abs/2302.07452) as their retrieval baseline, testing three retrieval unit types:
+
+| Retrieval unit | R@5 | R@10 | R@25 | R@50 |
+|---------------|:---:|:----:|:----:|:----:|
+| Dialog turns | 0.588 | 0.675 | 0.799 | 0.848 |
+| Observations | 0.496 | 0.571 | 0.660 | 0.711 |
+| Session summaries | 0.751 (R@5) | 0.907 (R@10) | — | — |
+
+EcoDB's approach (5-turn chunked sessions) is closest to the Dialog unit type. At K=5, EcoDB achieves 0.914 R@5 vs DRAGON Dialog's 0.588 — a +33 percentage-point improvement. Even against the strongest baseline (session summaries at 0.751), EcoDB's 0.914 represents a +16pp improvement with finer-grained retrieval units.
+
+No other system has published retrieval Recall@K on LoCoMo. Other AI memory systems (Mem0, Zep, Letta, ByteRover, Hindsight) evaluate on LLM-as-Judge QA accuracy, which is a different metric measuring end-to-end answer correctness rather than retrieval quality.
+
+#### Why Recall@K?
+
+EcoDB is a retrieval system, not a question-answering system. We report Recall@K because it isolates retrieval quality independent of the downstream LLM.
+
+LLM-as-Judge accuracy conflates two capabilities: the memory system's ability to find relevant information, and the LLM's ability to reason over whatever it receives. A powerful LLM can infer correct answers from tangentially related context, scoring well even when retrieval fails. This means the metric rewards LLM reasoning ability rather than retrieval quality — the opposite of what you want when evaluating a memory system.
+
+Recall@K has no such confound. The correct document is in the top K or it isn't. The metric is LLM-agnostic, reproducible, and directly measures what a memory system is responsible for: finding the right information.
+
 ### Search latency
 
 | Config | p50 | p95 |
