@@ -28,7 +28,7 @@ Standard RAG retrieves by cosine similarity. That works for simple recall, but f
 | Text query finding an image | Not possible | Cross-modal search (text ↔ image) |
 | Agent A's notes vs. Agent B's | No distinction | Governed visibility by workspace/project |
 
-EcoDB's **GAMR engine** (Graph-Augmented Memory Retrieval) solves this with a **10-stage scoring pipeline**:
+EcoDB's **GAMR engine** (Graph-Augmented Multimodal Retrieval) solves this with a **10-stage scoring pipeline**:
 
 <p align="center">
   <img src="docs/images/gamr-pipeline.png" alt="GAMR: 10-stage scoring pipeline" width="100%">
