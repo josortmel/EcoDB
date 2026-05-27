@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v0.8-orange" alt="Release"></a>
+  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.8.5"><img src="https://img.shields.io/badge/release-v0.8.5-orange" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
   <img src="https://img.shields.io/badge/MCP-22%2B%20tools-0d9488" alt="MCP Tools">
@@ -38,13 +38,13 @@ Query classification → embedding → vector retrieval (with UltraSearch multip
 
 ## Benchmarks
 
-### LoCoMo (ICLR 2025)
+### LoCoMo (ACL 2024)
 
 <p align="center">
-  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks on LoCoMo (ICLR 2025)" width="100%">
+  <img src="docs/images/benchmarks.png" alt="EcoDB benchmarks on LoCoMo (ACL 2024)" width="100%">
 </p>
 
-Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
+Evaluated on [LoCoMo](https://arxiv.org/abs/2402.17753) (Maharana et al., ACL 2024), a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval:
 
 | Metric | K=5 | K=10 | K=20 |
 |--------|:---:|:----:|:----:|
@@ -56,6 +56,15 @@ Evaluated on [LoCoMo](https://arxiv.org/abs/2401.17753), a long-context conversa
 **By query type** (Recall@5, K=20): adversarial 0.95 · open-domain 0.94 · temporal 0.92 · single-hop 0.91 · multi-hop 0.73
 
 10 conversations, no exclusions. Full methodology and scripts in [`eval/`](eval/).
+
+### Search latency
+
+| Config | p50 | p95 |
+|--------|:---:|:---:|
+| Standard (limit=5) | 44ms | 44ms |
+| Full pipeline (limit=20, graph discovery) | 44ms | 48ms |
+
+Measured on a single NVIDIA RTX 2080 Ti (11 GB). The full 10-stage GAMR pipeline — embedding, BM25, graph traversal, freshness, composite scoring — completes in under 50ms at p95.
 
 ### Internal golden set
 
@@ -254,7 +263,7 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 
 | Version | Status | What it adds |
 |---------|--------|-------------|
-| **v0.8** | **Current** | Single-tenant. Full feature set: GAMR, graph, ingestion, MCP, governance foundations. |
+| **v0.8.5** | **Current** | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. |
 | **v0.9** | Next | Multi-tenant. Multiple users on separate machines connected to one EcoDB instance. OAuth. Per-org API keys. |
 | **v1.0** | Planned | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
 

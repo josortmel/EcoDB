@@ -1,6 +1,6 @@
 # LoCoMo Benchmark
 
-Evaluates EcoDB's GAMR search engine against [LoCoMo](https://github.com/snap-research/LoCoMo) (ICLR 2025).
+Evaluates EcoDB's GAMR search engine against [LoCoMo](https://github.com/snap-research/LoCoMo) (Maharana et al., ACL 2024).
 
 ## What it measures
 
@@ -27,4 +27,26 @@ Each conversation loads into an isolated workspace, runs ~200 queries, and repor
 
 ## Results
 
-TODO: fill after running benchmark.
+### With Docling chunking (5-turn sliding windows, 1-turn overlap)
+
+| Metric | K=5 | K=10 | K=20 |
+|--------|:---:|:----:|:----:|
+| Recall@1 | 0.774 | 0.756 | 0.774 |
+| Recall@5 | 0.914 | 0.906 | **0.922** |
+| Recall@10 | * | 0.931 | **0.959** |
+
+### Without chunking (monolithic sessions)
+
+| Metric | Score |
+|--------|:-----:|
+| Recall@5 | 0.769 |
+| Recall@10 | 0.894 |
+
+### With cross-encoder reranking (no chunking)
+
+| Metric | Score |
+|--------|:-----:|
+| Recall@1 | 0.578 |
+| Recall@5 | 0.793 |
+
+See [`eval/BENCHMARKS.md`](../BENCHMARKS.md) for full analysis.

@@ -1,8 +1,8 @@
 # EcoDB Benchmarks: Full Results
 
-## LoCoMo (ICLR 2025)
+## LoCoMo (ACL 2024)
 
-[LoCoMo](https://arxiv.org/abs/2401.17753) is a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval.
+[LoCoMo](https://arxiv.org/abs/2402.17753) (Maharana et al., ACL 2024) is a long-context conversational memory benchmark. 10 conversations, 1,982 queries, session-level retrieval.
 
 ### With Docling chunking (5-turn sliding windows, 1-turn overlap)
 

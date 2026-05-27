@@ -2,7 +2,7 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — 2026-05-22
+## [0.8.5] — 2026-05-27
 
 ### Added
 - **10-stage GAMR pipeline** — cross-encoder reranker as Etapa 10 (MiniLM-L-6-v2, SHA-pinned, fail-closed)
