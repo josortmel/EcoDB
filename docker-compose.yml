@@ -15,6 +15,9 @@
 services:
 
   postgres:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.postgres
     image: ecodb-postgres:1.0.0
     container_name: ecodb-postgres
     environment:
@@ -39,6 +42,8 @@ services:
       - ecodb-net
 
   embeddings:
+    build:
+      context: ./embeddings
     image: ecodb-embeddings:0.2.5
     container_name: ecodb-embeddings
     environment:

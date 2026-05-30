@@ -201,7 +201,7 @@ Agents operate within their assigned workspace and project. A sales agent can't 
 git clone https://github.com/josortmel/ecodb
 cd ecodb
 ./scripts/setup.sh          # generates .env, verifies dependencies
-docker compose up -d         # first boot downloads models (~35 GB)
+docker compose up --build -d # first boot builds images + downloads models (~35 GB)
 ```
 
 Monitor first boot (model downloads take time):
@@ -222,8 +222,8 @@ docker compose restart mcp
 **Optional profiles:**
 
 ```bash
-docker compose --profile with-ingestion up -d    # PDF, DOCX, audio ingestion
-docker compose --profile with-llm up -d          # local LLM for classification
+docker compose --profile with-ingestion up --build -d    # PDF, DOCX, audio ingestion
+docker compose --profile with-llm up --build -d          # local LLM for classification
 ```
 
 ### Requirements
