@@ -28,13 +28,21 @@ Standard RAG retrieves by cosine similarity. That works for simple recall, but f
 | Text query finding an image | Not possible | Cross-modal search (text ↔ image) |
 | Agent A's notes vs. Agent B's | No distinction | Governed visibility by workspace/project |
 
-EcoDB's **GAMR engine** (Graph-Augmented Multimodal Retrieval) solves this with a **10-stage scoring pipeline**:
+## Multimodal Memory
 
 <p align="center">
-  <img src="docs/images/gamr-pipeline.png" alt="GAMR: 10-stage scoring pipeline" width="100%">
+  <img src="docs/images/multimodal.png" alt="EcoDB multimodal memory — what goes in" width="100%">
 </p>
 
-Query classification → embedding → vector retrieval (with UltraSearch multiplier) → BM25 lexical → graph expansion → source resolution → freshness → contradiction detection → multiplicative composite scoring → optional cross-encoder reranking. Each stage adds a signal that pure vector search doesn't have. The query type (factual, analytical, historical, contextual) adjusts signal weights automatically.
+EcoDB stores and searches across **text, images, and documents** in the same system.
+
+[Jina v4](https://jina.ai) embeds text and images into the same 512-dimensional vector space. A text query retrieves relevant images. An image query retrieves relevant text. Search results mix memories, document chunks, and graph discoveries in a single ranked response, with images returned inline.
+
+- **Store**: `save_memory(content="...", file_path="image.png")` embeds both text and image, copies to media store
+- **Search**: `search(query_text="...")` returns text and image memories ranked together
+- **View**: `view_image(memory_id)` returns the actual image inline, visible to the consuming LLM
+
+Documents (PDF, DOCX, PPTX, audio) are parsed, chunked, embedded, and searchable alongside memories. The GAMR pipeline scores everything uniformly; it doesn't distinguish between a memory saved by an agent and a chunk extracted from a PDF.
 
 ## Benchmarks
 
@@ -57,20 +65,6 @@ Evaluated on [LoCoMo](https://arxiv.org/abs/2402.17753) (Maharana et al., ACL 20
 
 10 conversations, no exclusions. Full methodology and scripts in [`eval/`](eval/).
 
-#### Context: paper baselines
-
-The LoCoMo authors (Snap Research) evaluated [DRAGON](https://arxiv.org/abs/2302.07452) as their retrieval baseline, testing three retrieval unit types:
-
-| Retrieval unit | R@5 | R@10 | R@25 | R@50 |
-|---------------|:---:|:----:|:----:|:----:|
-| Dialog turns | 0.588 | 0.675 | 0.799 | 0.848 |
-| Observations | 0.496 | 0.571 | 0.660 | 0.711 |
-| Session summaries | 0.751 (R@5) | 0.907 (R@10) | — | — |
-
-EcoDB's approach (5-turn chunked sessions) is closest to the Dialog unit type. At K=5, EcoDB achieves 0.914 R@5 vs DRAGON Dialog's 0.588 — a +33 percentage-point improvement. Even against the strongest baseline (session summaries at 0.751), EcoDB's 0.914 represents a +16pp improvement with finer-grained retrieval units.
-
-No other system has published retrieval Recall@K on LoCoMo. Other AI memory systems (Mem0, Zep, Letta, ByteRover, Hindsight) evaluate on LLM-as-Judge QA accuracy, which is a different metric measuring end-to-end answer correctness rather than retrieval quality.
-
 #### Why Recall@K?
 
 EcoDB is a retrieval system, not a question-answering system. We report Recall@K because it isolates retrieval quality independent of the downstream LLM.
@@ -92,45 +86,17 @@ Measured on a single NVIDIA RTX 2080 Ti (11 GB). The full 10-stage GAMR pipeline
 
 We also maintain a harder internal benchmark against EcoDB's production corpus: 1,400+ memories across multiple languages and dozens of topics, paragraph-level retrieval instead of session-level. This is where we explore our margin of improvement. It's the benchmark that still challenges the system. Detailed methodology and results in [`eval/BENCHMARKS.md`](eval/BENCHMARKS.md).
 
-## Architecture
+## GAMR Engine
+
+EcoDB's **GAMR engine** (Graph-Augmented Multimodal Retrieval) is a **10-stage scoring pipeline**:
 
 <p align="center">
-  <img src="docs/images/architecture.png" alt="EcoDB architecture" width="100%">
+  <img src="docs/images/gamr-pipeline.png" alt="GAMR: 10-stage scoring pipeline" width="100%">
 </p>
 
-**Two interfaces, same data:**
+Query classification → embedding → vector retrieval (with UltraSearch multiplier) → BM25 lexical → graph expansion → source resolution → freshness → contradiction detection → multiplicative composite scoring → optional cross-encoder reranking. Each stage adds a signal that pure vector search doesn't have. The query type (factual, analytical, historical, contextual) adjusts signal weights automatically.
 
-- **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
-- **MCP Server**: 32 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
-
-**Six Docker services:**
-
-| Service | Role | Size |
-|---------|------|-----:|
-| `postgres` | Storage + vector index + knowledge graph | 640 MB |
-| `api` | FastAPI, GAMR engine, auth, CRUD | 10 GB |
-| `embeddings` | Jina v4 embedding model (GPU) | 10 GB |
-| `ner` | GLiNER named entity recognition | 8.3 GB |
-| `mcp` | MCP protocol server | 280 MB |
-| `llm` | llama.cpp + Qwen 2.5 3B (optional) | 2.2 GB |
-
-## Multimodal Memory
-
-<p align="center">
-  <img src="docs/images/multimodal.png" alt="EcoDB multimodal memory — what goes in" width="100%">
-</p>
-
-EcoDB stores and searches across **text, images, and documents** in the same system.
-
-[Jina v4](https://jina.ai) embeds text and images into the same 512-dimensional vector space. A text query retrieves relevant images. An image query retrieves relevant text. Search results mix memories, document chunks, and graph discoveries in a single ranked response, with images returned inline.
-
-- **Store**: `save_memory(content="...", file_path="image.png")` embeds both text and image, copies to media store
-- **Search**: `search(query_text="...")` returns text and image memories ranked together
-- **View**: `view_image(memory_id)` returns the actual image inline, visible to the consuming LLM
-
-Documents (PDF, DOCX, PPTX, audio) are parsed, chunked, embedded, and searchable alongside memories. The GAMR pipeline scores everything uniformly; it doesn't distinguish between a memory saved by an agent and a chunk extracted from a PDF.
-
-## Knowledge Graph
+### Knowledge Graph
 
 <p align="center">
   <img src="docs/images/knowledge-graph.png" alt="Knowledge graph as a make-sense layer" width="100%">
@@ -145,92 +111,11 @@ Vector search finds what's **similar**. The graph finds what's **related**. A de
 - **Traversal tools**: `neighbors` (depth N), `path_between` (shortest path), `search_nodes` (fuzzy), co-occurrence analysis
 - **Graph bonus = 5% of GAMR composite score**, deliberately low. The graph's value is in exploration, not ranking
 
-### Automatic entity extraction
+#### Automatic entity extraction
 
 [GLiNER](https://github.com/urchade/GLiNER) extracts entities from every memory and document chunk at ingestion time and links them to the graph automatically. But automatic extraction alone generates noise. EcoDB combines GLiNER with an **entity dictionary**, a curated list of allowed entities with canonical names and aliases. Dictionary matches take priority over raw NER predictions. Entities that don't match the dictionary are flagged as candidates for human review.
 
 Automatic linking feeds the graph. It never substitutes a healthy, curated graph. The system detects and suggests; the human decides.
-
-## Ingestion
-
-Two pipelines for two content types. Both produce memories with embeddings that feed into the same GAMR search.
-
-### Documents (Docling)
-
-[Docling](https://github.com/DS4SD/docling) parses PDFs, Word documents, HTML, and PowerPoint into structured chunks. Audio files go through Whisper for transcription. Each chunk inherits document metadata (tags, project, workspace) and is tracked through a lifecycle: pending → processing → indexed → error.
-
-Pipeline: **parse → chunk (960 tokens) → NER (GLiNER) → embed (Jina v4) → graph link → index**
-
-### Conversational sessions (Session Parser)
-
-Raw Claude Code sessions (JSON with speaker/text turns) are split into **5-turn sliding windows with 1-turn overlap** before embedding. Each window becomes one memory tagged with session ID and chunk index. On retrieval, chunks are deduplicated back to session level.
-
-In an isolated experiment on the same LoCoMo benchmark, this single ingestion change took Recall@5 from **0.769 to 0.922 (+19.9%)** without any changes to the GAMR pipeline. The benchmarks above reflect this ingestion strategy applied across the full pipeline. For conversational data, ingestion granularity matters more than ranking sophistication.
-
-## Governance
-
-The system controls who sees what, who can write where, and how knowledge flows between teams.
-
-<p align="center">
-  <img src="docs/images/governance.png" alt="Governance model and roadmap" width="100%">
-</p>
-
-### Role hierarchy
-
-| Role | Scope | Can do |
-|------|-------|--------|
-| **Superuser** | Global | Everything. Manage workspaces, users, agents, ontology. |
-| **Workspace Lead** | Department | Manage projects and members within their workspace. |
-| **Project Member** | Project | Read/write within assigned projects. |
-
-### Memory visibility
-
-Every memory has a visibility scope:
-
-- **Public**: visible to all members of the workspace
-- **Private**: visible only to the author (agent or user)
-- **Workspace-scoped**: cascading permissions from workspace → project
-
-Agents operate within their assigned workspace and project. A sales agent can't read engineering memories unless explicitly granted access.
-
-
-
-## Quick Start
-
-```bash
-git clone https://github.com/josortmel/ecodb
-cd ecodb
-./scripts/setup.sh          # generates .env, verifies dependencies
-docker compose up --build -d # first boot builds images + downloads models (~35 GB)
-```
-
-Monitor first boot (model downloads take time):
-
-```bash
-docker compose logs -f embeddings ner    # wait for "model loaded" / "ready"
-docker compose ps                        # all services should show "healthy"
-```
-
-Generate your API key:
-
-```bash
-docker exec ecodb-api python bootstrap_first_apikey.py
-# Add to .env: ECODB_API_KEY=ecodb_...
-docker compose restart mcp
-```
-
-**Optional profiles:**
-
-```bash
-docker compose --profile with-ingestion up --build -d    # PDF, DOCX, audio ingestion
-docker compose --profile with-llm up --build -d          # local LLM for classification
-```
-
-### Requirements
-
-- Docker with Compose v2
-- NVIDIA GPU with CUDA drivers
-- ~35 GB disk space
 
 ## MCP Tools
 
@@ -293,6 +178,106 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 
 `deep_factor` ranges from 1 (standard) to 10. Hard cap at 200 internal candidates. The only trade-off is compute time, not output cost.
 
+## Architecture
+
+<p align="center">
+  <img src="docs/images/architecture.png" alt="EcoDB architecture" width="100%">
+</p>
+
+**Two interfaces, same data:**
+
+- **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
+- **MCP Server**: 32 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
+
+**Six Docker services:**
+
+| Service | Role | Size |
+|---------|------|-----:|
+| `postgres` | Storage + vector index + knowledge graph | 640 MB |
+| `api` | FastAPI, GAMR engine, auth, CRUD | 10 GB |
+| `embeddings` | Jina v4 embedding model (GPU) | 10 GB |
+| `ner` | GLiNER named entity recognition | 8.3 GB |
+| `mcp` | MCP protocol server | 280 MB |
+| `llm` | llama.cpp + Qwen 2.5 3B (optional) | 2.2 GB |
+
+## Ingestion
+
+Two pipelines for two content types. Both produce memories with embeddings that feed into the same GAMR search.
+
+### Documents (Docling)
+
+[Docling](https://github.com/DS4SD/docling) parses PDFs, Word documents, HTML, and PowerPoint into structured chunks. Audio files go through Whisper for transcription. Each chunk inherits document metadata (tags, project, workspace) and is tracked through a lifecycle: pending → processing → indexed → error.
+
+Pipeline: **parse → chunk (960 tokens) → NER (GLiNER) → embed (Jina v4) → graph link → index**
+
+### Conversational sessions (Session Parser)
+
+Raw Claude Code sessions (JSON with speaker/text turns) are split into **5-turn sliding windows with 1-turn overlap** before embedding. Each window becomes one memory tagged with session ID and chunk index. On retrieval, chunks are deduplicated back to session level.
+
+In an isolated experiment on the same LoCoMo benchmark, this single ingestion change took Recall@5 from **0.769 to 0.922 (+19.9%)** without any changes to the GAMR pipeline. The benchmarks above reflect this ingestion strategy applied across the full pipeline. For conversational data, ingestion granularity matters more than ranking sophistication.
+
+## Governance
+
+The system controls who sees what, who can write where, and how knowledge flows between teams.
+
+<p align="center">
+  <img src="docs/images/governance.png" alt="Governance model and roadmap" width="100%">
+</p>
+
+### Role hierarchy
+
+| Role | Scope | Can do |
+|------|-------|--------|
+| **Superuser** | Global | Everything. Manage workspaces, users, agents, ontology. |
+| **Workspace Lead** | Department | Manage projects and members within their workspace. |
+| **Project Member** | Project | Read/write within assigned projects. |
+
+### Memory visibility
+
+Every memory has a visibility scope:
+
+- **Public**: visible to all members of the workspace
+- **Private**: visible only to the author (agent or user)
+- **Workspace-scoped**: cascading permissions from workspace → project
+
+Agents operate within their assigned workspace and project. A sales agent can't read engineering memories unless explicitly granted access.
+
+## Quick Start
+
+```bash
+git clone https://github.com/josortmel/ecodb
+cd ecodb
+./scripts/setup.sh          # generates .env, verifies dependencies
+docker compose up --build -d # first boot builds images + downloads models (~35 GB)
+```
+
+Monitor first boot (model downloads take time):
+
+```bash
+docker compose logs -f embeddings ner    # wait for "model loaded" / "ready"
+docker compose ps                        # all services should show "healthy"
+```
+
+Generate your API key:
+
+```bash
+docker exec ecodb-api python bootstrap_first_apikey.py
+# Add to .env: ECODB_API_KEY=ecodb_...
+docker compose restart mcp
+```
+
+**Optional profiles:**
+
+```bash
+docker compose --profile with-ingestion up --build -d    # PDF, DOCX, audio ingestion
+docker compose --profile with-llm up --build -d          # local LLM for classification
+```
+
+### Requirements
+
+- Docker with Compose v2
+- NVIDIA GPU with CUDA drivers
+- ~35 GB disk space
 
 ## Roadmap
 
@@ -305,7 +290,7 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 ## Documentation
 
 - [`docs/architecture/`](docs/architecture/): System briefs on governance, ingestion, intelligence, product design
-- [`eval/`](eval/): Benchmark framework and golden set evaluation
+- [`eval/`](eval/): Benchmark framework, paper baseline comparison, and golden set evaluation
 - [`CHANGELOG.md`](CHANGELOG.md): Version history
 
 ## Development
