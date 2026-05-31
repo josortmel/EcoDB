@@ -60,9 +60,9 @@ services:
       # Mounted :ro because trust_remote_code=True could otherwise execute code that
       # modifies the host cache. With the revision pinned to a cached SHA, HF only
       # needs read access.
-      - ${HF_CACHE_PATH:-hf_cache}:/cache/huggingface:ro
+      - ${HF_CACHE_PATH:-hf_cache}:/cache/huggingface
       # torch.inductor kernel cache — named volume, persists across rebuilds.
-      - torch_cache:/home/apiuser/.cache/torch
+      - torch_cache:/cache/torch
     deploy:
       resources:
         reservations:

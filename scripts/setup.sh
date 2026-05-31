@@ -85,9 +85,9 @@ echo ""
 info "Setup complete. Next steps:"
 echo ""
 if [ "$USE_SEED" = "true" ]; then
-    echo "  1. Start: docker compose -f docker-compose.yml -f docker-compose.seed.yml up -d"
+    echo "  1. Start: docker compose -f docker-compose.yml -f docker-compose.seed.yml up --build -d"
 else
-    echo "  1. Start: docker compose up -d"
+    echo "  1. Start: docker compose up --build -d"
 fi
 echo "  2. Wait for first boot (models download ~35 GB)"
 echo "  3. Generate API key: docker exec ecodb-api python bootstrap_first_apikey.py"
