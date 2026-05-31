@@ -194,7 +194,12 @@ async def _ensure_node(conn, name: str) -> int:
             params_check,
         )
         if age_exists is None:
-            await _age_create(name, sql_id)
+            try:
+                await _age_create(name, sql_id)
+            except Exception as _age_dup:
+                logging.getLogger("ecodb.graph").warning(
+                    "_ensure_node: AGE create failed for %r (sql_id=%d): %r", name, sql_id, _age_dup
+                )
         return sql_id
     sql_id = inserted["id"]
     # AGE node created by trg_age_sync_insert trigger — no manual _age_create here.

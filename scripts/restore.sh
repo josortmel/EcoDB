@@ -9,7 +9,7 @@
 #   ./restore.sh DUMP_FILE --target=ecodb_v2        # restaura a DB con otro nombre
 #
 # Variables:
-#   ECODB_CONTAINER  (default: ecodb-postgres-test)
+#   ECODB_CONTAINER  (default: ecodb-postgres)
 #   ECODB_USER       (default: ecodb — debe tener CREATEDB)
 #   ECODB_TARGET_DB  (default: ecodb_restore_test)
 
@@ -28,7 +28,7 @@ fi
 DUMP_FILE="$1"
 shift
 
-CONTAINER="${ECODB_CONTAINER:-ecodb-postgres-test}"
+CONTAINER="${ECODB_CONTAINER:-ecodb-postgres}"
 PG_USER="${ECODB_USER:-ecodb}"
 TARGET="${ECODB_TARGET_DB:-ecodb_restore_test}"
 TEMP=false

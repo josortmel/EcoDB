@@ -1,7 +1,7 @@
 """Tests de integracion — auth endpoints contra postgres real.
 
 Pre-requisitos:
-- Container `ecodb-postgres-test` corriendo en localhost:5435 con init.sql aplicado.
+- Container `ecodb-postgres` corriendo en localhost:5435 con init.sql aplicado.
 - Variables de entorno DATABASE_URL apuntando ahi.
 
 Los tests crean su propio user de prueba (ademas del seed inicial) con sus propias

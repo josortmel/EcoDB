@@ -150,12 +150,14 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8091"
       ECODB_API_URL: http://ecodb-api:8080
-      ECODB_API_KEY: ${ECODB_API_KEY}
+      ECODB_API_KEY: ${ECODB_API_KEY:-}
       ECODB_TIMEOUT: "60.0"
       ENABLE_CONTEXT_INJECTION: "true"
       ECODB_MEDIA_DIR: /app/media
     ports:
       - "8091:8091"
+    volumes:
+      - ecodb_media:/app/media
     depends_on:
       api:
         condition: service_healthy

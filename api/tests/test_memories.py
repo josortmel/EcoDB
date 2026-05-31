@@ -327,12 +327,12 @@ def test_delete_moves_to_trash_and_returns_204(client, super_jwt):
     assert client.get(f"/memories/{created['id']}", headers=auth(super_jwt)).status_code == 403
 
 
-def test_delete_inexistent_returns_404(client, super_jwt):
+def test_delete_inexistent_returns_403(client, super_jwt):
     r = client.delete(
         "/memories/00000000-0000-0000-0000-000000000000",
         headers=auth(super_jwt),
     )
-    assert r.status_code == 404
+    assert r.status_code == 403
 
 
 # ---------------------------------------------------------------------------

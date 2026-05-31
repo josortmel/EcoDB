@@ -3,7 +3,7 @@
 ## Backups
 
 ```bash
-# Backup manual (default: container ecodb-postgres-test, DB ecodb)
+# Backup manual (default: container ecodb-postgres, DB ecodb)
 bash scripts/backup.sh
 
 # Override via env vars

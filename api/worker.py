@@ -438,8 +438,37 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Recovery loop
+# Recovery helpers
 # ---------------------------------------------------------------------------
+
+async def recover_stuck_documents(pool: asyncpg.Pool, stuck_timeout_minutes: int = 30) -> int:
+    """Reset documents stuck in 'processing' for longer than timeout.
+
+    Runs at worker startup to recover from process crashes.
+    """
+    async with pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE documents
+            SET status = 'queued',
+                processing_started_at = NULL,
+                retry_count = retry_count + 1
+            WHERE status = 'processing'
+              AND processing_started_at < now() - ($1 || ' minutes')::interval
+              AND retry_count < $2
+        """, str(stuck_timeout_minutes), MAX_RETRIES)
+        count = int(result.split()[-1]) if result else 0
+        if count > 0:
+            log.info("Recovered %d stuck documents (processing > %d min)", count, stuck_timeout_minutes)
+        await conn.execute("""
+            UPDATE documents
+            SET status = 'failed',
+                processing_metrics = jsonb_build_object('error', 'WorkerCrash', 'error_detail', 'stuck in processing after worker restart')
+            WHERE status = 'processing'
+              AND processing_started_at < now() - ($1 || ' minutes')::interval
+              AND retry_count >= $2
+        """, str(stuck_timeout_minutes), MAX_RETRIES)
+        return count
+
 
 async def recovery_loop(pool: asyncpg.Pool) -> None:
     """Reset stale 'processing' documents back to 'queued'."""
@@ -472,6 +501,7 @@ async def main() -> None:
     log.info("Worker starting. DATABASE_URL=%s...", DATABASE_URL[:30])
 
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=5)
+    await recover_stuck_documents(pool)
     _recovery_task = asyncio.create_task(recovery_loop(pool))
 
     async def _governance_loop():

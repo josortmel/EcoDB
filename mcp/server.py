@@ -43,6 +43,7 @@ from urllib.parse import quote, urlparse
 import httpx
 
 _URL_SCHEME_RE = _re.compile(r'^(https?|ftp|file|rtsp|rtmp)://', _re.IGNORECASE)
+_UUID_RE = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
 from mcp.server.fastmcp import FastMCP, Image
 
 
@@ -181,7 +182,7 @@ if _parsed_api_url.scheme == "http" and _parsed_api_url.hostname not in _INTERNA
     )
 if _parsed_api_url.scheme not in ("http", "https"):
     raise RuntimeError(
-        f"ECODB_API_URL scheme debe ser http o https, got: {_parsed_api_url.scheme!r}"
+        f"ECODB_API_URL scheme must be http or https, got: {_parsed_api_url.scheme!r}"
     )
 
 
@@ -489,7 +490,11 @@ def search(
     from pathlib import Path as _Path
 
     if query_text is None and query_image is None:
-        return [TextContent(type="text", text=json.dumps({"error": "al menos query_text o query_image es obligatorio"}, ensure_ascii=False))]
+        return [TextContent(type="text", text=json.dumps({"error": "at least one of query_text or query_image is required"}, ensure_ascii=False))]
+    if limit < 1 or limit > 100:
+        return [TextContent(type="text", text=json.dumps({"error": "limit must be between 1 and 100"}, ensure_ascii=False))]
+    if deep_factor < 1 or deep_factor > 10:
+        return [TextContent(type="text", text=json.dumps({"error": "deep_factor must be between 1 and 10"}, ensure_ascii=False))]
     payload: dict = {"limit": limit, "expand_scope": expand_scope, "modality_filter": modality_filter}
     if query_text is not None:
         payload["query_text"] = query_text
@@ -632,7 +637,7 @@ def search_recent(
     if fecha_hasta is not None:
         params["fecha_hasta"] = fecha_hasta
     if tags is not None:
-        params["tag"] = tags
+        params["tags"] = tags
     try:
         data = _api_call("GET", "/memories/recent", params=params)
     except RuntimeError as e:
@@ -987,7 +992,7 @@ def search_nodes(query: str, limit: int = 20) -> dict:
     del nodo. Devuelve ranking por similitud trigrama.
     """
     if len(query.strip()) < 3:
-        return _err(RuntimeError("query debe tener al menos 3 caracteres"))
+        return _err(RuntimeError("query must be at least 3 characters"))
     limit = max(1, min(int(limit), 100))
     params = {"q": query, "limit": limit}
     try:
@@ -1210,8 +1215,10 @@ def document_status(document_id: str) -> dict:
     Args:
       document_id: UUID del documento.
     """
+    if not _UUID_RE.match(document_id):
+        return _err(RuntimeError("document_id must be a valid UUID"))
     try:
-        data = _api_call("GET", f"/documents/{quote(str(document_id))}")
+        data = _api_call("GET", f"/documents/{quote(str(document_id), safe='')}")
         return _ok({
             "document_id": str(data.get("id")),
             "status": data.get("status"),
@@ -1273,9 +1280,11 @@ def search_in_document(
       query_text: texto de busqueda.
       limit: max chunks (1-50, default 5).
     """
+    if not _UUID_RE.match(document_id):
+        return _err(RuntimeError("document_id must be a valid UUID"))
     limit = min(max(1, limit), 50)
     try:
-        data = _api_call("POST", f"/search/document/{quote(str(document_id))}",
+        data = _api_call("POST", f"/search/document/{quote(str(document_id), safe='')}",
                          json={"query_text": query_text, "limit": limit})
         return _ok(data)
     except RuntimeError as e:
@@ -1300,9 +1309,11 @@ def read_document(
 
     Returns: {content, chunks_returned, total_chunks, truncated}
     """
+    if not _UUID_RE.match(document_id):
+        return _err(RuntimeError("document_id must be a valid UUID"))
     limit = min(max(1, limit), 200)
     try:
-        data = _api_call("GET", f"/documents/{quote(str(document_id))}/chunks",
+        data = _api_call("GET", f"/documents/{quote(str(document_id), safe='')}/chunks",
                          params={"start": start_chunk, "limit": limit})
         chunks = data.get("chunks", [])
         content = "\n\n".join(c.get("content", "") for c in chunks)
@@ -1327,8 +1338,13 @@ def validate_link(memory_id: str, document_id: str) -> dict:
       memory_id: UUID de la memoria.
       document_id: UUID del documento.
     """
-    resp = _api_call("PUT", f"/memories/{quote(str(memory_id))}/links/{quote(str(document_id))}/validate")
-    return resp
+    if not _UUID_RE.match(memory_id) or not _UUID_RE.match(document_id):
+        return _err(RuntimeError("memory_id and document_id must be valid UUIDs"))
+    try:
+        resp = _api_call("PUT", f"/memories/{quote(str(memory_id), safe='')}/links/{quote(str(document_id), safe='')}/validate")
+        return _ok(resp)
+    except RuntimeError as e:
+        return _err(e)
 
 
 @mcp.tool()
@@ -1404,10 +1420,12 @@ def classify_document(document_id: str, trust_tier: int) -> dict:
       document_id: UUID del documento.
       trust_tier: Nivel 0-3.
     """
+    if not _UUID_RE.match(document_id):
+        return _err(RuntimeError("document_id must be a valid UUID"))
     if trust_tier not in (0, 1, 2, 3):
         return _err(ValueError("trust_tier must be 0-3"))
     try:
-        resp = _api_call("PUT", f"/admin/documents/{quote(str(document_id))}/trust-tier",
+        resp = _api_call("PUT", f"/admin/documents/{quote(str(document_id), safe='')}/trust-tier",
                          json={"trust_tier": trust_tier})
         return _ok(resp)
     except RuntimeError as e:
@@ -1443,8 +1461,10 @@ def reindex_document(document_id: str) -> dict:
     Args:
       document_id: UUID del documento.
     """
+    if not _UUID_RE.match(document_id):
+        return _err(RuntimeError("document_id must be a valid UUID"))
     try:
-        data = _api_call("PUT", f"/documents/{quote(str(document_id))}/reindex")
+        data = _api_call("PUT", f"/documents/{quote(str(document_id), safe='')}/reindex")
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
@@ -1460,8 +1480,10 @@ def unlink_document(document_id: str) -> dict:
     Args:
       document_id: UUID del documento.
     """
+    if not _UUID_RE.match(document_id):
+        return _err(RuntimeError("document_id must be a valid UUID"))
     try:
-        _api_call("DELETE", f"/documents/{quote(str(document_id))}")
+        _api_call("DELETE", f"/documents/{quote(str(document_id), safe='')}")
         return _ok({"status": "deleted", "document_id": document_id})
     except RuntimeError as e:
         return _err(e)

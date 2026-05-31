@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.8.5"><img src="https://img.shields.io/badge/release-v0.8.5-orange" alt="Release"></a>
+  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.8.6"><img src="https://img.shields.io/badge/release-v0.8.6-orange" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
-  <img src="https://img.shields.io/badge/MCP-22%2B%20tools-0d9488" alt="MCP Tools">
+  <img src="https://img.shields.io/badge/MCP-32%20tools-0d9488" alt="MCP Tools">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
 </p>
 
@@ -101,7 +101,7 @@ We also maintain a harder internal benchmark against EcoDB's production corpus: 
 **Two interfaces, same data:**
 
 - **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
-- **MCP Server**: 22+ tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
+- **MCP Server**: 32 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
 
 **Six Docker services:**
 
@@ -165,7 +165,7 @@ Pipeline: **parse → chunk (960 tokens) → NER (GLiNER) → embed (Jina v4) �
 
 Raw Claude Code sessions (JSON with speaker/text turns) are split into **5-turn sliding windows with 1-turn overlap** before embedding. Each window becomes one memory tagged with session ID and chunk index. On retrieval, chunks are deduplicated back to session level.
 
-In an isolated experiment on the same LoCoMo benchmark, this single ingestion change took Recall@5 from **0.769 to 0.922 (+19.9%)** without any changes to the GAMR pipeline. The overall system score (0.77 R@5 in the Benchmarks table below) reflects the full pipeline with all content types, not just sessions. For conversational data, ingestion granularity matters more than ranking sophistication.
+In an isolated experiment on the same LoCoMo benchmark, this single ingestion change took Recall@5 from **0.769 to 0.922 (+19.9%)** without any changes to the GAMR pipeline. The benchmarks above reflect this ingestion strategy applied across the full pipeline. For conversational data, ingestion granularity matters more than ranking sophistication.
 
 ## Governance
 
@@ -236,12 +236,25 @@ docker compose --profile with-llm up --build -d          # local LLM for classif
 
 Connect any MCP-compatible client:
 
+**SSE transport** (default):
 ```json
 {
   "mcpServers": {
     "ecodb": {
       "type": "sse",
       "url": "http://localhost:8091/sse"
+    }
+  }
+}
+```
+
+**stdio transport** (subprocess):
+```json
+{
+  "mcpServers": {
+    "ecodb": {
+      "command": "docker",
+      "args": ["exec", "-i", "ecodb-mcp", "python", "server.py", "--transport", "stdio"]
     }
   }
 }
@@ -285,7 +298,7 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 
 | Version | Status | What it adds |
 |---------|--------|-------------|
-| **v0.8.5** | **Current** | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. |
+| **v0.8.6** | **Current** | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. Security hardening + infrastructure consolidation. |
 | **v0.9** | Next | Multi-tenant. Multiple users on separate machines connected to one EcoDB instance. OAuth. Per-org API keys. |
 | **v1.0** | Planned | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
 

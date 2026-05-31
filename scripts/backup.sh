@@ -3,11 +3,11 @@
 # Ejecuta pg_dump dentro del container postgres y copia el dump al host.
 #
 # Uso:
-#   ./backup.sh                              # defaults (ecodb-postgres-test)
+#   ./backup.sh                              # defaults (ecodb-postgres)
 #   ECODB_CONTAINER=foo ./backup.sh         # override via env vars
 #
 # Variables:
-#   ECODB_CONTAINER  (default: ecodb-postgres-test)
+#   ECODB_CONTAINER  (default: ecodb-postgres)
 #   ECODB_DB         (default: ecodb)
 #   ECODB_USER       (default: ecodb)
 #   ECODB_BACKUP_DIR (default: <repo>/backups)
@@ -22,7 +22,7 @@ set -euo pipefail
 # del container Linux. Desactivamos la conversion para todos los docker exec.
 export MSYS_NO_PATHCONV=1
 
-CONTAINER="${ECODB_CONTAINER:-ecodb-postgres-test}"
+CONTAINER="${ECODB_CONTAINER:-ecodb-postgres}"
 DB="${ECODB_DB:-ecodb}"
 PG_USER="${ECODB_USER:-ecodb}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

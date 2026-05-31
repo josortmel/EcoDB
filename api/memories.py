@@ -917,9 +917,9 @@ async def delete_memory(
             memory_id,
         )
         if row is None:
-            raise HTTPException(404, "memory not found")
+            raise HTTPException(403, "no access to this memory")
         if not await can_write_memory(conn, actor, dict(row)):
-            raise HTTPException(403, "no delete access to this memory")
+            raise HTTPException(403, "no access to this memory")
         # Soft delete: copiar a trash + DELETE de memories
         async with conn.transaction():
             original = dict(row)
@@ -956,10 +956,10 @@ async def validate_link(
     async with pool.acquire() as conn:
         mem = await conn.fetchrow("SELECT project_id, user_id FROM memories WHERE id = $1", memory_id)
         if mem is None:
-            raise HTTPException(404, "Memory not found")
+            raise HTTPException(403, "no access to this memory")
         if not actor.get("is_super"):
             if mem["user_id"] != int(actor["sub"]):
-                raise HTTPException(403, "Not authorized — only memory owner or super can modify")
+                raise HTTPException(403, "no access to this memory")
         result = await conn.execute(
             """
             UPDATE memory_document_links
@@ -987,10 +987,10 @@ async def unarchive_memory(
     async with pool.acquire() as conn:
         mem = await conn.fetchrow("SELECT project_id, user_id FROM memories WHERE id = $1", memory_id)
         if mem is None:
-            raise HTTPException(404, "Memory not found")
+            raise HTTPException(403, "no access to this memory")
         if not actor.get("is_super"):
             if mem["user_id"] != int(actor["sub"]):
-                raise HTTPException(403, "Not authorized — only memory owner or super can modify")
+                raise HTTPException(403, "no access to this memory")
         result = await conn.execute(
             "UPDATE memories SET staleness = 'active', updated_at = now() WHERE id = $1 AND staleness = 'archived'",
             memory_id,

@@ -405,7 +405,7 @@ async def expand_by_graph(
                         hop_map[csid] = hop_depth
             except Exception as _age_err:
                 logging.getLogger("ecodb.gamr").warning("expand_by_graph: AGE query failed hop=%d: %r", hop_depth, _age_err)
-                break
+                continue
 
         # Incluir entidades originales con hop=0
         for eid in all_entity_sql_ids:
@@ -415,9 +415,7 @@ async def expand_by_graph(
         if len(expanded_entity_ids) > MAX_EXPANDED_ENTITIES:
             expanded_entity_ids = set(sorted(expanded_entity_ids)[:MAX_EXPANDED_ENTITIES])
         all_relevant_entities = list(all_entity_sql_ids | expanded_entity_ids)
-        # WARNING: discovered memory IDs NO tienen check de permisos.
-        # Si futura integración devuelve estos IDs al caller, DEBE añadir
-        # permission check via check_visibility ANTES. Bypass latente (L1-GS7).
+        # GC1 aplica check_visibility al fetchear estas IDs — bypass resuelto en v0.8.6.
         graph_memory_rows = await conn.fetch("""
             SELECT mel.memory_id, mel.entity_node_id
             FROM memory_entity_links mel
@@ -1218,11 +1216,12 @@ async def search_memories(
                     FROM memories m
                     LEFT JOIN agents a ON a.id = m.agent_id
                     WHERE m.id = ANY($1::uuid[])
-                      AND m.project_id = ANY($2::int[])
-                      AND (m.visibility = 'public' OR m.user_id = $3)
+                      AND check_visibility(
+                          m.user_id, m.visibility::text, m.workspace_id, m.project_id,
+                          $2, $3::bool, $4::bool, $5, $6::int[], $7::bool
+                      )
                 """, [uuid.UUID(mid) for mid in discovered_ids],
-                     target_projects if target_projects else [],
-                     user_id_actor)
+                     user_id_actor, is_super, is_ceo, org_id, lead_ws, body.expand_scope)
                 for r in disc_rows:
                     mid = str(r["id"])
                     g_score = graph_scores.get(mid, 0.0)
