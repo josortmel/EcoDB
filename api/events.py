@@ -26,12 +26,22 @@ router = APIRouter(prefix="/events", tags=["events"])
 _event_queues: list[asyncio.Queue] = []
 
 
-async def broadcast_event(event_type: str, data: dict) -> None:
-    """Emite un evento a todos los clientes SSE conectados."""
+async def resolve_org_id_from_project(conn, project_id: int) -> int | None:
+    """Resolve organization_id from project via workspace. conn must be asyncpg.Connection, NOT Pool."""
+    row = await conn.fetchrow(
+        "SELECT w.organization_id FROM projects p JOIN workspaces w ON p.workspace_id = w.id WHERE p.id = $1",
+        project_id,
+    )
+    return row["organization_id"] if row else None
+
+
+async def broadcast_event(event_type: str, data: dict, org_id: int | None = None) -> None:
+    """Broadcast SSE event. org_id=None → super-only. org_id=N → same org + super."""
+    event_type = event_type.replace("\n", "").replace("\r", "")
     payload = json.dumps(data)
     for q in _event_queues:
         try:
-            q.put_nowait({"event": event_type, "data": payload})
+            q.put_nowait({"event": event_type, "data": payload, "org_id": org_id})
         except asyncio.QueueFull:
             pass
 
@@ -78,7 +88,7 @@ async def post_session_event(
             json.dumps({"event": body.event}),
             actor.get("organization_id"),
         )
-    await broadcast_event(f"agent_{body.event}", {"agent_identifier": body.agent_identifier})
+    await broadcast_event(f"agent_{body.event}", {"agent_identifier": body.agent_identifier}, org_id=actor.get("organization_id"))
     return {
         "ok": True,
         "agent_identifier": row["identifier"],
@@ -92,7 +102,10 @@ async def event_stream(
     request: Request,
     actor: dict = Depends(get_current_user),
 ):
-    """SSE stream — emits real-time events to the dashboard."""
+    """SSE stream — emits real-time events to the dashboard. Org-filtered."""
+    client_org_id: int | None = actor.get("organization_id")
+    client_is_super: bool = actor.get("is_super", False)
+
     async def generate():
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         _event_queues.append(queue)
@@ -102,6 +115,12 @@ async def event_stream(
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event_org_id = event.get("org_id")
+                    if event_org_id is not None:
+                        if not client_is_super and client_org_id != event_org_id:
+                            continue
+                    elif not client_is_super:
+                        continue
                     yield f"event: {event['event']}\ndata: {event['data']}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: keepalive\ndata: \n\n"
@@ -118,6 +137,7 @@ async def event_stream(
 class BroadcastBody(BaseModel):
     event_type: str = Field(..., min_length=1, max_length=128)
     data: dict = Field(default_factory=dict)
+    org_id: int | None = None
 
 
 @router.post("/broadcast", status_code=204, include_in_schema=False)
@@ -148,4 +168,4 @@ async def broadcast_internal(
     if not authorized:
         raise HTTPException(403, "internal broadcast requires X-Internal-Secret or Bearer token")
 
-    await broadcast_event(body.event_type, body.data)
+    await broadcast_event(body.event_type, body.data, org_id=body.org_id)

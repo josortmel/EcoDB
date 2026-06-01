@@ -24,6 +24,7 @@ async def run_governance_cycle(pool) -> None:
         reconcile_merged_entity_links,
         detect_tensions,
         update_corpus_vocabulary,
+        update_graph_clusters,
     ):
         try:
             await task_fn(pool)
@@ -308,5 +309,88 @@ async def detect_tensions(pool) -> None:
         count = tensions[0]["tension_count"] if tensions else 0
         if count > 0:
             from events import broadcast_event
-            await broadcast_event("tension_detected", {"count": count})
+            await broadcast_event("tension_detected", {"count": count}, org_id=None)
             log.info("Tensions detected: %d", count)
+
+
+async def update_graph_clusters(pool) -> None:
+    """Compute Louvain community detection on the graph and write to graph_clusters.
+
+    Reads triples → builds networkx graph → runs Louvain → upserts results.
+    Timeout: 120s. Skips if graph has <10 nodes.
+    """
+    import asyncio
+    import os
+    min_degree = int(os.getenv("LOUVAIN_MIN_DEGREE", "2"))
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name FROM nodes WHERE status = 'active'"
+        )
+        if len(rows) < 10:
+            log.info("update_graph_clusters: skipped, only %d active nodes", len(rows))
+            return
+
+        if min_degree > 1:
+            triples = await conn.fetch("""
+                WITH active_edges AS (
+                    SELECT t.subject_id, t.object_id
+                    FROM triples t
+                    JOIN nodes n1 ON t.subject_id = n1.id AND n1.status = 'active'
+                    JOIN nodes n2 ON t.object_id = n2.id AND n2.status = 'active'
+                ),
+                node_degrees AS (
+                    SELECT node_id, count(*) AS degree FROM (
+                        SELECT subject_id AS node_id FROM active_edges
+                        UNION ALL
+                        SELECT object_id AS node_id FROM active_edges
+                    ) d GROUP BY node_id HAVING count(*) >= $1
+                )
+                SELECT ae.subject_id, ae.object_id
+                FROM active_edges ae
+                WHERE ae.subject_id IN (SELECT node_id FROM node_degrees)
+                  AND ae.object_id IN (SELECT node_id FROM node_degrees)
+            """, min_degree)
+        else:
+            triples = await conn.fetch("""
+                SELECT t.subject_id, t.object_id
+                FROM triples t
+                JOIN nodes n1 ON t.subject_id = n1.id AND n1.status = 'active'
+                JOIN nodes n2 ON t.object_id = n2.id AND n2.status = 'active'
+            """)
+
+    import networkx as nx
+    from networkx.algorithms.community import louvain_communities
+
+    G = nx.Graph()
+    for t in triples:
+        G.add_edge(t["subject_id"], t["object_id"])
+
+    try:
+        communities = await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(
+                None, lambda: louvain_communities(G, seed=42)
+            ),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        log.warning("update_graph_clusters: Louvain timed out after 120s")
+        return
+
+    cluster_rows = []
+    for cluster_id, members in enumerate(communities):
+        for node_id in members:
+            cluster_rows.append((node_id, cluster_id))
+
+    if not cluster_rows:
+        log.warning("update_graph_clusters: 0 clusters computed — skipping write to preserve existing data")
+        return
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM graph_clusters")
+            await conn.executemany(
+                "INSERT INTO graph_clusters (node_id, cluster_id, computed_at) VALUES ($1, $2, now())",
+                cluster_rows,
+            )
+    log.info("update_graph_clusters: %d nodes → %d clusters", len(cluster_rows), len(communities))

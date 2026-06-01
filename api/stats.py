@@ -310,6 +310,90 @@ async def stats_system(actor: dict = Depends(get_current_user)) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# GET /stats/timeline
+# ---------------------------------------------------------------------------
+
+@router.get("/timeline")
+async def stats_timeline(
+    period: int = Query(30, ge=1, le=365, description="Days of history"),
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    is_super = bool(actor.get("is_super"))
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        if is_super:
+            mem_filter = ""
+            doc_filter = ""
+            search_filter = ""
+            params: list = [period]
+        else:
+            visible = await visible_project_ids(conn, actor)
+            if not visible:
+                return {"period_days": period, "timeline": []}
+            visible_list = list(visible)
+            mem_filter = "AND project_id = ANY($2::int[])"
+            doc_filter = "AND project_id = ANY($2::int[])"
+            search_filter = "AND project_ids && $2::int[]"
+            params = [period, visible_list]
+
+        rows = await conn.fetch(f"""
+            WITH gs AS (
+                SELECT gs::date AS day
+                FROM generate_series(
+                    (now() - (interval '1 day' * $1))::date,
+                    now()::date,
+                    '1 day'::interval
+                ) gs
+            ),
+            mem AS (
+                SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+                FROM memories
+                WHERE created_at >= now() - interval '1 day' * $1
+                AND staleness != 'archived'
+                {mem_filter}
+                GROUP BY DATE(created_at)
+            ),
+            docs AS (
+                SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+                FROM documents
+                WHERE created_at >= now() - interval '1 day' * $1
+                AND status != 'deleted'
+                {doc_filter}
+                GROUP BY DATE(created_at)
+            ),
+            searches AS (
+                SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+                FROM search_log
+                WHERE created_at >= now() - interval '1 day' * $1
+                {search_filter}
+                GROUP BY DATE(created_at)
+            )
+            SELECT
+                gs.day,
+                COALESCE(mem.cnt, 0) AS memories,
+                COALESCE(docs.cnt, 0) AS documents,
+                COALESCE(searches.cnt, 0) AS searches
+            FROM gs
+            LEFT JOIN mem ON mem.day = gs.day
+            LEFT JOIN docs ON docs.day = gs.day
+            LEFT JOIN searches ON searches.day = gs.day
+            ORDER BY gs.day
+        """, *params)
+
+    timeline = [
+        {
+            "date": str(r["day"]),
+            "memories": r["memories"],
+            "documents": r["documents"],
+            "searches": r["searches"],
+        }
+        for r in rows
+    ]
+    return {"period_days": period, "timeline": timeline}
+
+
+# ---------------------------------------------------------------------------
 # Task 5.17 — Observabilidad cognitiva
 # ---------------------------------------------------------------------------
 

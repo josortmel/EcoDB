@@ -106,10 +106,8 @@ class TeamMemberLink(BaseModel):
 
 
 class TeamResourceLink(BaseModel):
-    """Response for POST/DELETE /teams/{id}/resources.
     team_id: int
     project_id: int
-    """
 
 
 class TeamResponse(BaseModel):

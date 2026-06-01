@@ -367,12 +367,15 @@ async def create_memory(
             )
 
         # SSE broadcast BEFORE GLiNER (memory already committed, no delay)
-        from events import broadcast_event
+        from events import broadcast_event, resolve_org_id_from_project
+        _broadcast_org = await resolve_org_id_from_project(conn, body.project_id)
+        if _broadcast_org is None:
+            _broadcast_org = actor.get("organization_id")
         await broadcast_event("memory_created", {
             "memory_id": str(row["id"]),
             "type": body.type,
             "agent_identifier": body.agent_identifier or "",
-        })
+        }, org_id=_broadcast_org)
 
         _t_insert = _time.time()
         _perf_log.info("create_memory phase=insert %.2fs", _t_insert - _t_embed)
@@ -1011,6 +1014,84 @@ async def unarchive_memory(
         if result == "UPDATE 0":
             raise HTTPException(404, "Memory not archived")
     return {"status": "ok", "memory_id": str(memory_id), "staleness": "active"}
+
+
+# ---------------------------------------------------------------------------
+# B5 — PUT /memories/{id}/staleness
+# ---------------------------------------------------------------------------
+
+class StalenessUpdate(BaseModel):
+    staleness: Literal["active", "stale", "dormant", "archived"]
+
+
+@router.put("/{memory_id}/staleness")
+async def update_staleness(
+    memory_id: UUID,
+    body: StalenessUpdate,
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT user_id, project_id, workspace_id, visibility, staleness FROM memories WHERE id = $1 AND staleness != 'archived'",
+            memory_id,
+        )
+        if row is None or not await can_write_memory(conn, actor, dict(row)):
+            raise HTTPException(403, "no access to this memory")
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE memories SET staleness = $1, updated_at = now() WHERE id = $2",
+                body.staleness, memory_id,
+            )
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'update_staleness', 'memory', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(memory_id),
+                json.dumps({"staleness": body.staleness}),
+                actor.get("organization_id"),
+            )
+    return {"memory_id": str(memory_id), "staleness": body.staleness}
+
+
+# ---------------------------------------------------------------------------
+# B6 — Preview (GLiNER dry-run, no persist)
+# ---------------------------------------------------------------------------
+
+class PreviewRequest(BaseModel):
+    content: str = Field(..., min_length=3, max_length=16000)
+
+    @field_validator("content")
+    @classmethod
+    def _v_content(cls, v: str) -> str:
+        return _no_null_bytes(v, "content")
+
+
+@router.post("/preview")
+async def preview_memory(
+    body: PreviewRequest,
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    """Dry-run GLiNER entity extraction without persisting. For Templates screen."""
+    import logging as _logging
+    from gliner_service import extract_entities
+    try:
+        entities = await extract_entities(body.content)
+    except Exception as exc:
+        _logging.getLogger("ecodb.preview").warning("GLiNER preview failed: %r", exc)
+        entities = []
+    unique = list({e["text"]: e for e in (entities or [])}.values())
+    suggested_triples = []
+    for e in unique:
+        suggested_triples.append({
+            "subject": e["text"],
+            "predicate": "is_a",
+            "object": e.get("label", "unknown"),
+        })
+    return {
+        "entities": unique,
+        "entity_count": len(unique),
+        "suggested_triples": suggested_triples,
+    }
 
 
 # ---------------------------------------------------------------------------

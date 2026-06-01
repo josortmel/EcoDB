@@ -445,7 +445,7 @@ async def neighbors(
         # OBS-2 (verificador L1): si el nodo no existe en SQL, 404 explicito
         # en lugar de devolver lista vacia (que confunde "nodo inexistente"
         # con "nodo aislado sin vecinos").
-        node_exists = await conn.fetchval("SELECT 1 FROM nodes WHERE name = $1", node_name)
+        node_exists = await conn.fetchval("SELECT 1 FROM nodes WHERE lower(name) = lower($1)", node_name)
         if not node_exists:
             raise HTTPException(404, "node not found")
         params = json.dumps({"name": node_name})
@@ -720,11 +720,11 @@ async def get_subgraph(
     pool = await get_pool()
     async with pool.acquire() as conn:
         center_row = await conn.fetchrow(
-            "SELECT id, name, type::text FROM nodes WHERE name = $1 LIMIT 1", center
+            "SELECT id, name, type::text FROM nodes WHERE lower(name) = lower($1) LIMIT 1", center
         )
         if center_row is None:
             suggestion = await conn.fetchval(
-                "SELECT name FROM nodes WHERE lower(name) = lower($1) LIMIT 1", center
+                "SELECT name FROM nodes WHERE name % $1 ORDER BY similarity(name, $1) DESC LIMIT 1", center
             )
             if suggestion:
                 raise HTTPException(404, f"node '{center}' not found. Did you mean '{suggestion}'?")
@@ -793,6 +793,35 @@ async def get_subgraph(
             if key not in seen_edges:
                 seen_edges.add(key)
                 edges.append({"source": src_id, "target": tgt_id, "predicate": pred})
+
+    if len(nodes) > 400:
+        top_nodes = sorted(nodes, key=lambda n: n["degree"], reverse=True)[:200]
+        top_ids = {n["id"] for n in top_nodes}
+        cluster_info = {}
+        async with pool.acquire() as conn:
+            cluster_rows = await conn.fetch(
+                "SELECT node_id, cluster_id FROM graph_clusters WHERE node_id = ANY($1::int[])",
+                [n["id"] for n in nodes],
+            )
+        cr_map = {cr["node_id"]: cr["cluster_id"] for cr in cluster_rows}
+        for cr in cluster_rows:
+            cid = cr["cluster_id"]
+            if cr["node_id"] not in top_ids:
+                continue
+            if cid not in cluster_info:
+                cluster_info[cid] = {"cluster_id": cid, "node_count": 0, "sample_nodes": []}
+            cluster_info[cid]["node_count"] += 1
+            if len(cluster_info[cid]["sample_nodes"]) < 3:
+                cluster_info[cid]["sample_nodes"].append(cr["node_id"])
+        for n in top_nodes:
+            n["cluster_id"] = cr_map.get(n["id"])
+        filtered_edges = [e for e in edges if e["source"] in top_ids and e["target"] in top_ids]
+        return {
+            "center": center, "depth": depth,
+            "nodes": top_nodes, "edges": filtered_edges,
+            "truncated": True, "total_nodes": len(nodes), "shown_nodes": len(top_nodes),
+            "clusters": list(cluster_info.values()),
+        }
 
     return {"center": center, "depth": depth, "nodes": nodes, "edges": edges}
 
@@ -865,6 +894,7 @@ async def merge_entities(
                 "UPDATE nodes SET status = 'merged', merged_into = $1 WHERE id = $2",
                 canonical_id, source_id,
             )
+            await conn.execute("DELETE FROM graph_clusters WHERE node_id = $1", source_id)
             log_row = await conn.fetchrow(
                 """
                 INSERT INTO entity_merge_log
@@ -887,6 +917,7 @@ async def undo_merge(source_node_id: int, pool) -> dict:
 
     SELECT FOR UPDATE inside transaction prevents concurrent undo double-execution.
     Raises ValueError if none found.
+    Note: graph_clusters row is NOT restored — next Louvain cycle (hourly) re-clusters.
     """
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -916,6 +947,40 @@ async def undo_merge(source_node_id: int, pool) -> dict:
         "merge_log_id": log_row["id"],
         "source_node_id": source_node_id,
         "status": "reverted",
+    }
+
+
+@router.get("/clusters")
+async def get_graph_clusters(
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0, le=50000),
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT gc.node_id, n.name, gc.cluster_id, gc.computed_at
+            FROM graph_clusters gc
+            JOIN nodes n ON n.id = gc.node_id
+            WHERE n.status = 'active'
+            ORDER BY gc.cluster_id, n.name
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+    grouped: dict[int, dict] = {}
+    last_computed = None
+    for r in rows:
+        cid = r["cluster_id"]
+        if cid not in grouped:
+            grouped[cid] = {"cluster_id": cid, "node_count": 0, "nodes": []}
+        grouped[cid]["node_count"] += 1
+        grouped[cid]["nodes"].append({"node_id": r["node_id"], "name": r["name"]})
+        if last_computed is None or r["computed_at"] > last_computed:
+            last_computed = r["computed_at"]
+    return {
+        "clusters": list(grouped.values()),
+        "cluster_count": len(grouped),
+        "total_nodes": len(rows),
+        "last_computed": last_computed.isoformat() if last_computed else None,
     }
 
 

@@ -28,7 +28,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from auth import get_current_user, require_super
+from auth import get_current_user, require_super, require_super_or_ceo
 from db import get_pool
 from permissions import resolve_entity_org_ids, user_can_admin_operation
 from entity_normalization import is_valid_entity_type, normalize_name
@@ -106,7 +106,144 @@ class RedistributeResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Endpoint
+# Attention Inbox (B2+B3 — dashboard backend)
+# ---------------------------------------------------------------------------
+
+_INBOX_CLASSES = frozenset({"stale_memories", "unconfirmed_relations", "pending_alias_candidates", "low_trust_documents"})
+
+
+async def _inbox_query(conn, decision_class: str, actor: dict, limit: int = 0, offset: int = 0, count_only: bool = False):
+    """Org-scoped inbox queries. Super sees all; CEO sees own org only."""
+    is_super = actor.get("is_super")
+    actor_org = actor.get("organization_id")
+
+    _org_sub = "(SELECT p.id FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE w.organization_id = %s)"
+
+    if is_super:
+        org_mem_c = ""
+        org_mem_d = ""
+        org_doc_c = ""
+        org_doc_d = ""
+        org_alias_c = ""
+        org_alias_d = ""
+    else:
+        org_mem_c = f"AND m.project_id IN {_org_sub % '$1'}"
+        org_mem_d = f"AND m.project_id IN {_org_sub % '$3'}"
+        org_doc_c = f"AND d.project_id IN {_org_sub % '$1'}"
+        org_doc_d = f"AND d.project_id IN {_org_sub % '$3'}"
+        org_alias_c = f"""AND eac.id IN (
+            SELECT eac2.id FROM entity_alias_candidates eac2
+            JOIN entity_links el ON el.entity = eac2.source_name
+            JOIN memories mm ON mm.id = el.memory_id
+            JOIN projects pp ON pp.id = mm.project_id
+            JOIN workspaces ww ON ww.id = pp.workspace_id
+            WHERE ww.organization_id = $1)"""
+        org_alias_d = f"""AND eac.id IN (
+            SELECT eac2.id FROM entity_alias_candidates eac2
+            JOIN entity_links el ON el.entity = eac2.source_name
+            JOIN memories mm ON mm.id = el.memory_id
+            JOIN projects pp ON pp.id = mm.project_id
+            JOIN workspaces ww ON ww.id = pp.workspace_id
+            WHERE ww.organization_id = $3)"""
+
+    queries = {
+        "stale_memories": {
+            "count": f"SELECT count(*) FROM memories m WHERE m.staleness IN ('stale', 'dormant') {org_mem_c}",
+            "detail": f"""
+                SELECT m.id, m.content, m.type::text, m.staleness, m.created_at, m.updated_at,
+                       a.identifier AS agent_identifier
+                FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
+                WHERE m.staleness IN ('stale', 'dormant') {org_mem_d}
+                ORDER BY m.updated_at ASC LIMIT $1 OFFSET $2""",
+        },
+        "unconfirmed_relations": {
+            "count": f"""SELECT count(*) FROM related_documents rd
+                JOIN documents d ON d.id = rd.source_id
+                WHERE rd.confirmed_by IS NULL {org_doc_c}""",
+            "detail": f"""
+                SELECT rd.source_id, rd.target_id, rd.similarity, rd.detected_at,
+                       ds.filename AS source_title, dt.filename AS target_title
+                FROM related_documents rd
+                JOIN documents ds ON ds.id = rd.source_id
+                JOIN documents dt ON dt.id = rd.target_id
+                WHERE rd.confirmed_by IS NULL
+                AND ds.project_id IN {_org_sub % '$3' if not is_super else '(SELECT id FROM projects)'}
+                AND dt.project_id IN {_org_sub % '$3' if not is_super else '(SELECT id FROM projects)'}
+                ORDER BY rd.similarity DESC LIMIT $1 OFFSET $2""",
+        },
+        "pending_alias_candidates": {
+            "count": f"SELECT count(*) FROM entity_alias_candidates eac WHERE eac.status = 'pending' {org_alias_c}",
+            "detail": f"""
+                SELECT eac.id, eac.source_name, n.name AS target_node_name,
+                       eac.confidence, eac.occurrences, eac.first_seen, eac.last_seen
+                FROM entity_alias_candidates eac
+                JOIN nodes n ON n.id = eac.target_node_id
+                WHERE eac.status = 'pending' {org_alias_d}
+                ORDER BY eac.occurrences DESC, eac.confidence DESC LIMIT $1 OFFSET $2""",
+        },
+        "low_trust_documents": {
+            "count": f"SELECT count(*) FROM documents d WHERE d.trust_tier = 0 AND d.status != 'deleted' {org_doc_c}",
+            "detail": f"""
+                SELECT d.id, d.filename, d.trust_tier, d.status,
+                       d.created_at, d.last_indexed
+                FROM documents d
+                WHERE d.trust_tier = 0 AND d.status != 'deleted' {org_doc_d}
+                ORDER BY d.created_at DESC LIMIT $1 OFFSET $2""",
+        },
+    }
+
+    q = queries[decision_class]
+    if count_only:
+        if is_super:
+            return await conn.fetchval(q["count"])
+        return await conn.fetchval(q["count"], actor_org)
+    if is_super:
+        total = await conn.fetchval(q["count"])
+        rows = await conn.fetch(q["detail"], limit, offset)
+    else:
+        total = await conn.fetchval(q["count"], actor_org)
+        rows = await conn.fetch(q["detail"], limit, offset, actor_org)
+    return total, rows
+
+
+@router.get("/attention-inbox/summary")
+async def attention_inbox_summary(
+    actor: dict = Depends(require_super_or_ceo),
+) -> dict:
+    """4 counts by decision class for Command Center dashboard. Org-scoped for CEO."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = {}
+        for cls in _INBOX_CLASSES:
+            result[cls] = await _inbox_query(conn, cls, actor, count_only=True)
+    return {"classes": result, "total": sum(result.values())}
+
+
+@router.get("/attention-inbox/details")
+async def attention_inbox_details(
+    decision_class: str = Query(..., description="One of: stale_memories, unconfirmed_relations, pending_alias_candidates, low_trust_documents"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    actor: dict = Depends(require_super_or_ceo),
+) -> dict:
+    """Paginated details for a single decision class. Org-scoped for CEO."""
+    if decision_class not in _INBOX_CLASSES:
+        raise HTTPException(400, f"invalid class, must be one of: {sorted(_INBOX_CLASSES)}")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total, rows = await _inbox_query(conn, decision_class, actor, limit=limit, offset=offset)
+    items = [dict(r) for r in rows]
+    for item in items:
+        for k, v in item.items():
+            if hasattr(v, 'isoformat'):
+                item[k] = v.isoformat()
+            elif isinstance(v, uuid.UUID):
+                item[k] = str(v)
+    return {"class": decision_class, "total": total, "items": items, "limit": limit, "offset": offset}
+
+
+# ---------------------------------------------------------------------------
+# Endpoint — redistribute
 # ---------------------------------------------------------------------------
 
 @router.post("/redistribute/memories", response_model=RedistributeResponse)

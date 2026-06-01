@@ -1,6 +1,7 @@
 """Rate limiting middleware — per-user sliding window."""
 from __future__ import annotations
 
+import os
 import time
 from collections import defaultdict
 
@@ -10,6 +11,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 import settings
 from settings import RATE_LIMIT_SEARCH as SEARCH_LIMIT, RATE_LIMIT_DEFAULT as DEFAULT_LIMIT, RATE_LIMIT_WINDOW as WINDOW
+
+RATE_LIMITS: dict[tuple[str, str], int] = {
+    ("POST", "/memories/preview"): int(os.getenv("RATE_LIMIT_PREVIEW", "10")),
+    ("POST", "/memories"): int(os.getenv("RATE_LIMIT_CREATE_MEMORY", "20")),
+}
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -34,11 +40,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 pass
 
         now = time.time()
-        key = f"{actor_id}:{request.url.path}"
+        key = f"{actor_id}:{request.method}:{request.url.path}"
 
         self.requests[key] = [t for t in self.requests[key] if now - t < WINDOW]
+        if not self.requests[key]:
+            del self.requests[key]
 
-        limit = SEARCH_LIMIT if "/search" in request.url.path else DEFAULT_LIMIT
+        method_path = (request.method, request.url.path)
+        if method_path in RATE_LIMITS:
+            limit = RATE_LIMITS[method_path]
+        elif "/search" in request.url.path:
+            limit = SEARCH_LIMIT
+        else:
+            limit = DEFAULT_LIMIT
 
         if len(self.requests[key]) >= limit:
             retry_after = int(self.requests[key][0] + WINDOW - now) + 1

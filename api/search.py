@@ -388,14 +388,15 @@ async def expand_by_graph(
         for hop_depth in (1, 2):
             params = json.dumps({"ids": entity_ids_list})
             try:
-                rows = await conn.fetch(f"""
+                await conn.execute("SET LOCAL statement_timeout = '4500'")
+                rows = await asyncio.wait_for(conn.fetch(f"""
                     SELECT * FROM cypher('ecodb_graph', $$
                         UNWIND $ids AS sid
                         MATCH (e:Entity {{sql_id: sid}})-[*{hop_depth}]-(connected:Entity)
                         WHERE connected.sql_id <> sid
                         RETURN DISTINCT connected.sql_id AS csid
                     $$, $1::agtype) AS (csid agtype)
-                """, params)
+                """, params), timeout=5.0)
                 for r in rows:
                     csid_raw = r["csid"]
                     csid = int(str(csid_raw).strip('"'))
@@ -403,6 +404,9 @@ async def expand_by_graph(
                         expanded_entity_ids.add(csid)
                     if csid not in hop_map:
                         hop_map[csid] = hop_depth
+            except asyncio.TimeoutError:
+                logging.getLogger("ecodb.gamr").warning("expand_by_graph: AGE query timed out hop=%d", hop_depth)
+                continue
             except Exception as _age_err:
                 logging.getLogger("ecodb.gamr").warning("expand_by_graph: AGE query failed hop=%d: %r", hop_depth, _age_err)
                 continue
@@ -800,6 +804,7 @@ class SearchResponse(BaseModel):
     duration_ms: float
     graph_context: list[dict] = Field(default_factory=list, description="Entidades del grafo usadas en expansion")
     contradictions: list[ContradictionPair] = Field(default_factory=list, description="Pares de memorias potencialmente contradictorias")
+    warnings: list[str] = Field(default_factory=list, description="Machine-parseable warnings about query behavior")
     audit_id: Optional[str] = Field(
         None,
         description="UUID del audit_log row si expand_scope=true (.",
@@ -910,6 +915,7 @@ async def search_memories(
                     duration_ms=round((time.time() - t0) * 1000, 2),
                     graph_context=[],
                     contradictions=[],
+                    warnings=[],
                     audit_id=audit_uuid_early,
                 )
 
@@ -1257,8 +1263,15 @@ async def search_memories(
                         trust_warnings=disc_warnings,
                     ))
 
+    # D6 guard: user_id filter excludes documents (documents have no individual author)
+    _include_docs = body.include_documents
+    _search_warnings: list[str] = []
+    if body.user_id is not None and _include_docs:
+        _include_docs = False
+        _search_warnings.append("user_id filter active: document chunks excluded (documents have no individual author)")
+
     # Task 4.10 — Document chunk search (opt-in)
-    if body.include_documents and body.max_document_results > 0:
+    if _include_docs and body.max_document_results > 0:
         async with pool.acquire() as conn:
             doc_params: list = [query_vec]
             doc_where: list[str] = ["dc.embedding IS NOT NULL", "d.status != 'deleted'"]
@@ -1347,16 +1360,17 @@ async def search_memories(
     contradictions = [ContradictionPair(**c) for c in contradictions_raw]
 
     from events import broadcast_event
+    _actor_org = actor.get("organization_id")
 
     if contradictions:
         await broadcast_event("contradiction_detected", {
             "count": len(contradictions),
-        })
+        }, org_id=_actor_org)
 
     await broadcast_event("search_completed", {
         "query_type": resolved_query_type,
         "results_count": len(results),
-    })
+    }, org_id=_actor_org)
 
     return SearchResponse(
         query=body.query_text or "(image query)",
@@ -1367,6 +1381,7 @@ async def search_memories(
         duration_ms=round((time.time() - t0) * 1000, 2),
         graph_context=graph_context,
         contradictions=contradictions,
+        warnings=_search_warnings,
         audit_id=audit_uuid,
     )
 

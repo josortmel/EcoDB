@@ -102,6 +102,6 @@ async def get_onboarding(
             }
             for a in active_agents
         ],
-        "contradictions": [],
+        "contradictions": None,  # stub — not implemented yet
         "last_activity": last_activity.isoformat() if last_activity else None,
     }

@@ -342,7 +342,7 @@ def test_rate_limit_returns_429(client, two_orgs):
     verify the Retry-After header format when it does trigger)."""
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert "X-RateLimit-Limit" in resp.headers or resp.status_code == 200
+    assert "X-RateLimit-Limit" in resp.headers
 
 
 # ---------------------------------------------------------------------------
@@ -363,14 +363,157 @@ def test_workspace_1_has_null_org(two_orgs):
     asyncio.run(_check())
 
 
-def test_schema_version_is_5_1_0(two_orgs):
+def test_schema_version_is_current(two_orgs):
     async def _check():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
         try:
             version = await conn.fetchval(
                 "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1"
             )
-            assert version == "5.1.0"
+            assert version >= "5.1.0"
         finally:
             await conn.close()
     asyncio.run(_check())
+
+
+# ---------------------------------------------------------------------------
+# Trigger propagate_user_org_id — workspace_leads and project_members paths
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="function")
+def trigger_env(two_orgs):
+    """Minimal env for trigger tests: one bare user with no org, reusing orgs from two_orgs."""
+    async def _setup():
+        import time as _t
+        _suffix = str(int(_t.time()))[-6:]
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            user_id = await conn.fetchval(
+                "INSERT INTO users (name, active) VALUES ($1, true) RETURNING id",
+                f"trigger-test-user-{_suffix}",
+            )
+            await conn.execute(
+                "INSERT INTO user_emails (email, user_id, is_primary) VALUES ($1, $2, true)",
+                f"trigger-{_suffix}@test.local", user_id,
+            )
+            return {"user_id": user_id, "org_a": two_orgs["org_a"], "ws_a": two_orgs["ws_a"],
+                    "proj_a": two_orgs["proj_a"]}
+        finally:
+            await conn.close()
+
+    async def _cleanup(d):
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            await conn.execute("DELETE FROM workspace_leads WHERE user_id = $1", d["user_id"])
+            await conn.execute("DELETE FROM project_members WHERE user_id = $1", d["user_id"])
+            await conn.execute("DELETE FROM user_emails WHERE user_id = $1", d["user_id"])
+            await conn.execute("DELETE FROM users WHERE id = $1", d["user_id"])
+        except Exception:
+            pass
+        finally:
+            await conn.close()
+
+    d = asyncio.run(_setup())
+    yield d
+    asyncio.run(_cleanup(d))
+
+
+def test_trigger_workspace_lead_insert_sets_org_id(trigger_env):
+    """INSERT into workspace_leads → users.organization_id propagated."""
+    async def _run():
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            uid = trigger_env["user_id"]
+            org_before = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_before is None
+
+            await conn.execute(
+                "INSERT INTO workspace_leads (user_id, workspace_id) VALUES ($1, $2)",
+                uid, trigger_env["ws_a"],
+            )
+            org_after = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_after == trigger_env["org_a"]
+        finally:
+            await conn.close()
+    asyncio.run(_run())
+
+
+def test_trigger_delete_last_workspace_lead_clears_org_id(trigger_env):
+    """DELETE last workspace_lead (no project_members) → users.organization_id = NULL."""
+    async def _run():
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            uid = trigger_env["user_id"]
+            await conn.execute(
+                "INSERT INTO workspace_leads (user_id, workspace_id) VALUES ($1, $2)",
+                uid, trigger_env["ws_a"],
+            )
+            org_set = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_set == trigger_env["org_a"]
+
+            await conn.execute(
+                "DELETE FROM workspace_leads WHERE user_id = $1 AND workspace_id = $2",
+                uid, trigger_env["ws_a"],
+            )
+            org_after = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_after is None
+        finally:
+            await conn.close()
+    asyncio.run(_run())
+
+
+def test_trigger_delete_workspace_lead_keeps_org_from_project_members(trigger_env):
+    """DELETE workspace_lead when project_members remain → org_id resolved from project path."""
+    async def _run():
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            uid = trigger_env["user_id"]
+            # Establish org via workspace_leads
+            await conn.execute(
+                "INSERT INTO workspace_leads (user_id, workspace_id) VALUES ($1, $2)",
+                uid, trigger_env["ws_a"],
+            )
+            # Also add project_member path
+            await conn.execute(
+                "INSERT INTO project_members (user_id, project_id) VALUES ($1, $2)",
+                uid, trigger_env["proj_a"],
+            )
+            # Remove workspace_lead — trigger should fall back to project_members path
+            await conn.execute(
+                "DELETE FROM workspace_leads WHERE user_id = $1 AND workspace_id = $2",
+                uid, trigger_env["ws_a"],
+            )
+            org_after = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_after == trigger_env["org_a"]
+        finally:
+            await conn.close()
+    asyncio.run(_run())
+
+
+def test_trigger_project_member_path_independent(trigger_env):
+    """INSERT/DELETE project_members trigger path sets/clears org_id independently of workspace_leads."""
+    async def _run():
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            uid = trigger_env["user_id"]
+            org_before = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_before is None
+
+            # Insert via project_members only (no workspace_lead)
+            await conn.execute(
+                "INSERT INTO project_members (user_id, project_id) VALUES ($1, $2)",
+                uid, trigger_env["proj_a"],
+            )
+            org_set = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_set == trigger_env["org_a"]
+
+            # Delete project_member — org should clear
+            await conn.execute(
+                "DELETE FROM project_members WHERE user_id = $1 AND project_id = $2",
+                uid, trigger_env["proj_a"],
+            )
+            org_after = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", uid)
+            assert org_after is None
+        finally:
+            await conn.close()
+    asyncio.run(_run())

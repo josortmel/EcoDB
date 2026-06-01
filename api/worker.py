@@ -111,13 +111,20 @@ def _circuit_breaker_record_failure() -> None:
 # SSE broadcast (Task 4.13)
 # ---------------------------------------------------------------------------
 
-async def _broadcast_sse(event_type: str, data: dict) -> None:
+_INTERNAL_SECRET = os.environ.get("INTERNAL_BROADCAST_SECRET", "")
+
+
+async def _broadcast_sse(event_type: str, data: dict, org_id: int | None = None) -> None:
     """Best-effort SSE broadcast via internal API. Never raises."""
     try:
+        headers = {}
+        if _INTERNAL_SECRET:
+            headers["X-Internal-Secret"] = _INTERNAL_SECRET
         async with httpx.AsyncClient(timeout=5.0) as client:
             await client.post(
                 f"{API_URL}/api/v1/events/broadcast",
-                json={"event_type": event_type, "data": data},
+                json={"event_type": event_type, "data": data, "org_id": org_id},
+                headers=headers,
             )
     except Exception:
         pass
@@ -149,6 +156,14 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
     doc_id = row["id"]
     doc_type = row["doc_type"]
     uri = row["uri"]
+
+    _doc_org_id: int | None = None
+    try:
+        async with pool.acquire() as conn:
+            from events import resolve_org_id_from_project
+            _doc_org_id = await resolve_org_id_from_project(conn, row["project_id"])
+    except Exception:
+        pass
 
     # Translate Windows media path to Docker mount path
     _WIN_MEDIA = os.environ.get("WINDOWS_MEDIA_PREFIX", "")
@@ -237,7 +252,7 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                         "document_id": str(doc_id),
                         "duplicate_of": str(dup_exact["id"]),
                         "match": "exact",
-                    })
+                    }, _doc_org_id)
                     return
 
                 await conn.execute(
@@ -386,7 +401,7 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                             "document_id": str(doc_id),
                             "similar_to": str(near_dup["id"]),
                             "match": "normalized",
-                        })
+                        }, _doc_org_id)
             except Exception as _nd_exc:
                 log.debug("near-dup check skipped: %r", _nd_exc)
 
@@ -394,12 +409,12 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
         await _broadcast_sse("document_indexed", {
             "document_id": str(doc_id),
             "chunks": metrics.get("chunk_count", 0),
-        })
+        }, _doc_org_id)
         if linked_memory_ids:
             await _broadcast_sse("source_updated", {
                 "document_id": str(doc_id),
                 "affected_memory_ids": linked_memory_ids,
-            })
+            }, _doc_org_id)
 
         log.info(
             "Document %s indexed in %dms (%d chunks)",
@@ -434,7 +449,7 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
             await _broadcast_sse("document_failed", {
                 "document_id": str(doc_id),
                 "error": type(exc).__name__,
-            })
+            }, _doc_org_id)
 
 
 # ---------------------------------------------------------------------------
