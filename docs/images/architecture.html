@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EcoDB Architecture v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Geist", system-ui, sans-serif; background: #0a0a0a; }
+
+  .diagram {
+    width: 1200px;
+    height: 420px;
+    padding: 40px 60px;
+    background: oklch(10% 0.005 50);
+    background-image:
+      radial-gradient(ellipse at 50% 60%, oklch(16% 0.02 50) 0%, transparent 50%),
+      radial-gradient(circle, oklch(20% 0.01 50) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .diagram-title {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #f37513;
+    font-family: "Geist Mono", monospace;
+    margin-bottom: 32px;
+  }
+
+  .arch-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    height: 300px;
+    position: relative;
+  }
+
+  /* query input */
+  .query-input {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: 120px;
+    flex-shrink: 0;
+  }
+
+  .query-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid #f37513;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: #f37513;
+    background: oklch(14% 0.02 50);
+  }
+
+  .query-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+    color: oklch(80% 0.014 50);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  /* flow arrow */
+  .flow-arrow {
+    width: 36px;
+    height: 3px;
+    background: linear-gradient(90deg, #f37513, oklch(64% 0.13 50));
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .flow-arrow::after {
+    content: '';
+    position: absolute;
+    right: -6px;
+    top: -4px;
+    border-left: 8px solid oklch(64% 0.13 50);
+    border-top: 5.5px solid transparent;
+    border-bottom: 5.5px solid transparent;
+  }
+
+  .flow-arrow.reverse {
+    background: linear-gradient(90deg, oklch(64% 0.13 50), #f37513);
+  }
+
+  .flow-arrow.reverse::after {
+    right: auto;
+    left: -6px;
+    border-left: none;
+    border-right: 8px solid oklch(64% 0.13 50);
+  }
+
+  /* interface layer */
+  .interface-layer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .interface-box {
+    border: 1.5px solid oklch(40% 0.04 50);
+    border-radius: 10px;
+    padding: 14px 20px;
+    background: oklch(14% 0.008 50);
+    text-align: center;
+    width: 168px;
+  }
+
+  .interface-name {
+    font-family: "Geist", sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: oklch(96% 0.01 50);
+    margin-bottom: 4px;
+  }
+
+  .interface-sub {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    color: oklch(72% 0.018 50);
+    letter-spacing: 0.02em;
+  }
+
+  /* core: PostgreSQL hub */
+  .core-hub {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .core-glow {
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, oklch(20% 0.04 50) 0%, transparent 70%);
+  }
+
+  .core-ring {
+    position: absolute;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    border: 2px solid oklch(30% 0.06 50);
+  }
+
+  .core-box {
+    position: relative;
+    z-index: 1;
+    border: 2px solid #f37513;
+    border-radius: 12px;
+    padding: 20px 24px;
+    background: oklch(14% 0.02 50);
+    text-align: center;
+  }
+
+  .core-name {
+    font-family: "Geist", sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: #f37513;
+    margin-bottom: 4px;
+  }
+
+  .core-features {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    color: oklch(78% 0.014 50);
+    line-height: 1.6;
+  }
+
+  /* satellite services */
+  .satellites {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .satellite {
+    border: 1.5px solid oklch(38% 0.035 50);
+    border-radius: 8px;
+    padding: 11px 16px;
+    background: oklch(14% 0.008 50);
+    text-align: center;
+    width: 148px;
+  }
+
+  .satellite-name {
+    font-family: "Geist Mono", monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: oklch(92% 0.01 50);
+    margin-bottom: 3px;
+  }
+
+  .satellite-sub {
+    font-family: "Geist", sans-serif;
+    font-size: 11px;
+    color: oklch(68% 0.015 50);
+  }
+
+  .satellite.optional {
+    border-style: dashed;
+    border-color: oklch(32% 0.03 50);
+  }
+
+  .satellite.optional .satellite-name { color: oklch(74% 0.014 50); }
+
+  /* result output */
+  .result-output {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: 120px;
+    flex-shrink: 0;
+  }
+
+  .result-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid oklch(60% 0.12 50);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: oklch(60% 0.12 50);
+    background: oklch(14% 0.015 50);
+  }
+
+  /* flow labels */
+  .flow-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    color: oklch(70% 0.10 50);
+    text-align: center;
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+    line-height: 1.35;
+  }
+
+  /* connectors from core to satellites */
+  .core-connectors {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="diagram" id="architecture-v2">
+  <div class="diagram-title">Architecture / The Journey of a Query</div>
+
+  <div class="arch-flow">
+    <!-- Query enters -->
+    <div class="query-input">
+      <div class="query-icon">?</div>
+      <div class="query-label">query<br>(text or image)</div>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- Interface layer -->
+    <div class="interface-layer">
+      <div class="interface-box">
+        <div class="interface-name">MCP Server</div>
+        <div class="interface-sub">22+ tools · SSE</div>
+      </div>
+      <div class="interface-box">
+        <div class="interface-name">REST API</div>
+        <div class="interface-sub">30+ endpoints · JWT</div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; align-items:center; gap:8px; flex-shrink:0;">
+      <div class="flow-arrow"></div>
+      <div class="flow-label">GAMR<br>10 stages</div>
+    </div>
+
+    <!-- Core: PostgreSQL -->
+    <div class="core-hub">
+      <div class="core-glow"></div>
+      <div class="core-ring"></div>
+      <div class="core-box">
+        <div class="core-name">PostgreSQL 16</div>
+        <div class="core-features">
+          pgvector HNSW<br>
+          Apache AGE graph<br>
+          BM25 full-text<br>
+          LISTEN/NOTIFY
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; align-items:center; gap:8px; flex-shrink:0;">
+      <div class="flow-arrow"></div>
+      <div class="flow-label">embed<br>extract<br>link</div>
+    </div>
+
+    <!-- Satellite services -->
+    <div class="satellites">
+      <div class="satellite">
+        <div class="satellite-name">Embeddings</div>
+        <div class="satellite-sub">Jina v4 · GPU</div>
+      </div>
+      <div class="satellite">
+        <div class="satellite-name">NER</div>
+        <div class="satellite-sub">GLiNER · entities</div>
+      </div>
+      <div class="satellite optional">
+        <div class="satellite-name">LLM</div>
+        <div class="satellite-sub">Qwen 2.5 3B</div>
+      </div>
+    </div>
+
+    <div class="flow-arrow reverse"></div>
+
+    <!-- Results out -->
+    <div class="result-output">
+      <div class="result-icon">✓</div>
+      <div class="query-label">ranked results<br>+ contradictions</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

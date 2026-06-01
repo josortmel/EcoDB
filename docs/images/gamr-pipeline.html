@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EcoDB GAMR v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Geist", system-ui, sans-serif; background: #0a0a0a; }
+
+  .diagram {
+    width: 1200px;
+    padding: 50px 60px 44px;
+    background: oklch(10% 0.005 50);
+    background-image:
+      radial-gradient(ellipse at 0% 50%, oklch(14% 0.015 50) 0%, transparent 35%),
+      radial-gradient(ellipse at 100% 50%, oklch(14% 0.02 40) 0%, transparent 35%),
+      radial-gradient(circle, oklch(20% 0.01 50) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 40px 40px;
+    position: relative;
+  }
+
+  .diagram-title {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #f37513;
+    font-family: "Geist Mono", monospace;
+    margin-bottom: 28px;
+  }
+
+  /* Main flow: bookend input → pipeline → bookend output */
+  .gamr-flow {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .bookend {
+    width: 110px;
+    flex-shrink: 0;
+    text-align: center;
+  }
+
+  .bookend-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    margin: 0 auto 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Geist Mono", monospace;
+    font-size: 18px;
+  }
+
+  .bookend-icon.input {
+    border: 2px solid oklch(50% 0.06 50);
+    color: oklch(70% 0.01 50);
+    background: oklch(14% 0.01 50);
+  }
+
+  .bookend-icon.output {
+    border: 2px solid #f37513;
+    color: #f37513;
+    background: oklch(14% 0.02 50);
+  }
+
+  .bookend-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    color: oklch(76% 0.014 50);
+    line-height: 1.45;
+  }
+
+  .bookend-label.output-label { color: oklch(80% 0.10 50); }
+
+  .flow-connector {
+    width: 20px;
+    height: 2px;
+    background: oklch(42% 0.05 50);
+    flex-shrink: 0;
+  }
+
+  .flow-connector.bright { background: linear-gradient(90deg, oklch(52% 0.08 50), #f37513); }
+
+  /* Pipeline stages */
+  .pipeline {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+  }
+
+  .stage {
+    flex: 1;
+    border: 1.5px solid oklch(34% 0.03 50);
+    border-radius: 8px;
+    padding: 12px 8px 10px;
+    background: oklch(14% 0.008 50);
+    text-align: center;
+    position: relative;
+  }
+
+  .stage.differential {
+    border-color: oklch(48% 0.12 50);
+    background: oklch(16% 0.025 50);
+  }
+
+  .stage.optional {
+    border-style: dashed;
+    border-color: oklch(30% 0.03 50);
+  }
+
+  .stage-num {
+    font-family: "Geist Mono", monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: oklch(58% 0.04 50);
+    margin-bottom: 6px;
+    line-height: 1;
+  }
+
+  .stage.differential .stage-num { color: #f37513; }
+
+  .stage-name {
+    font-family: "Geist", sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: oklch(94% 0.01 50);
+    margin-bottom: 4px;
+    line-height: 1.25;
+  }
+
+  .stage-tech {
+    font-family: "Geist Mono", monospace;
+    font-size: 9.5px;
+    color: oklch(70% 0.10 50);
+    line-height: 1.35;
+  }
+
+  .stage.differential .stage-tech { color: oklch(75% 0.13 50); }
+
+  .stage-tag {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: "Geist Mono", monospace;
+    font-size: 8.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 1px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .stage-tag.diff {
+    color: #f37513;
+    background: oklch(14% 0.025 50);
+    border: 1px solid oklch(45% 0.12 50);
+  }
+
+  .stage-tag.opt {
+    color: oklch(70% 0.06 50);
+    background: oklch(13% 0.008 50);
+    border: 1px solid oklch(32% 0.04 50);
+  }
+
+  /* Legend */
+  .gamr-legend {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid oklch(18% 0.01 50);
+  }
+
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+
+  .legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+  }
+
+  .legend-swatch.standard { border: 1.5px solid oklch(34% 0.03 50); background: oklch(14% 0.008 50); }
+  .legend-swatch.diff { border: 1.5px solid oklch(48% 0.12 50); background: oklch(16% 0.025 50); }
+  .legend-swatch.opt { border: 1.5px dashed oklch(30% 0.03 50); background: oklch(13% 0.008 50); }
+
+  .legend-text {
+    font-family: "Geist Mono", monospace;
+    font-size: 12px;
+    color: oklch(76% 0.014 50);
+  }
+</style>
+</head>
+<body>
+
+<div class="diagram" id="gamr-v3">
+  <div class="diagram-title">GAMR / 10-Stage Scoring Pipeline</div>
+
+  <div class="gamr-flow">
+    <!-- Input bookend -->
+    <div class="bookend">
+      <div class="bookend-icon input">?</div>
+      <div class="bookend-label">query<br>(text or image)</div>
+    </div>
+
+    <div class="flow-connector"></div>
+
+    <!-- 10 stages -->
+    <div class="pipeline">
+      <div class="stage">
+        <div class="stage-num">1</div>
+        <div class="stage-name">Query Classification</div>
+        <div class="stage-tech">factual ·<br>analytical ·<br>historical</div>
+      </div>
+      <div class="stage">
+        <div class="stage-num">2</div>
+        <div class="stage-name">Embedding</div>
+        <div class="stage-tech">Jina v4<br>512-dim</div>
+      </div>
+      <div class="stage">
+        <div class="stage-num">3</div>
+        <div class="stage-name">Vector Retrieval</div>
+        <div class="stage-tech">pgvector<br>HNSW</div>
+      </div>
+      <div class="stage">
+        <div class="stage-num">4</div>
+        <div class="stage-name">BM25 Lexical</div>
+        <div class="stage-tech">full-text<br>tsvector</div>
+      </div>
+      <div class="stage">
+        <div class="stage-num">5</div>
+        <div class="stage-name">Graph Expansion</div>
+        <div class="stage-tech">Apache AGE<br>+ SQL dual</div>
+      </div>
+      <div class="stage differential">
+        <div class="stage-tag diff">exclusive</div>
+        <div class="stage-num">6</div>
+        <div class="stage-name">Source Resolution</div>
+        <div class="stage-tech">trust tiers<br>provenance</div>
+      </div>
+      <div class="stage differential">
+        <div class="stage-tag diff">exclusive</div>
+        <div class="stage-num">7</div>
+        <div class="stage-name">Freshness</div>
+        <div class="stage-tech">temporal<br>decay by<br>query type</div>
+      </div>
+      <div class="stage differential">
+        <div class="stage-tag diff">exclusive</div>
+        <div class="stage-num">8</div>
+        <div class="stage-name">Contradiction Detection</div>
+        <div class="stage-tech">flags<br>conflicts<br>≥ 0.85</div>
+      </div>
+      <div class="stage differential">
+        <div class="stage-tag diff">exclusive</div>
+        <div class="stage-num">9</div>
+        <div class="stage-name">Composite Score</div>
+        <div class="stage-tech">semantic ×<br>(1 + bm25 +<br>graph + w + f)</div>
+      </div>
+      <div class="stage optional">
+        <div class="stage-tag opt">optional</div>
+        <div class="stage-num">10</div>
+        <div class="stage-name">Cross-Encoder Reranking</div>
+        <div class="stage-tech">MiniLM<br>L-6-v2</div>
+      </div>
+    </div>
+
+    <div class="flow-connector bright"></div>
+
+    <!-- Output bookend -->
+    <div class="bookend">
+      <div class="bookend-icon output">✓</div>
+      <div class="bookend-label output-label">ranked results<br>+ contradictions</div>
+    </div>
+  </div>
+
+  <div class="gamr-legend">
+    <div class="legend-item">
+      <div class="legend-swatch standard"></div>
+      <div class="legend-text">Standard retrieval stages</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch diff"></div>
+      <div class="legend-text">GAMR exclusive (what RAG doesn't have)</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch opt"></div>
+      <div class="legend-text">Optional (flag-gated)</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

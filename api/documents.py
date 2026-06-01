@@ -155,6 +155,13 @@ async def create_document(
             workspace_id, body.project_id, body.visibility,
         )
         await conn.execute("SELECT pg_notify('ecodb_ingest', $1)", str(row["id"]))
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'register_document', 'document', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"uri": body.uri, "filename": body.filename, "project_id": body.project_id}),
+            actor.get("organization_id"),
+        )
         return _row_to_response(row)
 
 
@@ -296,15 +303,15 @@ async def reindex_document(
 ) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
+        if not actor.get("is_super"):
+            raise HTTPException(404, "not found")
+
         doc = await conn.fetchrow(
             "SELECT id, project_id, status FROM documents WHERE id = $1 AND status != 'deleted'",
             document_id,
         )
         if doc is None:
-            raise HTTPException(404, "document not found")
-
-        if not actor.get("is_super"):
-            raise HTTPException(403, "Not authorized — reindex requires super access")
+            raise HTTPException(404, "not found")
 
         await conn.execute("""
             UPDATE documents
@@ -313,6 +320,13 @@ async def reindex_document(
             WHERE id = $1
         """, document_id)
         await conn.execute("SELECT pg_notify('ecodb_ingest', $1)", str(document_id))
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'reindex_document', 'document', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(document_id),
+            json.dumps({}),
+            actor.get("organization_id"),
+        )
 
     return {"status": "queued", "document_id": str(document_id)}
 
@@ -328,15 +342,22 @@ async def delete_document(
 ) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
+        if not actor.get("is_super"):
+            raise HTTPException(404, "not found")
+
         doc = await conn.fetchrow(
             "SELECT id, project_id, status FROM documents WHERE id = $1", document_id
         )
         if doc is None or doc["status"] == "deleted":
-            raise HTTPException(404, "document not found")
-
-        if not actor.get("is_super"):
-            raise HTTPException(403, "Not authorized — delete requires super access")
+            raise HTTPException(404, "not found")
 
         await conn.execute(
             "UPDATE documents SET status = 'deleted' WHERE id = $1", document_id
+        )
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'delete_document', 'document', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(document_id),
+            json.dumps({"project_id": doc["project_id"]}),
+            actor.get("organization_id"),
         )

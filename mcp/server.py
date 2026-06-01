@@ -60,7 +60,16 @@ ECODB_TIMEOUT = float(os.environ.get("ECODB_TIMEOUT", "60.0"))
 # - "sse": HTTP server-sent events, util para containerizar y servir por red.
 # - "streamable-http": variante mas moderna del transport HTTP.
 # El docker-compose pasa MCP_TRANSPORT=sse para exponer el puerto 8091.
-MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio").lower()
+def _resolve_transport() -> str:
+    import sys
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == "--transport" and i < len(sys.argv) - 1:
+            return sys.argv[i + 1].lower()
+        if arg.startswith("--transport="):
+            return arg.split("=", 1)[1].lower()
+    return os.environ.get("MCP_TRANSPORT", "stdio").lower()
+
+MCP_TRANSPORT = _resolve_transport()
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8091"))
 

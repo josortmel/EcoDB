@@ -2,6 +2,36 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] — 2026-06-01
+
+### Added
+- **Multi-tenant: organization_id in JWT for all roles** — Workers, Leads, CEOs all carry `organization_id` in JWT (was CEO-only). All permission checks and audit records use it for org scoping.
+- **API key rotation** (`POST /auth/api-keys/{key_id}/rotate`): new key issued, old key enters configurable grace period (1-720h, default 24h). Zero-downtime rotation with `SELECT FOR UPDATE` serialization. Max 3 active keys per user.
+- **API key listing org-scoped** (`GET /auth/api-keys`): CEO sees org keys only, super sees all, others see own.
+- **CEO admin operations** — 7 endpoints now CEO-accessible with org scoping: alias_candidates (list + review), merge_entities, undo_merge, trust_tier, confirm_related_docs, graph_vocabulary. Gated by `_check_admin_op` with fail-closed on orphaned entities.
+- **Graph discovery permission pre-filter** — `visible_project_ids` applied before `[:20]` truncation in search graph discovery path.
+- **Rate limiting headers**: `Retry-After` on 429, `X-RateLimit-Limit` + `X-RateLimit-Remaining` on all responses. JWT verified with real secret (prevents rate bucket spoofing).
+- **Multi-tenant test suite**: `api/tests/test_multitenant.py` — 16 tests covering cross-org isolation.
+- **Migration guide**: `docs/migration-v0.8-to-v0.9.md` — step-by-step with JWT invalidation procedure.
+- **MCP --transport CLI arg**: `mcp/server.py` accepts `--transport stdio` for Claude Desktop compatibility (fixes port conflict when using `docker exec`).
+
+### Changed
+- **Audit log extended** — all mutation endpoints now write `audit_log` with `organization_id` (~40 calls across 14 files): memories (create, update, delete), projects (create, update, delete, leads), teams (create, update, delete, members, resources), workspaces (create, update, delete), agents (save_identity), auth (create_api_key, rotate_api_key), documents (register, reindex, delete), events (agent_session), graph (save_triple, save_triples_batch, delete_triple), admin (redistribute, merge, undo_merge, trust_tier, confirm_related_docs, entity_dictionary CRUD, stop_entities CRUD, merge_via_alias_review), users (update_preferences).
+- **Schema v5.1.0** (`sql/migrate_5.0.1_to_5.1.0.sql`, idempotent, with rollback script):
+  - `users.organization_id` — denormalized cache, auto-propagated via triggers on workspace_leads/project_members
+  - `api_keys.replaced_by_key_id`, `api_keys.grace_until` — rotation chain + grace period
+  - `teams.organization_id` — populated via team_resources→projects→workspaces
+  - `audit_log.organization_id` — org attribution for forensics
+  - 4 new triggers: `propagate_user_org_id` (workspace_leads + project_members), `check_team_org_consistency` (team_members + team_resources)
+- **IDOR oracle prevention** — admin endpoints return unified 404 for both "not found" and "wrong org" (no 403 that reveals cross-org existence).
+- **/events/broadcast** restricted to super JWT or internal secret (was any Bearer token).
+
+### Security
+- 3 adversarial loops per reviewer (adv-code + adv-seg). ~35 findings resolved.
+- Grace-expired API keys auto-deactivated on first failed auth attempt (no zombie active keys).
+- Re-rotation of grace-period keys blocked (409 — prevents split successor chains).
+- Rate limiter JWT signature verified (prevents bucket spoofing via forged tokens).
+
 ## [0.8.6] — 2026-05-31
 
 ### Security

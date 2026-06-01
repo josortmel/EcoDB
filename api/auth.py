@@ -11,7 +11,7 @@ JWT payload (claims):
 - email              : email usado en el login (uno de los user_emails del user)
 - is_super           : bool
 - is_ceo             : bool
-- organization_id    : id de la org si is_ceo=true, sino None
+- organization_id    : id de la org del usuario (todos los roles), None para super
 - lead_workspaces    : lista de workspace_id donde el user es lead
 - iat / exp          : timestamps estandar JWT
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import secrets
 import time
 from typing import Optional
@@ -69,19 +70,13 @@ async def build_jwt_payload(user_id: int, email: str) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            "SELECT id, name, is_super, is_ceo, active FROM users WHERE id = $1",
+            "SELECT id, name, is_super, is_ceo, active, organization_id FROM users WHERE id = $1",
             user_id,
         )
         if user is None or not user["active"]:
             raise HTTPException(status_code=401, detail="user not found or inactive")
 
-        organization_id = None
-        if user["is_ceo"]:
-            org = await conn.fetchrow(
-                "SELECT id FROM organizations WHERE ceo_user_id = $1",
-                user_id,
-            )
-            organization_id = org["id"] if org else None
+        organization_id = user["organization_id"]
 
         lead_rows = await conn.fetch(
             "SELECT workspace_id FROM workspace_leads WHERE user_id = $1",
@@ -135,7 +130,7 @@ async def resolve_user_from_api_key(key: str) -> dict:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT ak.user_id, ak.expires_at, ak.active,
+            SELECT ak.id AS key_id, ak.user_id, ak.expires_at, ak.active, ak.grace_until,
                    u.active AS user_active,
                    ue.email AS primary_email
             FROM api_keys ak
@@ -147,7 +142,13 @@ async def resolve_user_from_api_key(key: str) -> dict:
         )
     if row is None or not row["active"] or not row["user_active"]:
         raise HTTPException(status_code=401, detail="invalid api key")
-    if row["expires_at"] is not None and row["expires_at"].timestamp() < time.time():
+    now_ts = time.time()
+    in_grace = row["grace_until"] is not None and row["grace_until"].timestamp() > now_ts
+    if row["grace_until"] is not None and not in_grace:
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE api_keys SET active = false WHERE id = $1", row["key_id"])
+        raise HTTPException(status_code=401, detail="api key grace period expired")
+    if not in_grace and row["expires_at"] is not None and row["expires_at"].timestamp() < now_ts:
         raise HTTPException(status_code=401, detail="api key expired")
 
     primary_email = row["primary_email"] or f"user-{row['user_id']}@unknown"
@@ -199,7 +200,7 @@ def require_super_or_ceo(user: dict = Depends(get_current_user)) -> dict:
 # ---------------------------------------------------------------------------
 # Router con los endpoints del plan v3 §2.1
 # ---------------------------------------------------------------------------
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -310,19 +311,14 @@ async def auth_create_api_key(
                 detail="only super can create api keys for super users",
             )
 
-        # CEO org-scoping: CEO can only create keys for users in their own org.
         if actor.get("is_ceo") and not actor.get("is_super"):
             actor_org = actor.get("organization_id")
             if actor_org is None:
                 raise HTTPException(403, "CEO organization not resolved")
-            target_in_org = await conn.fetchval("""
-                SELECT 1 FROM project_members pm
-                JOIN projects p ON p.id = pm.project_id
-                JOIN workspaces w ON w.id = p.workspace_id
-                WHERE pm.user_id = $1 AND w.organization_id = $2
-                LIMIT 1
-            """, body.user_id, actor_org)
-            if not target_in_org:
+            target_org = await conn.fetchval(
+                "SELECT organization_id FROM users WHERE id = $1", body.user_id
+            )
+            if target_org != actor_org:
                 raise HTTPException(403, "CEO can only create API keys for users in their organization")
 
         key_plain, key_hash = generate_api_key()
@@ -335,6 +331,14 @@ async def auth_create_api_key(
             key_hash, body.name, body.user_id, body.expires_at,
         )
 
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'create_api_key', 'api_key', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"target_user_id": body.user_id, "name": body.name}),
+            actor.get("organization_id"),
+        )
+
     return ApiKeyCreateResponse(
         id=row["id"],
         user_id=body.user_id,
@@ -342,3 +346,158 @@ async def auth_create_api_key(
         api_key=key_plain,
         expires_at=row["expires_at"],
     )
+
+
+# ---------------------------------------------------------------------------
+# API key rotation (v0.9 multi-tenant)
+# ---------------------------------------------------------------------------
+
+class RotateRequest(BaseModel):
+    grace_hours: float = Field(24.0, description="Hours both keys stay valid. Clamped to [1, 720].")
+
+
+class RotateResponse(BaseModel):
+    new_key_id: int
+    new_api_key: str = Field(..., description="Plain key — only shown once.")
+    old_key_id: int
+    grace_until: datetime
+    deactivated_key_id: Optional[int] = Field(None, description="ID of oldest key deactivated (if >3 active).")
+
+
+@router.post("/api-keys/{key_id}/rotate", response_model=RotateResponse, status_code=201)
+async def auth_rotate_api_key(
+    key_id: int,
+    body: RotateRequest = RotateRequest(),
+    actor: dict = Depends(get_current_user),
+) -> RotateResponse:
+    """Rotate an API key: generate new key, mark old with grace_until.
+    Max 3 active keys per user — 4th rotation deactivates oldest.
+    Auth: key owner, CEO of key owner's org, or super.
+    """
+    grace_hours = max(1.0, min(body.grace_hours, 720.0))
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        old_key = await conn.fetchrow(
+            "SELECT id, user_id, active, name FROM api_keys WHERE id = $1", key_id
+        )
+        if old_key is None or not old_key["active"]:
+            raise HTTPException(404, "api key not found or inactive")
+
+        key_owner_id = old_key["user_id"]
+        actor_id = int(actor["sub"])
+
+        if actor_id != key_owner_id and not actor.get("is_super"):
+            if actor.get("is_ceo"):
+                owner_org = await conn.fetchval(
+                    "SELECT organization_id FROM users WHERE id = $1", key_owner_id
+                )
+                if owner_org != actor.get("organization_id"):
+                    raise HTTPException(403, "CEO can only rotate keys for users in their org")
+            else:
+                raise HTTPException(403, "only key owner, org CEO, or super can rotate")
+
+        grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
+
+        async with conn.transaction():
+            locked = await conn.fetchrow(
+                "SELECT id, replaced_by_key_id FROM api_keys WHERE id = $1 AND active = true FOR UPDATE", key_id
+            )
+            if locked is None:
+                raise HTTPException(409, "api key already rotated by concurrent request")
+            if locked["replaced_by_key_id"] is not None:
+                raise HTTPException(409, "api key already in grace period — rotate the successor instead")
+            new_plain, new_hash = generate_api_key()
+            new_row = await conn.fetchrow(
+                """
+                INSERT INTO api_keys (key_hash, name, user_id, active)
+                VALUES ($1, $2, $3, true)
+                RETURNING id
+                """,
+                new_hash, f"{old_key['name']} (rotated)", key_owner_id,
+            )
+
+            await conn.execute(
+                "UPDATE api_keys SET replaced_by_key_id = $1, grace_until = $2 WHERE id = $3",
+                new_row["id"], grace_until, key_id,
+            )
+
+            active_keys = await conn.fetch(
+                """SELECT id FROM api_keys
+                WHERE user_id = $1 AND active = true
+                AND (grace_until IS NULL OR grace_until > now())
+                AND id != $2
+                ORDER BY id ASC""",
+                key_owner_id, key_id,
+            )
+            deactivated_id = None
+            if len(active_keys) > 3:
+                oldest_id = active_keys[0]["id"]
+                await conn.execute(
+                    "UPDATE api_keys SET active = false WHERE id = $1", oldest_id
+                )
+                deactivated_id = oldest_id
+
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'rotate_api_key', 'api_key', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(new_row["id"]),
+                json.dumps({"old_key_id": key_id, "deactivated_key_id": deactivated_id}),
+                actor.get("organization_id"),
+            )
+
+    return RotateResponse(
+        new_key_id=new_row["id"],
+        new_api_key=new_plain,
+        old_key_id=key_id,
+        grace_until=grace_until,
+        deactivated_key_id=deactivated_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/api-keys — org-scoped list (v0.9 multi-tenant)
+# ---------------------------------------------------------------------------
+
+class ApiKeyListItem(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    active: bool
+    grace_until: Optional[datetime]
+    replaced_by_key_id: Optional[int]
+    expires_at: Optional[datetime]
+    created_at: datetime
+
+
+@router.get("/api-keys", response_model=list[ApiKeyListItem])
+async def auth_list_api_keys(
+    actor: dict = Depends(get_current_user),
+) -> list[ApiKeyListItem]:
+    """List API keys visible to actor.
+    Super: all keys. CEO: keys of users in their org. Others: own keys only.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if actor.get("is_super"):
+            rows = await conn.fetch(
+                "SELECT id, user_id, name, active, grace_until, replaced_by_key_id, expires_at, created_at FROM api_keys ORDER BY id"
+            )
+        elif actor.get("is_ceo") and actor.get("organization_id"):
+            rows = await conn.fetch(
+                """
+                SELECT ak.id, ak.user_id, ak.name, ak.active, ak.grace_until,
+                       ak.replaced_by_key_id, ak.expires_at, ak.created_at
+                FROM api_keys ak
+                JOIN users u ON u.id = ak.user_id
+                WHERE u.organization_id = $1
+                ORDER BY ak.id
+                """,
+                actor["organization_id"],
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT id, user_id, name, active, grace_until, replaced_by_key_id, expires_at, created_at FROM api_keys WHERE user_id = $1 ORDER BY id",
+                int(actor["sub"]),
+            )
+    return [ApiKeyListItem(**dict(r)) for r in rows]

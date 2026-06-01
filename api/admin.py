@@ -28,8 +28,9 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from auth import require_super
+from auth import get_current_user, require_super
 from db import get_pool
+from permissions import resolve_entity_org_ids, user_can_admin_operation
 from entity_normalization import is_valid_entity_type, normalize_name
 
 # import top-level de gliner_service
@@ -43,6 +44,25 @@ from gliner_service import DEFAULT_LABELS, MODEL_NAME, extract_entities, load_di
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+async def _check_admin_op(conn, actor: dict, operation: str, entity_name: str | None = None) -> None:
+    """Check admin operation permission. Raises 403 if denied.
+
+    Fail-closed: if entity_name provided but has no org links → 403 (not fall-through).
+    """
+    if actor.get("is_super"):
+        return
+    target_org = actor.get("organization_id")
+    if entity_name:
+        entity_orgs = await resolve_entity_org_ids(conn, entity_name)
+        if len(entity_orgs) > 1:
+            raise HTTPException(403, "entity spans multiple organizations — super required")
+        if len(entity_orgs) == 0:
+            raise HTTPException(403, "entity has no organization ownership — super required")
+        target_org = entity_orgs.pop()
+    if not await user_can_admin_operation(conn, actor, operation, target_org):
+        raise HTTPException(403, "insufficient permissions for this admin operation")
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +204,8 @@ async def redistribute_memories(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'redistribute', 'memories_batch', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'redistribute', 'memories_batch', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), audit_uuid,
                     json.dumps({
@@ -194,7 +214,7 @@ async def redistribute_memories(
                         "matched_count": 0,
                         "moved_count": 0,
                         "sample_memory_ids": [],
-                    }),
+                    }), actor.get("organization_id"),
                 )
             return RedistributeResponse(
                 dry_run=False,
@@ -240,8 +260,8 @@ async def redistribute_memories(
             moved_count_real = int(update_result.split()[-1])
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'redistribute', 'memories_batch', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'redistribute', 'memories_batch', $2, $3::jsonb, $4)
                 """,
                 int(actor["sub"]), audit_uuid,
                 json.dumps({
@@ -250,7 +270,7 @@ async def redistribute_memories(
                     "matched_count": matched_count,
                     "moved_count": moved_count_real,
                     "sample_memory_ids": sample_ids,
-                }),
+                }), actor.get("organization_id"),
             )
 
     return RedistributeResponse(
@@ -402,6 +422,13 @@ async def create_dictionary_entry(
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"name_normalized '{name_normalized}' already exists")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'create_entity_dict', 'entity_dictionary', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"name": body.name, "entity_type": body.entity_type}),
+            actor.get("organization_id"),
+        )
     return _row_to_dict_entry(row)
 
 
@@ -471,8 +498,15 @@ async def update_dictionary_entry(
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, "name_normalized already exists for another entry")
-    if row is None:
-        raise HTTPException(404, "entry not found")
+        if row is None:
+            raise HTTPException(404, "entry not found")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_entity_dict', 'entity_dictionary', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(entry_id),
+            json.dumps({"fields_updated": [s.split(" = ")[0] for s in sets]}),
+            actor.get("organization_id"),
+        )
     return _row_to_dict_entry(row)
 
 
@@ -485,6 +519,11 @@ async def delete_dictionary_entry(
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM entity_dictionary WHERE id = $1", entry_id)
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'delete_entity_dict', 'entity_dictionary', $2, NULL, $3)""",
+            int(actor["sub"]), str(entry_id), actor.get("organization_id"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +577,13 @@ async def create_stop_entity(
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"stop entity '{name_normalized}' already exists")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'create_stop_entity', 'stop_entities', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"name": body.name, "reason": body.reason}),
+            actor.get("organization_id"),
+        )
     return _row_to_stop_entity(row)
 
 
@@ -561,6 +607,11 @@ async def delete_stop_entity(
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM stop_entities WHERE id = $1", stop_id)
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'delete_stop_entity', 'stop_entities', $2, NULL, $3)""",
+            int(actor["sub"]), str(stop_id), actor.get("organization_id"),
+        )
 
 
 @router.get("/stop-entities/check")
@@ -608,27 +659,48 @@ class AliasCandidateReview(BaseModel):
 async def list_alias_candidates(
     status: str = "pending",
     limit: int = Query(50, ge=1, le=200),
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> list[AliasCandidateRow]:
-    """List entity alias candidates. Defaults to pending. Super-only."""
+    """List entity alias candidates. Defaults to pending. Super or CEO (own org)."""
     allowed = {"pending", "approved", "rejected", "archived"}
     if status not in allowed:
         raise HTTPException(400, f"status must be one of {sorted(allowed)}")
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT eac.id, eac.source_name, eac.target_node_id, n.name AS target_node_name,
-                   eac.confidence, eac.occurrences, eac.status,
-                   eac.first_seen, eac.last_seen, eac.sample_contexts
-            FROM entity_alias_candidates eac
-            JOIN nodes n ON n.id = eac.target_node_id
-            WHERE eac.status = $1
-            ORDER BY eac.occurrences DESC, eac.confidence DESC
-            LIMIT $2
-            """,
-            status, limit,
-        )
+        await _check_admin_op(conn, actor, "alias_candidates")
+        if actor.get("is_super"):
+            rows = await conn.fetch(
+                """
+                SELECT eac.id, eac.source_name, eac.target_node_id, n.name AS target_node_name,
+                       eac.confidence, eac.occurrences, eac.status,
+                       eac.first_seen, eac.last_seen, eac.sample_contexts
+                FROM entity_alias_candidates eac
+                JOIN nodes n ON n.id = eac.target_node_id
+                WHERE eac.status = $1
+                ORDER BY eac.occurrences DESC, eac.confidence DESC
+                LIMIT $2
+                """,
+                status, limit,
+            )
+        else:
+            actor_org = actor.get("organization_id")
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT eac.id, eac.source_name, eac.target_node_id, n.name AS target_node_name,
+                       eac.confidence, eac.occurrences, eac.status,
+                       eac.first_seen, eac.last_seen, eac.sample_contexts
+                FROM entity_alias_candidates eac
+                JOIN nodes n ON n.id = eac.target_node_id
+                JOIN entity_links el ON el.entity = eac.source_name
+                JOIN memories m ON m.id = el.memory_id
+                JOIN projects p ON p.id = m.project_id
+                JOIN workspaces w ON w.id = p.workspace_id
+                WHERE eac.status = $1 AND w.organization_id = $2
+                ORDER BY eac.occurrences DESC, eac.confidence DESC
+                LIMIT $3
+                """,
+                status, actor_org, limit,
+            )
     return [
         AliasCandidateRow(
             id=r["id"],
@@ -650,9 +722,9 @@ async def list_alias_candidates(
 async def review_alias_candidate(
     candidate_id: int,
     body: AliasCandidateReview,
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> AliasCandidateRow:
-    """Review an alias candidate (approve/reject). If approved + merge=true, merges entities. Super-only."""
+    """Review an alias candidate (approve/reject). If approved + merge=true, merges entities."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -663,7 +735,11 @@ async def review_alias_candidate(
             candidate_id,
         )
         if row is None:
-            raise HTTPException(404, "alias candidate not found")
+            raise HTTPException(404, "not found")
+        try:
+            await _check_admin_op(conn, actor, "alias_candidates", row["source_name"])
+        except HTTPException:
+            raise HTTPException(404, "not found")
         if row["status"] != "pending":
             raise HTTPException(409, f"candidate already reviewed (status={row['status']})")
 
@@ -675,7 +751,6 @@ async def review_alias_candidate(
         )
 
         if body.status == "approved" and body.merge:
-            # Resolve source name to a node id, then trigger merge
             source_node = await conn.fetchrow(
                 "SELECT id FROM nodes WHERE lower(name) = lower($1) AND status = 'active' LIMIT 1",
                 row["source_name"],
@@ -683,14 +758,27 @@ async def review_alias_candidate(
             if source_node is None:
                 raise HTTPException(422, f"source node '{row['source_name']}' not found as active node — merge skipped")
 
+            target_name = await conn.fetchval(
+                "SELECT name FROM nodes WHERE id = $1", row["target_node_id"]
+            )
+            if target_name:
+                await _check_admin_op(conn, actor, "merge_entities", target_name)
+
             from graph import merge_entities as _merge_entities
             try:
-                await _merge_entities(
+                merge_result = await _merge_entities(
                     source_node["id"], row["target_node_id"],
                     int(actor["sub"]), body.reason, pool,
                 )
             except ValueError as exc:
                 raise HTTPException(422, str(exc))
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'merge_via_alias_review', 'entity', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(candidate_id),
+                json.dumps({"source": row["source_name"], "target": target_name, "candidate_id": candidate_id}),
+                actor.get("organization_id"),
+            )
 
     # Fetch updated row
     async with pool.acquire() as conn:
@@ -730,9 +818,9 @@ class MergeEntitiesRequest(BaseModel):
 @router.post("/merge-entities")
 async def merge_entities_endpoint(
     body: MergeEntitiesRequest,
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> dict:
-    """Soft-merge source entity into target. Super-only.
+    """Soft-merge source entity into target.
 
     Resolves target to canonical via chain compression.
     Marks source as 'merged'. Logs to entity_merge_log.
@@ -741,6 +829,13 @@ async def merge_entities_endpoint(
         raise HTTPException(422, "source and target must be different")
     from graph import merge_entities as _merge_entities
     pool = await get_pool()
+    async with pool.acquire() as conn:
+        src_name = await conn.fetchval("SELECT name FROM nodes WHERE id = $1", body.source_node_id)
+        tgt_name = await conn.fetchval("SELECT name FROM nodes WHERE id = $1", body.target_node_id)
+        if not src_name or not tgt_name:
+            raise HTTPException(422, "source or target node not found")
+        await _check_admin_op(conn, actor, "merge_entities", src_name)
+        await _check_admin_op(conn, actor, "merge_entities", tgt_name)
     try:
         result = await _merge_entities(
             body.source_node_id, body.target_node_id,
@@ -748,6 +843,14 @@ async def merge_entities_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'merge_entities', 'node', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(result["merge_log_id"]),
+            json.dumps({"source_node_id": body.source_node_id, "target_node_id": body.target_node_id, "reason": body.reason}),
+            actor.get("organization_id"),
+        )
     return result
 
 
@@ -764,18 +867,35 @@ class UndoMergeRequest(BaseModel):
 @router.post("/undo-merge")
 async def undo_merge_endpoint(
     body: UndoMergeRequest,
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> dict:
-    """Revert a merge operation by log ID. Super-only.
+    """Revert a merge operation.
 
     Restores source node to status='active'. One-time only — already-undone merges return 409.
     """
     from graph import undo_merge as _undo_merge
     pool = await get_pool()
+    async with pool.acquire() as conn:
+        await _check_admin_op(conn, actor, "undo_merge")
+        src_name = await conn.fetchval("SELECT name FROM nodes WHERE id = $1", body.source_node_id)
+        if not src_name:
+            raise HTTPException(404, "not found")
+        try:
+            await _check_admin_op(conn, actor, "undo_merge", src_name)
+        except HTTPException:
+            raise HTTPException(404, "not found")
     try:
         result = await _undo_merge(body.source_node_id, pool)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'undo_merge', 'node', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(result["merge_log_id"]),
+            json.dumps({"source_node_id": body.source_node_id}),
+            actor.get("organization_id"),
+        )
     return result
 
 
@@ -793,17 +913,35 @@ class TrustTierUpdate(BaseModel):
 async def set_document_trust_tier(
     document_id: str,
     body: TrustTierUpdate,
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> dict:
-    """Set trust tier for a document (0=untrusted, 1=default, 2=verified, 3=gold). Super-only."""
+    """Set trust tier for a document (0=untrusted, 1=default, 2=verified, 3=gold)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await _check_admin_op(conn, actor, "trust_tier")
+        if not actor.get("is_super"):
+            doc_org = await conn.fetchval(
+                """SELECT w.organization_id FROM documents d
+                JOIN projects p ON p.id = d.project_id
+                JOIN workspaces w ON w.id = p.workspace_id
+                WHERE d.id = $1 AND d.status != 'deleted'""",
+                document_id,
+            )
+            if doc_org is None or doc_org != actor.get("organization_id"):
+                raise HTTPException(404, "document not found")
         result = await conn.execute(
             "UPDATE documents SET trust_tier = $1 WHERE id = $2 AND status != 'deleted'",
             body.trust_tier, document_id,
         )
         if result == "UPDATE 0":
             raise HTTPException(404, "document not found")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'set_trust_tier', 'document', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), document_id,
+            json.dumps({"trust_tier": body.trust_tier}),
+            actor.get("organization_id"),
+        )
     return {"document_id": document_id, "trust_tier": body.trust_tier}
 
 
@@ -821,23 +959,43 @@ class ConfirmRelationRequest(BaseModel):
 @router.put("/related-documents/confirm")
 async def confirm_related_document(
     body: ConfirmRelationRequest,
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> dict:
-    """Mark a related_documents entry as confirmed by the current user. Super-only."""
+    """Mark a related_documents entry as confirmed by the current user."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await _check_admin_op(conn, actor, "confirm_related_docs")
+        if not actor.get("is_super"):
+            actor_org = actor.get("organization_id")
+            for doc_label, doc_id in [("source", body.source_id), ("target", body.target_id)]:
+                doc_org = await conn.fetchval(
+                    """SELECT w.organization_id FROM documents d
+                    JOIN projects p ON p.id = d.project_id
+                    JOIN workspaces w ON w.id = p.workspace_id
+                    WHERE d.id = $1 AND d.status != 'deleted'""",
+                    doc_id,
+                )
+                if doc_org is None or doc_org != actor_org:
+                    raise HTTPException(404, f"{doc_label} document not found")
         result = await conn.execute(
             "UPDATE related_documents SET confirmed_by = $1 WHERE source_id = $2 AND target_id = $3",
             int(actor["sub"]), body.source_id, body.target_id,
         )
         if result == "UPDATE 0":
             raise HTTPException(404, "relation not found")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'confirm_related_docs', 'related_documents', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), body.source_id,
+            json.dumps({"source_id": body.source_id, "target_id": body.target_id}),
+            actor.get("organization_id"),
+        )
     return {"source_id": body.source_id, "target_id": body.target_id, "confirmed": True}
 
 
 @router.get("/graph-vocabulary", status_code=200)
 async def get_graph_vocabulary(
-    actor: dict = Depends(require_super),
+    actor: dict = Depends(get_current_user),
 ) -> dict:
     """Vocabulario del grafo: entidades del diccionario + predicados aprobados.
 
@@ -845,6 +1003,7 @@ async def get_graph_vocabulary(
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
+        await _check_admin_op(conn, actor, "graph_vocabulary")
         entities = await conn.fetch(
             "SELECT name, entity_type FROM entity_dictionary ORDER BY entity_type, name"
         )

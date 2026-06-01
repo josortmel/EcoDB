@@ -71,6 +71,13 @@ async def post_session_event(
             """,
             agent_row["id"],
         )
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'agent_session', 'agent', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), body.agent_identifier,
+            json.dumps({"event": body.event}),
+            actor.get("organization_id"),
+        )
     await broadcast_event(f"agent_{body.event}", {"agent_identifier": body.agent_identifier})
     return {
         "ok": True,
@@ -130,11 +137,13 @@ async def broadcast_internal(
     if _INTERNAL_BROADCAST_SECRET and secret_header == _INTERNAL_BROADCAST_SECRET:
         authorized = True
     elif auth_header.startswith("Bearer "):
-        # Allow any valid authenticated call — worker runs on internal network
-        authorized = True
-    elif not _INTERNAL_BROADCAST_SECRET:
-        # No secret configured → open for internal use (Docker network isolation)
-        authorized = True
+        try:
+            from auth import decode_jwt
+            payload = decode_jwt(auth_header[7:])
+            if payload.get("is_super"):
+                authorized = True
+        except Exception:
+            pass
 
     if not authorized:
         raise HTTPException(403, "internal broadcast requires X-Internal-Secret or Bearer token")

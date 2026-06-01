@@ -3,14 +3,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.8.6"><img src="https://img.shields.io/badge/release-v0.8.6-orange" alt="Release"></a>
+  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/release-v0.9.0-orange" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
   <img src="https://img.shields.io/badge/MCP-32%20tools-0d9488" alt="MCP Tools">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
 </p>
 
-Personal AI memory tools serve one agent, one session. EcoDB is the step beyond: a shared memory system where **multiple agents** store, search, connect, and govern knowledge across teams and projects, with workspace isolation, role-based permissions, and a knowledge graph that links entities across memories and documents.
+Personal AI memory tools serve one agent, one session. EcoDB extends this to teams: a shared memory system where **multiple agents** store, search, connect, and govern knowledge across projects, with workspace isolation, role-based permissions, and a knowledge graph that links entities across memories and documents.
 
 The vision: move from personal developer memory to **enterprise competitive intelligence**. One system, multiple users, governed knowledge.
 
@@ -80,7 +80,7 @@ Recall@K has no such confound. The correct document is in the top K or it isn't.
 | Standard (limit=5) | 44ms | 44ms |
 | Full pipeline (limit=20, graph discovery) | 44ms | 48ms |
 
-Measured on a single NVIDIA RTX 2080 Ti (11 GB). The full 10-stage GAMR pipeline — embedding, BM25, graph traversal, freshness, composite scoring — completes in under 50ms at p95.
+Measured on a single NVIDIA RTX 2080 Ti (11 GB). The full 10-stage GAMR pipeline completes in under 50ms at p95.
 
 ### Internal golden set
 
@@ -119,9 +119,9 @@ Automatic linking feeds the graph. It never substitutes a healthy, curated graph
 
 ## MCP Tools
 
-Connect any MCP-compatible client:
+Connect any MCP-compatible client (Claude Code, Claude Desktop, Cursor, Windsurf, etc.):
 
-**SSE transport** (default):
+**SSE transport** — for clients that support SSE natively (e.g. Claude Code `settings.json`):
 ```json
 {
   "mcpServers": {
@@ -133,7 +133,7 @@ Connect any MCP-compatible client:
 }
 ```
 
-**stdio transport** (subprocess):
+**stdio transport** — for clients that launch MCP servers as subprocesses (e.g. Claude Desktop `claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -145,30 +145,47 @@ Connect any MCP-compatible client:
 }
 ```
 
+> **Note:** The `--transport stdio` flag is required when using `docker exec` because the MCP container runs in SSE mode by default. Without it, the subprocess tries to bind port 8091 which is already in use by the running container.
+
 | Tool | What it does |
 |------|-------------|
-| `search` | GAMR search. Returns text and image memories ranked together |
+| **Memory** | |
+| `search` | GAMR search (10-stage). Text and image queries, cross-modal |
 | `search_recent` | Recent memories with filters (agent, tags, date range) |
-| `save_memory` | Store memory (auto-embeds, auto-extracts entities, auto-links graph) |
-| `read_memory` | Read a memory by ID |
+| `get_relevant_context` | Context injection — returns formatted context block for LLM consumption |
+| `save_memory` | Store memory with optional image (auto-embeds, auto-extracts entities, auto-links graph) |
+| `read_memory` | Read a memory by UUID |
 | `delete_memory` | Soft-delete to recycle bin |
+| `unarchive_memory` | Restore from recycle bin |
+| `view_image` | View image attached to a memory, inline to the LLM |
+| **Knowledge Graph** | |
 | `save_triple` | Add relationship to knowledge graph |
 | `save_triples_batch` | Batch add triples (max 100) |
+| `delete_triple` | Remove a graph relationship |
 | `neighbors` | Graph neighbors at depth N |
 | `path_between` | Shortest path between two nodes |
 | `search_nodes` | Fuzzy search nodes by name |
-| `delete_triple` | Remove a graph relationship |
-| `graph_status` | Graph statistics (nodes, edges, predicates) |
-| `load_identity` | Load agent identity (ordered narrative fragments) |
-| `save_identity` | Save agent identity snapshot |
-| `view_image` | Retrieve embedded image, visible inline to the LLM |
-| `register_document` | Register document for ingestion |
-| `document_status` | Check ingestion pipeline status |
-| `search_in_document` | Search within a specific document |
-| `read_document` | Read document content |
-| `list_documents` | List registered documents |
-| `reindex_document` | Re-index a document |
-| `unlink_document` | Unlink a document |
+| `graph_status` | Graph statistics (nodes, triples, predicates) |
+| **Identity** | |
+| `load_identity` | Load agent identity fragments (ordered narrative) |
+| `save_identity` | Save agent identity (versioned snapshot) |
+| **Documents** | |
+| `register_document` | Register document for ingestion (PDF, DOCX, audio) |
+| `document_status` | Check document processing status |
+| `search_in_document` | Search within a specific document's chunks |
+| `read_document` | Read document metadata and chunks |
+| `list_documents` | List documents with filters |
+| `reindex_document` | Re-queue document for processing |
+| `unlink_document` | Soft-delete a document |
+| `classify_document` | Set document trust tier (0–3) |
+| `confirm_document_relation` | Confirm related document pair |
+| **Governance** | |
+| `review_alias_candidate` | Approve or reject entity alias candidate |
+| `merge_entities` | Soft-merge source entity into target |
+| `undo_merge` | Revert a merge operation |
+| `seed_dictionary` | Bulk-add entries to entity dictionary |
+| `validate_link` | Validate entity↔memory link |
+| `get_graph_vocabulary` | Read entity dictionary and approved predicates |
 
 ### UltraSearch
 
@@ -228,7 +245,8 @@ The system controls who sees what, who can write where, and how knowledge flows 
 
 | Role | Scope | Can do |
 |------|-------|--------|
-| **Superuser** | Global | Everything. Manage workspaces, users, agents, ontology. |
+| **Superuser** | Global | Everything. Manage organizations, users, agents, ontology. |
+| **CEO** | Organization | Manage workspaces and projects within their org. Admin operations (entity dictionary, trust tiers, merges) scoped to org data. |
 | **Workspace Lead** | Department | Manage projects and members within their workspace. |
 | **Project Member** | Project | Read/write within assigned projects. |
 
@@ -241,6 +259,25 @@ Every memory has a visibility scope:
 - **Workspace-scoped**: cascading permissions from workspace → project
 
 Agents operate within their assigned workspace and project. A sales agent can't read engineering memories unless explicitly granted access.
+
+### Multi-tenancy
+
+EcoDB v0.9 adds organization-level isolation. Multiple teams share one EcoDB instance without seeing each other's data.
+
+The organization is the tenant boundary. Every memory, document, workspace, project, API key, and audit entry belongs to exactly one organization. Queries never return data from another org — scoping is enforced at the SQL level, not application-level filtering. Every JWT carries `organization_id` for all roles, so permission checks need no additional database lookups.
+
+**What's isolated:** memories, documents, workspaces, projects, teams (cross-org membership blocked by database triggers), API keys, audit log.
+
+**What's shared:** graph nodes and triples (structural knowledge like "PostgreSQL is a technology" benefits all orgs), entity dictionary, canonical predicates. The graph is a shared ontology, not tenant data.
+
+**Key capabilities:**
+
+- **API key rotation** — `POST /auth/api-keys/{key_id}/rotate` issues a new key while the old one enters a configurable grace period (default 24h, max 720h). Both keys work simultaneously. Zero-downtime rotation.
+- **Rate limiting** — per-user sliding window. 120 req/min general, 60 req/min search. `Retry-After` and `X-RateLimit-*` headers on 429 responses.
+- **Audit trail** — every mutation endpoint writes to `audit_log` with `organization_id`. CEOs query their org's audit. Superusers see all.
+- **IDOR prevention** — auth before fetch, unified error responses. A 403 never reveals whether a resource exists in another org.
+
+For the complete architecture — authentication flow, data isolation model, admin operations, and design decisions — see [`docs/architecture/multi-tenant.en.md`](docs/architecture/multi-tenant.en.md).
 
 ## Quick Start
 
@@ -283,13 +320,15 @@ docker compose --profile with-llm up --build -d          # local LLM for classif
 
 | Version | Status | What it adds |
 |---------|--------|-------------|
-| **v0.8.6** | **Current** | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. Security hardening + infrastructure consolidation. |
-| **v0.9** | Next | Multi-tenant. Multiple users on separate machines connected to one EcoDB instance. OAuth. Per-org API keys. |
-| **v1.0** | Planned | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
+| **v0.8.6** | Done | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. Security hardening + infrastructure consolidation. |
+| **v0.9.0** | **Current** | Multi-tenant. Organization isolation, CEO role, API key rotation with grace period, rate limiting headers, audit log complete, schema v5.1.0. |
+| **v1.0** | Next | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
 
 ## Documentation
 
+- [`docs/architecture/multi-tenant.en.md`](docs/architecture/multi-tenant.en.md): Multi-tenant architecture — isolation model, auth flow, key rotation, rate limiting, design decisions
 - [`docs/architecture/`](docs/architecture/): System briefs on governance, ingestion, intelligence, product design
+- [`docs/migration-v0.8-to-v0.9.md`](docs/migration-v0.8-to-v0.9.md): Migration guide from v0.8.x to v0.9.0
 - [`eval/`](eval/): Benchmark framework, paper baseline comparison, and golden set evaluation
 - [`CHANGELOG.md`](CHANGELOG.md): Version history
 

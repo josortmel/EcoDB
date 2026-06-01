@@ -881,8 +881,8 @@ async def search_memories(
                     audit_uuid_early = str(uuid.uuid4())
                     await conn.execute(
                         """
-                        INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                        VALUES ($1, 'search_expanded', 'memories_batch', $2, $3::jsonb)
+                        INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                        VALUES ($1, 'search_expanded', 'memories_batch', $2, $3::jsonb, $4)
                         """,
                         user_id_actor, audit_uuid_early,
                         json.dumps({
@@ -899,7 +899,7 @@ async def search_memories(
                             "actor_is_super": is_super,
                             "actor_is_ceo": is_ceo,
                             "no_visible_projects": True,
-                        }),
+                        }), actor.get("organization_id"),
                     )
                 return SearchResponse(
                     query=body.query_text or "(image query)",
@@ -1100,8 +1100,8 @@ async def search_memories(
             audit_uuid = str(uuid.uuid4())
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'search_expanded', 'memories_batch', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'search_expanded', 'memories_batch', $2, $3::jsonb, $4)
                 """,
                 user_id_actor, audit_uuid,
                 json.dumps({
@@ -1117,7 +1117,7 @@ async def search_memories(
                     "result_count": len(rows),
                     "actor_is_super": is_super,
                     "actor_is_ceo": is_ceo,
-                }),
+                }), actor.get("organization_id"),
             )
 
     # --- Etapas 4-8 GAMR (
@@ -1204,7 +1204,18 @@ async def search_memories(
     # GC1 — Discovery: fetch memorias descubiertas por grafo (opt-in)
     if body.graph_discovery:
         seen_ids = {str(r["id"]) for r in rows}
-        discovered_ids = [mid for mid in graph_scores if mid not in seen_ids][:20]
+        raw_discovered = [mid for mid in graph_scores if mid not in seen_ids]
+        if raw_discovered and visible_projects:
+            async with pool.acquire() as conn:
+                perm_rows = await conn.fetch(
+                    "SELECT id FROM memories WHERE id = ANY($1::uuid[]) AND project_id = ANY($2::int[])",
+                    [uuid.UUID(mid) for mid in raw_discovered],
+                    list(visible_projects),
+                )
+                allowed = {str(r["id"]) for r in perm_rows}
+                discovered_ids = [mid for mid in raw_discovered if mid in allowed][:20]
+        else:
+            discovered_ids = raw_discovered[:20]
         if discovered_ids:
             async with pool.acquire() as conn:
                 disc_rows = await conn.fetch("""

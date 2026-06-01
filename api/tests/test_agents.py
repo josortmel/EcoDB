@@ -121,6 +121,10 @@ def super_jwt(client):
         try:
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-agents-%'")
             await conn.execute(
+                "DELETE FROM audit_log WHERE user_id IN "
+                "(SELECT id FROM users WHERE name LIKE 'pytest-agents-%')"
+            )
+            await conn.execute(
                 "DELETE FROM user_emails WHERE user_id IN "
                 "(SELECT id FROM users WHERE name LIKE 'pytest-agents-%')"
             )

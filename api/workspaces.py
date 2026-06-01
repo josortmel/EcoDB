@@ -164,6 +164,13 @@ async def create_workspace(
                     """,
                     row["id"],
                 )
+                await conn.execute(
+                    """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'create_workspace', 'workspace', $2, $3::jsonb, $4)""",
+                    int(actor["sub"]), str(row["id"]),
+                    json.dumps({"name": body.name, "organization_id": body.organization_id}),
+                    actor.get("organization_id"),
+                )
         except UniqueViolationError:
             # Schema tiene UNIQUE(org_id, name) + partial unique idx para org_id IS NULL.
             # Si la collision es del workspace name, mensaje específico.
@@ -313,6 +320,14 @@ async def update_workspace(
         if new_row is None:
             raise HTTPException(403, "no access to this workspace")
 
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_workspace', 'workspace', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(workspace_id),
+            json.dumps({"name": body.name}),
+            actor.get("organization_id"),
+        )
+
     return WorkspaceResponse(**dict(new_row))
 
 
@@ -353,14 +368,15 @@ async def delete_workspace(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'delete', 'workspace', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'delete', 'workspace', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), str(workspace_id),
                     json.dumps({
                         "name": row["name"],
                         "organization_id": row["organization_id"],
                     }),
+                    actor.get("organization_id"),
                 )
                 await conn.execute("DELETE FROM workspaces WHERE id = $1", workspace_id)
         except ForeignKeyViolationError:

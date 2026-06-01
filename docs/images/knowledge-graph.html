@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EcoDB Knowledge Graph v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Geist", system-ui, sans-serif; background: #0a0a0a; }
+
+  .diagram {
+    width: 1200px;
+    height: 520px;
+    padding: 46px 60px;
+    background: oklch(10% 0.005 50);
+    background-image:
+      radial-gradient(ellipse at 35% 55%, oklch(15% 0.02 50) 0%, transparent 50%),
+      radial-gradient(circle, oklch(20% 0.01 50) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px;
+    position: relative;
+  }
+
+  .diagram-title {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #f37513;
+    font-family: "Geist Mono", monospace;
+    margin-bottom: 32px;
+  }
+
+  .kg-layout {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 400px;
+  }
+
+  /* Graph area */
+  .kg-graph { width: 480px; height: 400px; flex-shrink: 0; }
+
+  .kg-graph svg { width: 100%; height: 100%; }
+
+  /* Muted edges (existing graph - visible but secondary) */
+  .edge-muted { stroke: oklch(46% 0.06 50); stroke-width: 1.5; }
+  /* Discovery edges (the moment) */
+  .edge-discovery { stroke: #f37513; stroke-width: 2.6; opacity: 0.9; }
+  /* Edge labels */
+  .edge-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    fill: oklch(80% 0.13 50);
+    font-weight: 600;
+  }
+  .edge-label-muted {
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    fill: oklch(72% 0.07 50);
+    font-weight: 500;
+  }
+
+  /* Nodes */
+  .node-query { fill: #f37513; stroke: oklch(78% 0.18 50); stroke-width: 3; }
+  .node-discovered { fill: oklch(32% 0.12 50); stroke: #f37513; stroke-width: 2; }
+  .node-d1 { fill: oklch(34% 0.06 50); stroke: oklch(54% 0.08 50); stroke-width: 1.5; }
+  .node-d2 { fill: oklch(38% 0.07 50); stroke: oklch(56% 0.09 50); stroke-width: 1.5; }
+  .node-d3 { fill: oklch(42% 0.08 50); stroke: oklch(58% 0.10 50); stroke-width: 1.5; }
+
+  .node-text {
+    font-family: "Geist", sans-serif;
+    font-size: 13px;
+    fill: oklch(96% 0.01 50);
+    text-anchor: middle;
+    dominant-baseline: central;
+    font-weight: 600;
+  }
+
+  .node-text-d1 { font-family: "Geist", sans-serif; font-size: 12px; fill: oklch(85% 0.014 50); text-anchor: middle; dominant-baseline: central; font-weight: 500; }
+  .node-text-d2 { font-family: "Geist", sans-serif; font-size: 12px; fill: oklch(88% 0.014 50); text-anchor: middle; dominant-baseline: central; font-weight: 500; }
+  .node-text-d3 { font-family: "Geist", sans-serif; font-size: 12px; fill: oklch(90% 0.014 50); text-anchor: middle; dominant-baseline: central; font-weight: 500; }
+
+  /* Discovery pulse rings */
+  .pulse-ring {
+    fill: none;
+    stroke: #f37513;
+    opacity: 0.22;
+  }
+
+  /* Flow section */
+  .kg-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100px;
+    flex-shrink: 0;
+  }
+
+  .kg-flow-arrow {
+    font-family: "Geist Mono", monospace;
+    font-size: 32px;
+    color: #f37513;
+  }
+
+  .kg-flow-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    color: oklch(80% 0.10 50);
+    text-align: center;
+    margin-top: 8px;
+    line-height: 1.5;
+    font-weight: 600;
+  }
+
+  /* Output panel */
+  .kg-output { flex: 1; display: flex; flex-direction: column; gap: 14px; }
+
+  .kg-output-title {
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    color: oklch(78% 0.014 50);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+    font-weight: 600;
+  }
+
+  .kg-output-box {
+    border: 1.5px solid oklch(34% 0.03 50);
+    border-radius: 10px;
+    padding: 16px 20px;
+    background: oklch(14% 0.008 50);
+  }
+
+  .kg-output-box.highlight {
+    border-color: oklch(54% 0.13 50);
+    background: oklch(16% 0.02 50);
+  }
+
+  .kg-output-box h4 {
+    font-family: "Geist", sans-serif;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: oklch(95% 0.01 50);
+    margin-bottom: 6px;
+  }
+
+  .kg-output-box.highlight h4 { color: #f37513; }
+
+  .kg-output-box p {
+    font-family: "Geist", sans-serif;
+    font-size: 12.5px;
+    color: oklch(80% 0.014 50);
+    line-height: 1.55;
+  }
+
+  .kg-output-box code {
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    color: oklch(82% 0.13 50);
+    background: oklch(18% 0.015 50);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+
+  /* Footer compare */
+  .kg-compare {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid oklch(26% 0.015 50);
+  }
+
+  .kg-compare-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    color: oklch(74% 0.014 50);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .kg-compare-value {
+    font-family: "Geist", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: oklch(92% 0.014 50);
+    text-align: center;
+  }
+
+  .kg-compare-value.accent { color: #f37513; }
+</style>
+</head>
+<body>
+
+<div class="diagram" id="kg-v2">
+  <div class="diagram-title">Knowledge Graph: The Moment of Discovery</div>
+
+  <div class="kg-layout">
+    <div class="kg-graph">
+      <svg viewBox="0 0 480 400">
+        <!-- Dormant edges (existing graph, faded) -->
+        <line class="edge-muted" x1="80" y1="280" x2="150" y2="330"/>
+        <line class="edge-muted" x1="80" y1="280" x2="120" y2="170"/>
+        <line class="edge-muted" x1="370" y1="250" x2="280" y2="340"/>
+        <line class="edge-muted" x1="200" y1="370" x2="150" y2="330"/>
+        <line class="edge-muted" x1="340" y1="340" x2="280" y2="340"/>
+        <line class="edge-muted" x1="200" y1="370" x2="120" y2="370"/>
+
+        <!-- Discovery edges (the expansion from API query, bright orange) -->
+        <line class="edge-discovery" x1="220" y1="90" x2="120" y2="170"/>
+        <line class="edge-discovery" x1="220" y1="90" x2="320" y2="155"/>
+        <line class="edge-discovery" x1="220" y1="90" x2="220" y2="240"/>
+
+        <!-- Secondary discovery (2nd hop) -->
+        <line class="edge-discovery" x1="120" y1="170" x2="80" y2="280" style="opacity:0.4"/>
+        <line class="edge-discovery" x1="320" y1="155" x2="370" y2="250" style="opacity:0.4"/>
+        <line class="edge-discovery" x1="320" y1="155" x2="220" y2="240" style="opacity:0.4"/>
+        <line class="edge-discovery" x1="220" y1="240" x2="150" y2="330" style="opacity:0.4"/>
+
+        <!-- Edge labels on discovery paths -->
+        <text class="edge-label" x="155" y="120" transform="rotate(-30 155 120)">works_on</text>
+        <text class="edge-label" x="280" y="112" transform="rotate(18 280 112)">decided</text>
+        <text class="edge-label" x="232" y="165">part_of</text>
+
+        <!-- Edge labels on muted paths -->
+        <text class="edge-label-muted" x="95" y="225" transform="rotate(-60 95 225)">uses</text>
+        <text class="edge-label-muted" x="355" y="292" transform="rotate(50 355 292)">requires</text>
+
+        <!-- Pulse rings around query node -->
+        <circle class="pulse-ring" cx="220" cy="90" r="42" stroke-width="1.4"/>
+        <circle class="pulse-ring" cx="220" cy="90" r="60" stroke-width="1" opacity="0.13"/>
+
+        <!-- Query node (the search origin) -->
+        <circle cx="220" cy="90" r="30" class="node-query"/>
+        <text class="node-text" x="220" y="88" fill="oklch(98% 0.008 50)">API</text>
+        <text x="220" y="105" font-family="Geist Mono, monospace" font-size="9" fill="oklch(85% 0.01 50)" text-anchor="middle">query</text>
+
+        <!-- Discovered nodes (1st hop, bright) -->
+        <circle cx="120" cy="170" r="24" class="node-discovered"/>
+        <text class="node-text" x="120" y="172">Schema</text>
+
+        <circle cx="320" cy="155" r="24" class="node-discovered"/>
+        <text class="node-text" x="320" y="157">Auth</text>
+
+        <circle cx="220" cy="240" r="28" class="node-discovered"/>
+        <text class="node-text" x="220" y="242">Sprint 3</text>
+
+        <!-- Dormant nodes (exist but not in discovery path) -->
+        <!-- d1: upper dormant (y~250-280) -->
+        <circle cx="80" cy="280" r="20" class="node-d1"/>
+        <text class="node-text-d1" x="80" y="282">PG16</text>
+
+        <circle cx="370" cy="250" r="20" class="node-d1"/>
+        <text class="node-text-d1" x="370" y="252">JWT</text>
+
+        <!-- d2: mid dormant (y~330-340) -->
+        <circle cx="150" cy="330" r="28" class="node-d2"/>
+        <text class="node-text-d2" x="150" y="332">Migration</text>
+
+        <circle cx="280" cy="340" r="22" class="node-d2"/>
+        <text class="node-text-d2" x="280" y="342">OAuth</text>
+
+        <circle cx="340" cy="340" r="20" class="node-d2"/>
+        <text class="node-text-d2" x="340" y="342">RBAC</text>
+
+        <!-- d3: bottom dormant (y~370), brightest dormant -->
+        <circle cx="200" cy="370" r="22" class="node-d3"/>
+        <text class="node-text-d3" x="200" y="372">Alembic</text>
+
+        <circle cx="120" cy="370" r="20" class="node-d3"/>
+        <text class="node-text-d3" x="120" y="372">SQL</text>
+      </svg>
+    </div>
+
+    <div class="kg-flow">
+      <div class="kg-flow-arrow">→</div>
+      <div class="kg-flow-label">curated<br>context</div>
+    </div>
+
+    <div class="kg-output">
+      <div class="kg-output-title">LLM receives context before searching</div>
+
+      <div class="kg-output-box highlight">
+        <h4>Graph expansion</h4>
+        <p><code>neighbors("API")</code> → Schema, Auth, Sprint 3<br>
+        <code>path_between("API", "OAuth")</code> → API → Auth → OAuth<br>
+        Entities the LLM didn't know to ask about</p>
+      </div>
+
+      <div class="kg-output-box">
+        <h4>Informed vector search</h4>
+        <p>Now searches with context: API + Schema + Auth + Sprint 3.<br>
+        Finds memories that raw "API" query would miss.</p>
+      </div>
+
+      <div class="kg-output-box">
+        <h4>Quality answer</h4>
+        <p>The model understood the ecosystem before accessing data.<br>
+        Connects dots that similarity alone cannot.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="kg-compare">
+    <div style="text-align:center">
+      <div class="kg-compare-label">Vector search</div>
+      <div class="kg-compare-value">finds what's similar</div>
+    </div>
+    <div style="text-align:center">
+      <div class="kg-compare-label">Knowledge graph</div>
+      <div class="kg-compare-value accent">finds what's related</div>
+    </div>
+    <div style="text-align:center">
+      <div class="kg-compare-label">Graph weight in GAMR</div>
+      <div class="kg-compare-value">5% (by design)</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

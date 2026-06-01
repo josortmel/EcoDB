@@ -129,6 +129,9 @@ async def _create_ceo(name: str, org_name: str) -> tuple[int, int, str]:
             org_name, user_id,
         )
         org_id = o["id"]
+        await conn.execute(
+            "UPDATE users SET organization_id = $1 WHERE id = $2", org_id, user_id
+        )
         key_plain, key_hash = generate_api_key()
         await conn.execute(
             "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true)",

@@ -153,6 +153,13 @@ async def create_team(
             )
         except UniqueViolationError:
             raise HTTPException(409, "team with this name already exists")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'create_team', 'team', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"name": body.name}),
+            actor.get("organization_id"),
+        )
     return TeamResponse(**dict(row))
 
 
@@ -256,6 +263,13 @@ async def update_team(
             raise HTTPException(409, "team with this name already exists")
         if row is None:
             raise HTTPException(403, "no access to this team")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_team', 'team', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(team_id),
+            json.dumps({"name": body.name}),
+            actor.get("organization_id"),
+        )
     return TeamResponse(**dict(row))
 
 
@@ -280,11 +294,11 @@ async def delete_team(
         async with conn.transaction():
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'delete', 'team', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'delete', 'team', $2, $3::jsonb, $4)
                 """,
                 int(actor["sub"]), str(team_id),
-                json.dumps({"name": row["name"]}),
+                json.dumps({"name": row["name"]}), actor.get("organization_id"),
             )
             await conn.execute("DELETE FROM teams WHERE id = $1", team_id)
 
@@ -318,11 +332,11 @@ async def add_team_member(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'add_member', 'team', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'add_member', 'team', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), str(team_id),
-                    json.dumps({"user_id": body.user_id}),
+                    json.dumps({"user_id": body.user_id}), actor.get("organization_id"),
                 )
                 await conn.execute(
                     """
@@ -355,11 +369,11 @@ async def remove_team_member(
         async with conn.transaction():
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'remove_member', 'team', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'remove_member', 'team', $2, $3::jsonb, $4)
                 """,
                 int(actor["sub"]), str(team_id),
-                json.dumps({"user_id": user_id}),
+                json.dumps({"user_id": user_id}), actor.get("organization_id"),
             )
             await conn.execute(
                 "DELETE FROM team_members WHERE team_id = $1 AND user_id = $2",
@@ -394,11 +408,11 @@ async def add_team_resource(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'add_resource', 'team', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'add_resource', 'team', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), str(team_id),
-                    json.dumps({"project_id": body.project_id}),
+                    json.dumps({"project_id": body.project_id}), actor.get("organization_id"),
                 )
                 await conn.execute(
                     """
@@ -430,11 +444,11 @@ async def remove_team_resource(
         async with conn.transaction():
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'remove_resource', 'team', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'remove_resource', 'team', $2, $3::jsonb, $4)
                 """,
                 int(actor["sub"]), str(team_id),
-                json.dumps({"project_id": project_id}),
+                json.dumps({"project_id": project_id}), actor.get("organization_id"),
             )
             await conn.execute(
                 "DELETE FROM team_resources WHERE team_id = $1 AND project_id = $2",

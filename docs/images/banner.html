@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EcoDB Social Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 2560px;
+    height: 1280px;
+    overflow: hidden;
+    font-family: "Geist", system-ui, sans-serif;
+  }
+
+  .card {
+    width: 2560px;
+    height: 1280px;
+    background: oklch(12% 0.008 50);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 160px 200px;
+    overflow: hidden;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, oklch(30% 0.02 50) 1.5px, transparent 1.5px);
+    background-size: 64px 64px;
+    opacity: 0.25;
+    pointer-events: none;
+  }
+
+  /* grafo decorativo */
+  .graph-decoration {
+    position: absolute;
+    right: -40px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1040px;
+    height: 1040px;
+    opacity: 0.22;
+  }
+
+  .graph-decoration circle {
+    fill: oklch(70% 0.14 50);
+  }
+
+  .graph-decoration .node-accent {
+    fill: #f37513;
+    opacity: 1;
+  }
+
+  .graph-decoration line {
+    stroke: oklch(52% 0.10 50);
+    stroke-width: 1.4;
+  }
+
+  /* lockup: logo + nombre */
+  .lockup {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    margin-bottom: 40px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .lockup svg {
+    width: 108px;
+    height: 108px;
+    flex-shrink: 0;
+  }
+
+  .product-name {
+    font-family: "Geist", sans-serif;
+    font-size: 192px;
+    font-weight: 700;
+    color: oklch(96% 0.008 50);
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .product-name span {
+    color: #f37513;
+  }
+
+  .tagline {
+    font-family: "Geist", sans-serif;
+    font-size: 52px;
+    font-weight: 400;
+    color: oklch(82% 0.018 50);
+    line-height: 1.45;
+    max-width: 1200px;
+    position: relative;
+    z-index: 1;
+    margin-bottom: 80px;
+  }
+
+  /* pills */
+  .pills {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
+  }
+
+  .pill {
+    font-family: "Geist Mono", monospace;
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: oklch(82% 0.08 50);
+    border: 2px solid oklch(46% 0.07 50);
+    border-radius: 12px;
+    padding: 12px 28px;
+    background: oklch(17% 0.014 50);
+  }
+
+  .pill.accent {
+    color: oklch(76% 0.19 50);
+    border-color: #f37513;
+    background: oklch(20% 0.04 50);
+  }
+
+  /* tagline secundaria — bottom right */
+  .tagline-secondary {
+    position: absolute;
+    bottom: 104px;
+    right: 200px;
+    text-align: right;
+    z-index: 1;
+  }
+
+  .tagline-secondary-text {
+    font-family: "Geist", sans-serif;
+    font-size: 36px;
+    font-weight: 500;
+    color: oklch(78% 0.016 50);
+    line-height: 1.35;
+  }
+
+  .tagline-secondary-text em {
+    font-style: normal;
+    color: #f37513;
+  }
+
+  /* footer */
+  .footer-url {
+    position: absolute;
+    bottom: 104px;
+    left: 200px;
+    font-family: "Geist Mono", monospace;
+    font-size: 28px;
+    color: oklch(40% 0.01 50);
+    letter-spacing: 0.04em;
+    z-index: 1;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- grafo decorativo de fondo -->
+  <svg class="graph-decoration" viewBox="0 0 520 520">
+    <line x1="260" y1="130" x2="390" y2="210"/>
+    <line x1="260" y1="130" x2="160" y2="240"/>
+    <line x1="390" y1="210" x2="420" y2="340"/>
+    <line x1="390" y1="210" x2="300" y2="290"/>
+    <line x1="160" y1="240" x2="200" y2="370"/>
+    <line x1="160" y1="240" x2="300" y2="290"/>
+    <line x1="300" y1="290" x2="420" y2="340"/>
+    <line x1="300" y1="290" x2="200" y2="370"/>
+    <line x1="420" y1="340" x2="340" y2="430"/>
+    <line x1="200" y1="370" x2="340" y2="430"/>
+    <line x1="200" y1="370" x2="120" y2="420"/>
+    <line x1="340" y1="430" x2="440" y2="440"/>
+    <line x1="260" y1="130" x2="380" y2="100"/>
+    <line x1="380" y1="100" x2="460" y2="170"/>
+    <line x1="460" y1="170" x2="390" y2="210"/>
+    <line x1="120" y1="420" x2="80" y2="320"/>
+    <line x1="80" y1="320" x2="160" y2="240"/>
+    <circle cx="260" cy="130" r="8"/>
+    <circle cx="390" cy="210" r="6"/>
+    <circle cx="160" cy="240" r="7"/>
+    <circle cx="300" cy="290" r="10" class="node-accent"/>
+    <circle cx="420" cy="340" r="5"/>
+    <circle cx="200" cy="370" r="7"/>
+    <circle cx="340" cy="430" r="6"/>
+    <circle cx="120" cy="420" r="4"/>
+    <circle cx="440" cy="440" r="4"/>
+    <circle cx="380" cy="100" r="5"/>
+    <circle cx="460" cy="170" r="4"/>
+    <circle cx="80" cy="320" r="5"/>
+  </svg>
+
+  <!-- lockup: icono + EcoDB -->
+  <div class="lockup">
+    <svg viewBox="0 0 32 32">
+      <rect x="2" y="2" width="28" height="28" rx="2" fill="none" stroke="oklch(72% 0.01 50)" stroke-width="1.8"/>
+      <line x1="8" y1="10" x2="24" y2="10" stroke="oklch(72% 0.01 50)" stroke-width="2.2" stroke-linecap="square"/>
+      <line x1="8" y1="16" x2="20" y2="16" stroke="#f37513" stroke-width="2.2" stroke-linecap="square"/>
+      <line x1="8" y1="22" x2="24" y2="22" stroke="oklch(72% 0.01 50)" stroke-width="2.2" stroke-linecap="square"/>
+    </svg>
+    <div class="product-name">Eco<span>DB</span></div>
+  </div>
+
+  <div class="tagline">Collective AI memory infrastructure.<br>Semantic search, knowledge graph, MCP server.</div>
+
+  <div class="pills">
+    <span class="pill accent">GAMR 10-stage search</span>
+    <span class="pill">PostgreSQL + pgvector</span>
+    <span class="pill">Apache AGE graph</span>
+    <span class="pill">22+ MCP tools</span>
+    <span class="pill">GLiNER NER</span>
+  </div>
+
+  <!-- tagline secundaria -->
+  <div class="tagline-secondary">
+    <div class="tagline-secondary-text">Your agents <em>remember</em>.<br>Across sessions.</div>
+  </div>
+
+  <!-- footer-url quitado para uso como banner -->
+
+</div>
+</body>
+</html>

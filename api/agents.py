@@ -42,6 +42,7 @@ Hardening:
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -247,6 +248,13 @@ async def create_identity_version(
                         """,
                         agent_id, new_version, idx, content,
                     )
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'save_identity', 'agent', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), agent_identifier,
+                json.dumps({"version": new_version, "fragments_count": len(body.fragments)}),
+                actor.get("organization_id"),
+            )
         except asyncpg.UniqueViolationError:
             # Race en auto-increment: otro POST concurrente ganó la version.
             raise HTTPException(409, "version conflict — retry")

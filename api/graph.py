@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -368,6 +369,13 @@ async def create_triple(body: TripleCreate, actor: dict = Depends(get_current_us
                 raise HTTPException(409, "triple already exists")
             await _create_age_edge(conn, subj_id, body.predicate, obj_id)
             triple_id = row["id"]
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'save_triple', 'triple', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(triple_id),
+                json.dumps({"subject": body.subject, "predicate": body.predicate, "object": body.object}),
+                actor.get("organization_id"),
+            )
     return TripleResponse(
         id=triple_id,
         subject_id=subj_id,
@@ -412,6 +420,13 @@ async def create_triples_batch(body: TripleBatch, actor: dict = Depends(get_curr
                     object_name=triple.object,
                     author=triple.author,
                 ))
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'save_triples_batch', 'triple', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(uuid.uuid4()),
+            json.dumps({"created_count": len(created), "skipped_count": skipped, "triple_ids": [t.id for t in created]}),
+            actor.get("organization_id"),
+        )
     return TripleBatchResponse(created=created, skipped_duplicates=skipped)
 
 
@@ -570,6 +585,13 @@ async def delete_triple(triple_id: int, actor: dict = Depends(get_current_user))
                 params,
             )
             await conn.execute("DELETE FROM triples WHERE id = $1", triple_id)
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'delete_triple', 'triple', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(triple_id),
+                json.dumps({"predicate": row["predicate"]}),
+                actor.get("organization_id"),
+            )
 
 
 @router.get("/stats", response_model=GraphStats)

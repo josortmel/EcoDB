@@ -178,21 +178,77 @@ async def user_can_create_project_in_ws(conn, actor: dict, workspace_id: int) ->
     """
     if actor.get("is_super"):
         return True
-    ws_org = await _ws_org_id(conn, workspace_id)
-    if ws_org is None:
+    ws_row = await conn.fetchrow(
+        "SELECT id, organization_id FROM workspaces WHERE id = $1", workspace_id
+    )
+    if ws_row is None:
         return False
-    if actor.get("is_ceo"):
+    ws_org = ws_row["organization_id"]
+    if workspace_id in (actor.get("lead_workspaces") or []):
+        return True
+    if actor.get("is_ceo") and ws_org is not None:
         org_id = actor.get("organization_id")
         if org_id is not None and ws_org == org_id:
             return True
-    if workspace_id in (actor.get("lead_workspaces") or []):
-        return True
     return False
 
 
 # ---------------------------------------------------------------------------
 # Memory permissions (mantienen el shape async actual de memories.py)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Admin operation permissions (multi-tenant v0.9)
+# ---------------------------------------------------------------------------
+
+_CEO_ALLOWED_ADMIN_OPS = frozenset({
+    "alias_candidates",
+    "merge_entities",
+    "undo_merge",
+    "trust_tier",
+    "confirm_related_docs",
+    "graph_vocabulary",
+})
+
+
+async def resolve_entity_org_ids(conn, entity_name: str) -> set[int]:
+    """Resolve which organizations an entity belongs to via its memory links."""
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT w.organization_id
+        FROM entity_links el
+        JOIN memories m ON m.id = el.memory_id
+        JOIN projects p ON p.id = m.project_id
+        JOIN workspaces w ON w.id = p.workspace_id
+        WHERE el.entity = $1 AND w.organization_id IS NOT NULL
+        """,
+        entity_name,
+    )
+    return {r["organization_id"] for r in rows}
+
+
+async def user_can_admin_operation(
+    conn, actor: dict, operation: str, target_org_id: Optional[int] = None
+) -> bool:
+    """Check if actor can perform an admin operation.
+
+    - super: any operation, any org.
+    - CEO: only operations in _CEO_ALLOWED_ADMIN_OPS, only own org.
+    - others: denied.
+    """
+    if actor.get("is_super"):
+        return True
+    if not actor.get("is_ceo"):
+        return False
+    if operation not in _CEO_ALLOWED_ADMIN_OPS:
+        return False
+    actor_org = actor.get("organization_id")
+    if actor_org is None:
+        return False
+    if target_org_id is None:
+        return False
+    return actor_org == target_org_id
+
 
 async def visible_workspace_ids(conn, actor: dict) -> set[int]:
     """Conjunto de workspace_ids que el actor puede leer.

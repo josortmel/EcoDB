@@ -609,8 +609,8 @@ async def list_recent(
             if expand_scope:
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'recent_expanded', 'memories_batch', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'recent_expanded', 'memories_batch', $2, $3::jsonb, $4)
                     """,
                     user_id, str(uuid.uuid4()),
                     json.dumps({
@@ -627,7 +627,7 @@ async def list_recent(
                         "actor_is_super": is_super,
                         "actor_is_ceo": is_ceo,
                         "no_visible_projects": True,
-                    }),
+                    }), actor.get("organization_id"),
                 )
             return MemoryListResponse(items=[], total=0, limit=limit, cursor_next=None)
 
@@ -711,8 +711,8 @@ async def list_recent(
         if expand_scope:
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'recent_expanded', 'memories_batch', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'recent_expanded', 'memories_batch', $2, $3::jsonb, $4)
                 """,
                 user_id, str(uuid.uuid4()),
                 json.dumps({
@@ -728,7 +728,7 @@ async def list_recent(
                     "result_count": len(rows),
                     "actor_is_super": is_super,
                     "actor_is_ceo": is_ceo,
-                }),
+                }), actor.get("organization_id"),
             )
 
     items = [_row_to_response(r) for r in rows]
@@ -782,8 +782,8 @@ async def get_memory(
         if expand_scope:
             await conn.execute(
                 """
-                INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                VALUES ($1, 'memory_read_expanded', 'memory', $2, $3::jsonb)
+                INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'memory_read_expanded', 'memory', $2, $3::jsonb, $4)
                 """,
                 user_id_actor, str(memory_id),
                 json.dumps({
@@ -791,7 +791,7 @@ async def get_memory(
                     "memory_creator": row["user_id"],
                     "actor_is_super": is_super,
                     "actor_is_ceo": is_ceo,
-                }),
+                }), actor.get("organization_id"),
             )
     row = dict(row)
     row["access_count"] = row["access_count"] + 1
@@ -893,10 +893,16 @@ async def update_memory(
             LEFT JOIN agents a ON a.id = u.agent_id
         """
         new_row = await conn.fetchrow(sql, *params)
-    # BC2 fix (adv-code): si DELETE concurrente entre FASE 1 y FASE 3, RETURNING
-    # devuelve None. Sin este guard, _row_to_response(None) → TypeError → 500.
-    if new_row is None:
-        raise HTTPException(404, "memory not found or deleted concurrently")
+        if new_row is None:
+            raise HTTPException(404, "memory not found or deleted concurrently")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_memory', 'memory', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(memory_id),
+            json.dumps({"fields_updated": list(body.model_fields_set)}),
+            actor.get("organization_id"),
+        )
+
     return _row_to_response(new_row)
 
 
@@ -944,6 +950,13 @@ async def delete_memory(
                 row["id"], json_str, int(actor["sub"]),
             )
             await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'delete_memory', 'memory', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(memory_id),
+                json.dumps({"type": row.get("type"), "workspace_id": row.get("workspace_id"), "project_id": row.get("project_id")}),
+                actor.get("organization_id"),
+            )
 
 
 @router.put("/{memory_id}/links/{document_id}/validate")

@@ -170,8 +170,15 @@ async def create_project(
             # Schema tiene UNIQUE(workspace_id, name).
             raise HTTPException(409, "project with this name already exists in the workspace")
         except ForeignKeyViolationError:
-            # Workspace fue borrado entre permission check y INSERT (TOCTOU).
             raise HTTPException(403, "no access to this workspace")
+
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'create_project', 'project', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"workspace_id": workspace_id, "name": body.name, "is_common": body.is_common}),
+            actor.get("organization_id"),
+        )
 
     return ProjectResponse(**dict(row))
 
@@ -343,6 +350,14 @@ async def update_project(
         if new_row is None:
             raise HTTPException(403, "no access to this project")
 
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_project', 'project', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(project_id),
+            json.dumps({"name": body.name}),
+            actor.get("organization_id"),
+        )
+
     return ProjectResponse(**dict(new_row))
 
 
@@ -397,15 +412,15 @@ async def delete_project(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'delete', 'project', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'delete', 'project', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), str(project_id),
                     json.dumps({
                         "name": row["name"],
                         "workspace_id": row["workspace_id"],
                         "is_common": row["is_common"],
-                    }),
+                    }), actor.get("organization_id"),
                 )
                 # Cleanup explícito project_leads (no hay CASCADE en projects→
                 # project_leads en orden — sí lo hay vía FK pero el DELETE de
@@ -466,11 +481,11 @@ async def add_project_lead(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'add_lead', 'project', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'add_lead', 'project', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), str(project_id),
-                    json.dumps({"user_id": body.user_id}),
+                    json.dumps({"user_id": body.user_id}), actor.get("organization_id"),
                 )
                 await conn.execute(
                     """
@@ -524,11 +539,11 @@ async def remove_project_lead(
             if deleted is not None:
                 await conn.execute(
                     """
-                    INSERT INTO audit_log (user_id, action, resource, resource_id, details)
-                    VALUES ($1, 'remove_lead', 'project', $2, $3::jsonb)
+                    INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                    VALUES ($1, 'remove_lead', 'project', $2, $3::jsonb, $4)
                     """,
                     int(actor["sub"]), str(project_id),
-                    json.dumps({"user_id": user_id}),
+                    json.dumps({"user_id": user_id}), actor.get("organization_id"),
                 )
 
 

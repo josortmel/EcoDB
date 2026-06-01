@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EcoDB Governance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Geist", system-ui, sans-serif; background: oklch(8% 0.004 50); }
+
+  .diagram {
+    width: 1200px;
+    height: 720px;
+    padding: 36px 56px 40px;
+    background: oklch(10% 0.005 50);
+    background-image:
+      radial-gradient(ellipse at 30% 40%, oklch(15% 0.014 50) 0%, transparent 60%),
+      radial-gradient(circle, oklch(24% 0.012 50) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px;
+    position: relative;
+  }
+
+  .diagram-title {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #f37513;
+    font-family: "Geist Mono", monospace;
+    margin-bottom: 28px;
+  }
+
+  .gov-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+
+  /* HIERARCHY (left column) */
+  .gov-hierarchy { display: flex; flex-direction: column; gap: 0; }
+
+  .gov-level {
+    padding: 12px 18px;
+    border-left: 3px solid oklch(36% 0.03 50);
+    position: relative;
+  }
+  .gov-level:first-child { border-left-color: #f37513; }
+
+  .gov-level-role {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #f37513;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .gov-level:not(:first-child) .gov-level-role {
+    color: oklch(78% 0.12 50);
+  }
+
+  .gov-level-name {
+    font-family: "Geist", sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: oklch(96% 0.01 50);
+    margin-bottom: 3px;
+    letter-spacing: -0.01em;
+  }
+
+  .gov-level-desc {
+    font-family: "Geist", sans-serif;
+    font-size: 12px;
+    color: oklch(80% 0.014 50);
+    line-height: 1.5;
+  }
+
+  .gov-level-indent-1 { margin-left: 28px; }
+  .gov-level-indent-2 { margin-left: 56px; }
+  .gov-level-indent-3 { margin-left: 84px; }
+
+  /* ORG BOUNDARY MARKER */
+  .gov-org-boundary {
+    margin: 6px 0 6px 28px;
+    padding: 4px 14px;
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: oklch(70% 0.12 50);
+    border-top: 1.5px dashed oklch(40% 0.06 50);
+    border-bottom: 1.5px dashed oklch(40% 0.06 50);
+    background: oklch(13% 0.012 50);
+  }
+
+  /* SCOPING (right column) */
+  .gov-scoping {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .gov-scope-card {
+    border: 1.5px solid oklch(34% 0.03 50);
+    border-radius: 10px;
+    padding: 16px 20px;
+    background: oklch(14% 0.008 50);
+  }
+
+  .gov-scope-title {
+    font-family: "Geist Mono", monospace;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: oklch(96% 0.01 50);
+    margin-bottom: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .gov-scope-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .gov-scope-row:last-child { margin-bottom: 0; }
+
+  .gov-scope-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+    box-shadow: 0 0 8px currentColor;
+  }
+  .gov-scope-dot.public    { background: oklch(72% 0.18 150); color: oklch(72% 0.18 150); }
+  .gov-scope-dot.private   { background: oklch(70% 0.18 25);  color: oklch(70% 0.18 25); }
+  .gov-scope-dot.workspace { background: #f37513;             color: #f37513; }
+  .gov-scope-dot.isolated  { background: oklch(72% 0.16 80);  color: oklch(72% 0.16 80); }
+  .gov-scope-dot.global    { background: oklch(72% 0.18 280); color: oklch(72% 0.18 280); }
+
+  .gov-scope-text {
+    font-family: "Geist", sans-serif;
+    font-size: 12.5px;
+    color: oklch(82% 0.014 50);
+    line-height: 1.45;
+  }
+  .gov-scope-text strong {
+    color: oklch(98% 0.01 50);
+    font-weight: 700;
+  }
+
+  /* ROADMAP (bottom row) */
+  .gov-roadmap {
+    display: flex;
+    gap: 14px;
+    margin-top: 22px;
+  }
+
+  .gov-version {
+    flex: 1;
+    border: 1.5px solid oklch(34% 0.03 50);
+    border-radius: 10px;
+    padding: 16px 18px;
+    background: oklch(14% 0.008 50);
+  }
+
+  .gov-version.current {
+    border-color: #f37513;
+    background: oklch(16% 0.025 50);
+  }
+
+  .gov-version.done {
+    opacity: 0.65;
+  }
+
+  .gov-version-num {
+    font-family: "Geist Mono", monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: oklch(86% 0.014 50);
+    margin-bottom: 4px;
+    letter-spacing: 0.02em;
+  }
+  .gov-version.current .gov-version-num { color: #f37513; }
+
+  .gov-version-label {
+    font-family: "Geist", sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: oklch(96% 0.01 50);
+    margin-bottom: 3px;
+  }
+
+  .gov-version-desc {
+    font-family: "Geist", sans-serif;
+    font-size: 11px;
+    color: oklch(78% 0.014 50);
+    line-height: 1.5;
+  }
+
+  .gov-version-tag {
+    display: inline-block;
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: #f37513;
+    border: 1px solid oklch(45% 0.10 50);
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin-top: 8px;
+    letter-spacing: 0.04em;
+  }
+
+  .gov-version-tag.done-tag {
+    color: oklch(72% 0.18 150);
+    border-color: oklch(40% 0.10 150);
+  }
+</style>
+</head>
+<body>
+
+<div class="diagram">
+  <div class="diagram-title">Governance Model &amp; Roadmap</div>
+
+  <div class="gov-grid">
+    <div>
+      <div class="gov-hierarchy">
+        <div class="gov-level">
+          <div class="gov-level-role">Superuser</div>
+          <div class="gov-level-name">Platform Owner</div>
+          <div class="gov-level-desc">Full access. Manages organizations, users, agents, ontology.</div>
+        </div>
+
+        <div class="gov-org-boundary">organization boundary</div>
+
+        <div class="gov-level gov-level-indent-1">
+          <div class="gov-level-role">CEO</div>
+          <div class="gov-level-name">Organization Admin</div>
+          <div class="gov-level-desc">Manages workspaces and projects within their org. Admin operations scoped to org data.</div>
+        </div>
+        <div class="gov-level gov-level-indent-2">
+          <div class="gov-level-role">Workspace Lead</div>
+          <div class="gov-level-name">Department Head</div>
+          <div class="gov-level-desc">Manages projects and members within their workspace.</div>
+        </div>
+        <div class="gov-level gov-level-indent-3">
+          <div class="gov-level-role">Project Member</div>
+          <div class="gov-level-name">Agent or User</div>
+          <div class="gov-level-desc">Read/write within assigned projects. Scoped visibility.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gov-scoping">
+      <div class="gov-scope-card">
+        <div class="gov-scope-title">Memory visibility</div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot public"></div>
+          <div class="gov-scope-text"><strong>Public</strong> — visible to all workspace members</div>
+        </div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot private"></div>
+          <div class="gov-scope-text"><strong>Private</strong> — visible only to the author agent</div>
+        </div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot workspace"></div>
+          <div class="gov-scope-text"><strong>Workspace-scoped</strong> — cascading from workspace → project</div>
+        </div>
+      </div>
+
+      <div class="gov-scope-card">
+        <div class="gov-scope-title">Data isolation</div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot isolated"></div>
+          <div class="gov-scope-text"><strong>Org-scoped</strong> — memories, documents, workspaces, teams, API keys, audit log</div>
+        </div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot global"></div>
+          <div class="gov-scope-text"><strong>Global</strong> — graph nodes and triples, entity dictionary, canonical predicates</div>
+        </div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot workspace"></div>
+          <div class="gov-scope-text"><strong>API key rotation</strong> — grace period, zero-downtime swap</div>
+        </div>
+      </div>
+
+      <div class="gov-scope-card">
+        <div class="gov-scope-title">Security</div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot private"></div>
+          <div class="gov-scope-text">SQL-level org scoping — queries never cross org boundaries</div>
+        </div>
+        <div class="gov-scope-row">
+          <div class="gov-scope-dot private"></div>
+          <div class="gov-scope-text">IDOR prevention — unified 404, no existence oracles</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gov-roadmap">
+    <div class="gov-version done">
+      <div class="gov-version-num">v0.8.6</div>
+      <div class="gov-version-label">Single-tenant</div>
+      <div class="gov-version-desc">10-stage GAMR, UltraSearch, graph, ingestion, MCP, governance foundations.</div>
+      <div class="gov-version-tag done-tag">done</div>
+    </div>
+    <div class="gov-version current">
+      <div class="gov-version-num">v0.9</div>
+      <div class="gov-version-label">Multi-tenant</div>
+      <div class="gov-version-desc">Organization isolation, CEO role, API key rotation, rate limiting, audit log complete.</div>
+      <div class="gov-version-tag">you are here</div>
+    </div>
+    <div class="gov-version">
+      <div class="gov-version-num">v1.0</div>
+      <div class="gov-version-label">Dashboard</div>
+      <div class="gov-version-desc">Electron app: visual governance, graph studio, attention inbox, knowledge explorer.</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

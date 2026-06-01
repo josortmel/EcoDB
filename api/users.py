@@ -111,6 +111,13 @@ async def put_my_preferences(
             """,
             user_id, serialized,
         )
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_preferences', 'user_preferences', $2, $3::jsonb, $4)""",
+            user_id, str(user_id),
+            json.dumps({"size_bytes": len(serialized.encode("utf-8"))}),
+            actor.get("organization_id"),
+        )
     prefs = row["prefs"]
     if isinstance(prefs, str):
         prefs = json.loads(prefs)
