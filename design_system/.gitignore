@@ -1,0 +1,3 @@
+# Export / duplicados — no van al repo
+*.zip
+*(standalone)*.html

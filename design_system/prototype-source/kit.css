@@ -1,0 +1,181 @@
+/* ============================================================
+   EcoDB Component Kit — gallery + new components/states
+   Reuses tokens & base components from styles.css.
+   ============================================================ */
+
+/* ---------- gallery chrome ---------- */
+body.kit {
+  background:
+    radial-gradient(60% 40% at 85% -5%, rgba(245,150,70,.08), transparent 60%),
+    linear-gradient(180deg, #efece6, #e6e2da);
+  color: #211f1c; padding: 0; min-height:100vh;
+}
+.kit-wrap { max-width: 1240px; margin: 0 auto; padding: 0 32px 120px; }
+
+.kit-masthead { padding: 56px 0 30px; border-bottom: 1px solid rgba(40,38,34,.1); margin-bottom: 44px; display:flex; align-items:flex-end; justify-content:space-between; gap: 24px; }
+.kit-masthead .lede h1 { font-family: var(--font-mono); font-size: 26px; font-weight: 500; letter-spacing:.01em; color:#1c1c1e; }
+.kit-masthead .lede h1 b { color: var(--accent); font-weight:500; }
+.kit-masthead .lede p { font-size: 14px; color:#6a655d; margin-top: 10px; max-width: 560px; line-height:1.55; }
+.kit-masthead .meta { font-family: var(--font-mono); font-size: 11px; color:#7a7468; text-align:right; line-height:1.7; flex:none; }
+.kit-masthead .meta b { color:#46474b; font-weight:500; }
+
+.kit-legend { display:flex; flex-wrap:wrap; gap: 18px; margin-bottom: 40px; font-family: var(--font-mono); font-size: 11px; color:#6a655d; }
+.kit-legend .li { display:flex; align-items:center; gap:7px; }
+.kit-legend .sw { width:11px; height:11px; border-radius:50%; }
+
+.kit-batch { font-family: var(--font-mono); font-size: 12px; letter-spacing:.18em; text-transform: uppercase; color: var(--accent); margin: 64px 0 6px; font-weight:500; }
+.kit-batch:first-of-type { margin-top: 8px; }
+.kit-batch + .kit-batch-desc { font-size: 13px; color:#9a948a; margin-bottom: 26px; }
+
+/* component block */
+.block { margin-bottom: 44px; }
+.block-head { display:flex; align-items:baseline; gap: 12px; margin-bottom: 4px; }
+.block-head h2 { font-family: var(--font-mono); font-size: 16px; font-weight:500; color:#1c1c1e; }
+.block-head .pill { font-family: var(--font-mono); font-size: 10px; color:#6f695e; padding:2px 8px; border-radius:20px; background: rgba(40,38,34,.05); }
+.block-desc { font-size: 13px; color:#6a655d; margin-bottom: 16px; max-width: 720px; line-height:1.5; }
+.block code.contract { display:block; white-space:pre-wrap; font-family: var(--font-mono); font-size: 11.5px; line-height:1.6; color:#5a5650;
+  background:#f4f1ea; border:1px solid rgba(40,38,34,.08); border-radius:10px; padding:12px 14px; margin-bottom:18px; overflow-x:auto; }
+.block code.contract .k { color: var(--accent); }
+.block code.contract .c { color:#9a948a; }
+
+/* themed preview tiles (light then dark) */
+.pair { display:grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.pair.one { grid-template-columns: 1fr; }
+.preview {
+  position:relative; border-radius: 18px; padding: 26px; overflow:hidden; min-height: 80px;
+  background:
+    radial-gradient(60% 50% at 82% 4%, var(--blob-warm), transparent 60%),
+    radial-gradient(120% 100% at 50% 0%, var(--bd-1), var(--bd-2) 60%, var(--bd-3));
+  box-shadow: inset 0 0 0 1px rgba(127,127,127,.12);
+}
+.preview .theme-tag { position:absolute; top:10px; right:12px; font-family: var(--font-mono); font-size: 9px; letter-spacing:.14em; text-transform:uppercase; color: var(--ink-3); opacity:.7; }
+
+/* state grid inside a preview */
+.states { display:flex; flex-wrap:wrap; gap: 20px 24px; align-items:flex-start; }
+.st { display:flex; flex-direction:column; gap: 8px; }
+.st-cap { font-family: var(--font-mono); font-size: 9.5px; letter-spacing:.06em; text-transform: uppercase; color: var(--ink-2); }
+.st-row { display:flex; align-items:center; gap: 14px; }
+.w-card { width: 280px; } .w-kpi { width: 230px; } .w-wide { width: 100%; } .w-row { width: 340px; }
+
+/* ============================================================
+   New component: skeleton shimmer
+   ============================================================ */
+.sk { position:relative; overflow:hidden; background: var(--inset); border-radius: 6px; }
+.sk::after { content:""; position:absolute; inset:0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--card-spec), transparent); animation: shimmer 1.5s infinite; }
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.sk-line { height: 11px; border-radius: 5px; }
+.sk-block { border-radius: 8px; }
+
+/* card state overlays */
+.card.is-hover { box-shadow: var(--elev-hi); transform: translateY(-2px); }
+.card.is-error, .card.is-empty { align-items:stretch; }
+.card-msg { display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 10px; flex:1 1 auto; padding: 22px 0; text-align:center; }
+.card-msg .m { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+.card-msg .retry { font-family: var(--font-mono); font-size: 12px; color: var(--accent); cursor:pointer; border:none; background:none; }
+.skl-stack { display:flex; flex-direction:column; gap:10px; flex:1 1 auto; }
+
+/* ============================================================
+   Button extensions
+   ============================================================ */
+.btn[disabled], .btn.is-disabled { opacity: .42; pointer-events:none; }
+.btn.sm { padding: 8px 12px; font-size: 12px; border-radius: 9px; }
+.btn .spin { width: 13px; height: 13px; border-radius:50%; border: 2px solid currentColor; border-top-color: transparent; display:inline-block; animation: spin .7s linear infinite; vertical-align:-2px; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.btn.is-pressed { transform: translateY(1px); filter: brightness(.96); }
+
+/* focus ring utility */
+.focus-ring { box-shadow: 0 0 0 3px rgba(245,99,30,.22), inset 0 0 0 1px var(--accent) !important; }
+
+/* ============================================================
+   SearchField extensions (base .search in styles.css)
+   ============================================================ */
+.search.lg { height: 48px; }
+.search.is-focus { box-shadow: inset 0 1px 3px var(--inset), inset 0 0 0 1px var(--accent), 0 0 0 3px rgba(245,99,30,.16); }
+.search .spin { width: 14px; height:14px; border:2px solid var(--ink-3); border-top-color: transparent; border-radius:50%; animation: spin .7s linear infinite; flex:none; }
+.search .cbadge { font-family: var(--font-mono); font-size: 10px; color:#fff; background: var(--accent); padding: 2px 7px; border-radius: 20px; flex:none; }
+
+/* ============================================================
+   CmdK modal
+   ============================================================ */
+.cmdk-stage { position:relative; border-radius: 14px; overflow:hidden; padding: 26px;
+  background: rgba(18,14,10,.32); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.cmdk { width: 100%; max-width: 540px; margin: 0 auto; border-radius: 16px; overflow:hidden;
+  background: var(--card-bg); -webkit-backdrop-filter: blur(30px) saturate(1.5); backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--elev-hi); }
+.cmdk-top { padding: 12px; border-bottom: 1px solid var(--card-hairline); }
+.cmdk-list { padding: 8px; display:flex; flex-direction:column; gap:2px; max-height: 320px; overflow-y:auto; }
+.cmdk-item { display:flex; align-items:center; gap: 12px; padding: 10px 12px; border-radius: 10px; cursor:pointer; }
+.cmdk-item.sel { background: var(--inset); }
+.cmdk-item .ico { width: 28px; height:28px; border-radius:8px; display:grid; place-items:center; flex:none; background: var(--inset); box-shadow: inset 0 0 0 1px var(--card-hairline); }
+.cmdk-item .ico svg { width:14px; height:14px; }
+.cmdk-item .tx { flex:1 1 auto; min-width:0; }
+.cmdk-item .tt { display:block; font-size: 13px; color: var(--ink-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cmdk-item .ss { display:block; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cmdk-item .kb { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); flex:none; }
+.cmdk-empty { padding: 30px; text-align:center; font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+.cmdk-foot { padding: 9px 14px; border-top: 1px solid var(--card-hairline); display:flex; gap:16px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.cmdk-foot b { color: var(--ink-2); font-weight:500; }
+
+/* ============================================================
+   StatusPill
+   ============================================================ */
+.statuspill { display:inline-flex; align-items:center; gap: 9px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-2);
+  padding: 6px 12px; border-radius: 20px; background: var(--field-bg); box-shadow: inset 0 0 0 1px var(--card-hairline); }
+.statuspill .sep { color: var(--ink-4); }
+.statuspill .lat { color: var(--ink-3); }
+
+/* ============================================================
+   Attention inbox
+   ============================================================ */
+.inbox { display:flex; flex-direction:column; }
+.inbox-item { display:flex; align-items:center; gap: 12px; padding: 11px 4px; cursor:pointer; border-radius: 8px; margin: 0 -6px; padding-left:8px; padding-right:8px; transition: background .15s; }
+.inbox-item + .inbox-item { border-top: 1px solid var(--card-hairline); }
+.inbox-item:hover { background: var(--inset); }
+.inbox-item .il { flex:1 1 auto; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-1); }
+.inbox-item.zero .il { color: var(--ink-3); }
+.cbadge2 { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-1);
+  min-width: 28px; text-align:center; padding: 2px 8px; border-radius: 7px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--card-hairline); }
+.cbadge2.hot { color:#fff; background: var(--accent); box-shadow:none; }
+
+/* ============================================================
+   Memory-type dots + row accents + search highlight
+   ============================================================ */
+.dot.t-decision::after   { background: var(--accent); box-shadow: 0 0 6px rgba(245,99,30,.5); }
+.dot.t-tecnico::after     { background: #6e9ecf; box-shadow: 0 0 6px rgba(110,158,207,.45); }
+.dot.t-momento::after     { background: var(--grn); box-shadow: 0 0 6px rgba(78,158,106,.45); }
+.dot.t-observacion::after { background: #c4a86a; box-shadow: 0 0 6px rgba(196,168,106,.45); }
+.dot.t-referencia::after  { background: var(--ink-3); }
+
+.frow.hot { box-shadow: inset 2px 0 0 var(--accent); background: rgba(245,99,30,.05); border-radius: 4px; }
+mark, .frow mark { background: rgba(245,99,30,.20); color: var(--accent); border-radius: 3px; padding: 0 2px; }
+[data-theme="dark"] mark { background: rgba(245,99,30,.26); }
+
+.agent.hot-name .nm { color: var(--accent); }
+
+/* ============================================================
+   ThemeToggle (recessed flat button)
+   ============================================================ */
+.themebtn { width: 34px; height: 34px; border-radius: 10px; border:none; cursor:pointer; display:grid; place-items:center;
+  background: var(--field-bg); box-shadow: inset 0 1px 3px var(--inset), inset 0 0 0 1px var(--card-hairline); color: var(--ink-2); }
+.themebtn:hover { color: var(--ink-1); }
+.themebtn svg { width: 16px; height:16px; }
+
+/* TopBar status accent line variant */
+.tray.topbar { width: 100%; padding: 12px 16px; }
+.statusline { display:flex; align-items:center; gap: 14px; }
+.statusline .bar { height: 3px; width: 46px; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+/* graph viewport demo sizing */
+.demo-screen { height: 240px; }
+.demo-screen.tall { height: 360px; }
+
+/* drawer rendered inline (gallery) */
+.drawer.inline { position: relative; right: auto; top: auto; height: auto; width: 400px; max-width: 100%;
+  border-radius: 16px; box-shadow: var(--elev-hi); will-change: auto; }
+.drawer.inline .dwr-body { max-height: 420px; }
+.card.pad-c { padding: 12px 14px; }
+
+/* misc helpers */
+.kit-note { font-size: 12px; color:#9a948a; font-style: italic; margin-top: 8px; }
+.inline-tiles { display:flex; gap: 16px; flex-wrap:wrap; }

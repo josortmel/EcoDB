@@ -279,6 +279,23 @@ The organization is the tenant boundary. Every memory, document, workspace, proj
 
 For the complete architecture — authentication flow, data isolation model, admin operations, and design decisions — see [`docs/architecture/multi-tenant.en.md`](docs/architecture/multi-tenant.en.md).
 
+## Dashboard
+
+EcoDB v1.0 ships a **desktop dashboard** (Electron) — visual governance over the entire system. The engine was reachable only through the REST API and MCP tools; now there's a GUI to search, explore, ingest, and govern the knowledge base.
+
+<!-- DEMO REEL: drag the screen-recording .mp4 into this block from GitHub's web editor (it renders as an inline player), or replace with a GIF once the final reel lands. -->
+<p align="center"><em>▶ Dashboard walkthrough — demo reel landing with the v1.0 launch</em></p>
+
+- **Command Center** — workspace overview: attention inbox, live activity (SSE), knowledge health, ingestion pipeline.
+- **Knowledge Explorer** — GAMR search across memories and documents, with author / tag / workspace / project filters, UltraSearch, and document preview.
+- **Graph Studio** — the knowledge graph on a canvas: pan, zoom, re-center, expand neighbors, merge entities.
+- **Decisions Inbox** — review what the system flagged: stale memories, alias candidates, unconfirmed relations, low-trust documents.
+- **Ingestion** — upload documents and watch them flow through the pipeline (pending → indexed) in real time.
+- **Ontology Console** — curate the graph's vocabulary: entity dictionary, canonical predicates, alias management, merges.
+- **Settings** — configurable backend URL (connect to a local Docker stack or a remote EcoDB instance on your network), API keys, trust tiers.
+
+Built with React + TypeScript + Tailwind on Electron, talking to the same REST API. The API key never leaves the main process. Windows installer (unsigned — SmartScreen will warn on first run).
+
 ## Quick Start
 
 ```bash

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EcoDB — Component Kit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="kit.css" />
+</head>
+<body class="kit">
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<rect width="100" height="100" rx="18" fill="#e6e2da"/>
+<rect x="20" y="22" width="26" height="22" rx="5" fill="#fff" opacity="0.75"/>
+<rect x="52" y="22" width="28" height="22" rx="5" fill="#fff" opacity="0.55"/>
+<rect x="20" y="50" width="60" height="12" rx="4" fill="#fff" opacity="0.7"/>
+<rect x="20" y="66" width="44" height="12" rx="4" fill="#fff" opacity="0.5"/>
+<circle cx="33" cy="33" r="4" fill="#F5631E"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="graph.jsx"></script>
+<script type="text/babel" src="kit-parts.jsx"></script>
+<script type="text/babel" src="kit-overlays.jsx"></script>
+<script type="text/babel" src="kit-gallery.jsx"></script>
+</body>
+</html>
