@@ -133,8 +133,9 @@ async def reconcile_document_entities(pool) -> None:
                 """, doc["id"])
                 for pair in pairs:
                     existing = await conn.fetchrow(
-                        """SELECT id FROM entity_alias_candidates
-                           WHERE source_name = $1 AND target_node_id = $2 AND status = 'pending'""",
+                        """SELECT id, status FROM entity_alias_candidates
+                           WHERE source_name = $1 AND target_node_id = $2
+                             AND status IN ('pending', 'rejected')""",
                         pair["e2_name"], pair["e1"],
                     )
                     if existing:
@@ -146,7 +147,7 @@ async def reconcile_document_entities(pool) -> None:
                                WHERE id = $1""",
                             existing["id"], float(pair["sim"]),
                         )
-                    else:
+                    elif existing is None:
                         await conn.execute(
                             """INSERT INTO entity_alias_candidates
                                    (source_name, target_node_id, confidence, occurrences, sample_contexts)

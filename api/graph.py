@@ -707,9 +707,84 @@ async def list_aliases(actor: dict = Depends(get_current_user)) -> AliasListResp
     return AliasListResponse(aliases=[AliasEntry(alias=r["alias"], canonical=r["canonical"], domain=r["domain"]) for r in rows])
 
 
+@router.get("/all")
+async def get_full_graph(
+    limit: int = Query(500, ge=1, le=5000, description="Max nodes to return"),
+    offset: int = Query(0, ge=0, le=50000),
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    """Full graph — all active nodes + edges between them. Paginated, ordered by degree."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        node_rows = await conn.fetch("""
+            WITH degree_counts AS (
+                SELECT node_id, COUNT(*) AS degree FROM (
+                    SELECT subject_id AS node_id FROM triples
+                    UNION ALL
+                    SELECT object_id FROM triples
+                ) t GROUP BY node_id
+            )
+            SELECT n.id, n.name, n.type::text,
+                   COALESCE(dc.degree, 0) AS degree
+            FROM nodes n
+            LEFT JOIN degree_counts dc ON dc.node_id = n.id
+            WHERE n.status = 'active'
+            ORDER BY COALESCE(dc.degree, 0) DESC, n.name
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+
+        node_ids = [r["id"] for r in node_rows]
+        edge_rows = await conn.fetch("""
+            SELECT subject_id AS source, object_id AS target, predicate
+            FROM triples
+            WHERE subject_id = ANY($1::int[]) AND object_id = ANY($1::int[])
+        """, node_ids) if node_ids else []
+
+        cluster_info = {}
+        cr_map: dict[int, int] = {}
+        if node_ids:
+            cluster_rows = await conn.fetch(
+                "SELECT node_id, cluster_id FROM graph_clusters WHERE node_id = ANY($1::int[])",
+                node_ids,
+            )
+            cr_map = {cr["node_id"]: cr["cluster_id"] for cr in cluster_rows}
+            for cr in cluster_rows:
+                cid = cr["cluster_id"]
+                if cid not in cluster_info:
+                    cluster_info[cid] = {"cluster_id": cid, "node_count": 0, "sample_nodes": []}
+                cluster_info[cid]["node_count"] += 1
+                if len(cluster_info[cid]["sample_nodes"]) < 3:
+                    cluster_info[cid]["sample_nodes"].append(cr["node_id"])
+
+    nodes = [{"id": r["id"], "name": r["name"], "type": r["type"], "degree": r["degree"]} for r in node_rows]
+    for n in nodes:
+        if n["id"] in cr_map:
+            n["cluster_id"] = cr_map[n["id"]]
+
+    seen_edges: set[tuple] = set()
+    edges = []
+    for r in edge_rows:
+        key = (r["source"], r["target"], r["predicate"])
+        if key not in seen_edges:
+            seen_edges.add(key)
+            edges.append({"source": r["source"], "target": r["target"], "predicate": r["predicate"]})
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "limit": limit,
+        "offset": offset,
+        "clusters": list(cluster_info.values()),
+    }
+
+
 @router.get("/subgraph")
 async def get_subgraph(
-    center: str = Query(..., min_length=1, max_length=MAX_NODE_NAME_LEN),
+    center: str = Query(None, min_length=1, max_length=MAX_NODE_NAME_LEN),
+    limit: int = Query(0, ge=0, le=5000, description="Max nodes. 0 = auto"),
+    offset: int = Query(0, ge=0, le=50000),
     depth: int = Query(2, ge=1, le=3),
     actor: dict = Depends(get_current_user),
 ) -> dict:
