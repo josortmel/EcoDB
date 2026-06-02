@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from datetime import datetime
 from typing import Literal, Optional
 
 import asyncpg
@@ -950,6 +951,7 @@ class MergeEntitiesRequest(BaseModel):
     source_node_id: int = Field(..., gt=0, description="Node to merge (will be marked merged).")
     target_node_id: int = Field(..., gt=0, description="Canonical target node.")
     reason: Optional[str] = Field(None, max_length=500)
+    keep_as_alias: bool = Field(False, description="Create approved alias source→target after merge")
 
 
 @router.post("/merge-entities")
@@ -988,6 +990,17 @@ async def merge_entities_endpoint(
             json.dumps({"source_node_id": body.source_node_id, "target_node_id": body.target_node_id, "reason": body.reason}),
             actor.get("organization_id"),
         )
+        if body.keep_as_alias:
+            from graph import _ensure_node
+            try:
+                await conn.execute("""
+                    INSERT INTO entity_alias_candidates (source_name, target_node_id, confidence, occurrences, status)
+                    VALUES ($1, $2, 1.0, 1, 'approved')
+                    ON CONFLICT DO NOTHING
+                """, src_name, body.target_node_id)
+                result["alias_created"] = True
+            except Exception:
+                result["alias_created"] = False
     return result
 
 
@@ -1153,6 +1166,118 @@ async def get_graph_vocabulary(
         "entity_count": len(entities),
         "predicate_count": len(predicates),
     }
+
+
+# ---------------------------------------------------------------------------
+# Predicates CRUD (dashboard #44)
+# ---------------------------------------------------------------------------
+
+class PredicateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field("")
+    cluster: str = Field("general")
+    state: str = Field("approved", pattern="^(experimental|candidate|approved|deprecated|archived|forbidden)$")
+
+
+class PredicateUpdate(BaseModel):
+    description: Optional[str] = None
+    cluster: Optional[str] = None
+    state: Optional[str] = Field(None, pattern="^(experimental|candidate|approved|deprecated|archived|forbidden)$")
+
+
+class PredicateResponse(BaseModel):
+    name: str
+    description: str
+    cluster: str
+    state: str
+    domain: Optional[str] = None
+    symmetric: bool
+    transitive: bool
+    created_at: Optional[datetime] = None
+
+
+@router.post("/predicates", response_model=PredicateResponse, status_code=201)
+async def create_predicate(
+    body: PredicateCreate,
+    actor: dict = Depends(require_super),
+) -> PredicateResponse:
+    """Create a new canonical predicate. Super-only."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow("""
+                INSERT INTO predicates_canonical (name, description, cluster, state, ontology_layer)
+                VALUES ($1, $2, $3, $4, 'domain')
+                RETURNING name, description, cluster, state, domain, "symmetric", "transitive", created_at
+            """, body.name, body.description, body.cluster, body.state)
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(409, f"predicate '{body.name}' already exists")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'create_predicate', 'predicates_canonical', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), body.name,
+            json.dumps({"description": body.description, "cluster": body.cluster, "state": body.state}),
+            actor.get("organization_id"),
+        )
+    return PredicateResponse(**dict(row))
+
+
+@router.put("/predicates/{name}", response_model=PredicateResponse)
+async def update_predicate(
+    name: str,
+    body: PredicateUpdate,
+    actor: dict = Depends(require_super),
+) -> PredicateResponse:
+    """Update predicate metadata. Super-only."""
+    sets = []
+    params: list = [name]
+    i = 2
+    if body.description is not None:
+        sets.append(f"description = ${i}"); params.append(body.description); i += 1
+    if body.cluster is not None:
+        sets.append(f"cluster = ${i}"); params.append(body.cluster); i += 1
+    if body.state is not None:
+        sets.append(f"state = ${i}"); params.append(body.state); i += 1
+        if body.state in ("deprecated", "archived", "forbidden"):
+            sets.append("deprecated_since = now()")
+    if not sets:
+        raise HTTPException(400, "no fields to update")
+    sets.append("updated_at = now()")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""UPDATE predicates_canonical SET {', '.join(sets)}
+            WHERE name = $1
+            RETURNING name, description, cluster, state, domain, "symmetric", "transitive", created_at""",
+            *params,
+        )
+        if row is None:
+            raise HTTPException(404, "predicate not found")
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'update_predicate', 'predicates_canonical', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), name,
+            json.dumps({"fields_updated": [s.split(" = ")[0] for s in sets if " = " in s]}),
+            actor.get("organization_id"),
+        )
+    return PredicateResponse(**dict(row))
+
+
+@router.delete("/predicates/{name}", status_code=204)
+async def delete_predicate(
+    name: str,
+    actor: dict = Depends(require_super),
+) -> None:
+    """Delete a canonical predicate. Super-only. Idempotent."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM predicates_canonical WHERE name = $1", name)
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'delete_predicate', 'predicates_canonical', $2, NULL, $3)""",
+            int(actor["sub"]), name, actor.get("organization_id"),
+        )
 
 
 @router.post("/entity-dictionary/reload", status_code=200)

@@ -20,7 +20,7 @@ WORKDIR /app
 # asi que ponemos el cache en /app/.cache/huggingface, owned por apiuser.
 # docker-compose.yml monta named volume aqui para sobrevivir force-recreate.
 ENV HF_HOME=/app/.cache/huggingface
-RUN mkdir -p /app/.cache/huggingface && chown -R apiuser:apiuser /app/.cache
+RUN mkdir -p /app/.cache/huggingface /app/media && chown -R apiuser:apiuser /app/.cache /app/media
 
 # Layer separado para deps — cache friendly: requirements.txt cambia menos que el codigo.
 COPY --chown=apiuser:apiuser requirements.txt .

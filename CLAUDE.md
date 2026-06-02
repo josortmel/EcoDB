@@ -5,12 +5,12 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 ## Versiones actuales
 
 - API: `0.23.0` (imagen Docker) / API_VERSION `0.9.0`
-- Schema: `5.1.0`
+- Schema: `5.1.1`
 - MCP: `1.6.0`
 - Embeddings: `0.2.5`
 - NER: `1.0.0`
 - Postgres: `1.0.0` (PG16 + pgvector + AGE 1.5.0)
-- Release pública: `v0.9.0`
+- Release pública: `v0.9.5`
 
 ## Arquitectura — 6 servicios Docker
 
@@ -183,6 +183,7 @@ docker compose restart mcp
 - **NER puerto**: internamente usa 8091, pero host expone 8092 (conflicto con MCP que usa 8091).
 - **Primer boot MCP**: MCP no arranca hasta generar API key con `bootstrap_first_apikey.py` y reiniciar el servicio.
 - **Backup/restore scripts**: verificar que `ECODB_CONTAINER` coincide con el container_name en docker-compose.yml (default: `ecodb-postgres`).
+- **Worker SSE events**: require `INTERNAL_BROADCAST_SECRET` in `.env`. If dashboard shows no document events, check this env var first.
 
 ## Deuda técnica — deep hunt v0.9 (2026-06-01)
 
@@ -203,22 +204,15 @@ docker compose restart mcp
 
 | # | Item | Severity | Trigger |
 |---|------|----------|---------|
-| VS-L2-1 | SSE events broadcast cross-org (events.py) | CRITICAL for multi-org | Second org in production |
 | VS1/VS2 | Graph endpoints without org scoping | HIGH for multi-org | Second org in production (DD4) |
 | VS-L2-6 | MCP single API key (no per-agent isolation) | MEDIUM | Per-agent key rotation needed (DD2) |
 | IC4 | Super audit_log has org_id=NULL on org resources | MEDIUM | Audit forensics requirement |
-| BC8 | /stats/graph returns global stats to any user | MEDIUM | Second org (DD4) |
-| BC9 | /stats/knowledge duplicate_candidate_count ignores project_id | LOW | Dashboard accuracy |
 
 ### Pre-existing (found during v0.9 deep hunt)
 
 | # | Item | Severity |
 |---|------|----------|
-| BC5 | TeamResourceLink response model empty → POST returns {} | HIGH |
-| BC6 | Graph node name case-sensitive (create vs query) | LOW |
-| F2 | Search user_id filter doesn't apply to document chunks | MEDIUM |
-| F3 | AGE hop-2 timeout under load → silent result degradation | MEDIUM |
-| AU5 | onboarding.py contradictions hardcoded to [] | LOW |
+| F3 | AGE hop-2 timeout under load → silent result degradation (has statement_timeout but still occurs under load) | MEDIUM |
 
 ### Test coverage gaps
 
@@ -242,12 +236,24 @@ docker compose restart mcp
 12. GAMR_WEIGHTS_BM25 en settings.py — los pesos deben sumar ~1.0 por query_type.
 13. `users.organization_id` debe ser consistente con workspace membership — si un user es CEO de org A, sus workspaces deben pertenecer a org A. Violarlo corrompe el modelo de permisos en cascada.
 14. `_CEO_ALLOWED_ADMIN_OPS` frozenset en `permissions.py` controla qué operaciones admin puede ejecutar un CEO. Añadir operaciones a este set tiene implicaciones de seguridad — requiere revisión explícita antes de cada adición.
+15. `INTERNAL_BROADCAST_SECRET` env var must be set for worker SSE events to reach the broadcast endpoint. Without it, all document lifecycle events are silently dropped.
 
 ## Roadmap
 
 - **v0.8.6** ✓ completada: Fix seguridad + primer arranque + robustez. Sin features nuevas.
 - **v0.9.0** ✓ completada: Multi-tenant — organization_id en JWT, CEO scoping, API key rotation con grace period, rate limiting headers, audit log completo, schema v5.1.0.
-- **v1.0**: Dashboard Electron — diseñado por Lienzo (27 tareas). React+Vite+Tailwind. Frontend puro.
+- **v0.9.5** ✓ completada: Debt resolution — SSE org-scoped broadcast, method-aware rate limiting, Louvain SQL pre-filtering, search user_id document exclusion, graph org scoping design doc, trigger verification tests, 10 mechanical fixes. Dashboard backend endpoints (B1-B9) included.
+- **v1.0**: Dashboard Electron — React+Vite+Tailwind. Frontend. Spec+Plan by Prima. Lienzo building. Backend endpoints delivered:
+  - `GET /graph/all` — full graph paginated (limit/offset, degree DESC, cluster_id)
+  - `POST/PUT/DELETE /admin/predicates` — predicates CRUD (super-only)
+  - `POST /admin/merge-entities` — keep_as_alias flag for merge+alias
+  - `POST /documents/upload` — multipart file upload (dashboard ingestion)
+  - `POST /admin/attention-inbox/summary` + `/details` — org-scoped governance inbox
+  - `GET /api/v1/stats/timeline` — daily activity timeline
+  - `PUT /memories/{id}/staleness` — manual staleness management
+  - `POST /memories/preview` — GLiNER dry-run
+  - `GET /graph/clusters` — Louvain communities (paginated)
+  - FB-ALIAS pipeline fix: rejected candidates not re-proposed
 
 ## Licencia
 

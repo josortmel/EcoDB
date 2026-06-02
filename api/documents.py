@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import uuid as _uuid
 from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from auth import get_current_user
@@ -166,7 +168,81 @@ async def create_document(
 
 
 # ---------------------------------------------------------------------------
-# GET /documents — list
+# POST /documents/upload — multipart file upload (dashboard, distribution)
+# ---------------------------------------------------------------------------
+
+_MEDIA_STORE = os.environ.get("MEDIA_STORE_DIR", "/app/media")
+
+_DOC_TYPE_MAP = {
+    ".pdf": "pdf", ".docx": "docx", ".doc": "docx",
+    ".pptx": "pptx", ".ppt": "pptx",
+    ".md": "markdown", ".txt": "text",
+    ".html": "html", ".htm": "html",
+    ".csv": "csv", ".json": "json",
+    ".mp3": "audio", ".wav": "audio", ".ogg": "audio",
+    ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
+}
+
+
+@router.post("/upload", response_model=DocumentResponse, status_code=201)
+async def upload_document(
+    file: UploadFile = File(...),
+    project_id: int = Query(..., gt=0),
+    visibility: Literal["public", "private"] = "public",
+    actor: dict = Depends(get_current_user),
+) -> DocumentResponse:
+    """Upload a document file via multipart. Dashboard uses this — no host path needed."""
+    if not file.filename:
+        raise HTTPException(400, "file has no name")
+
+    os.makedirs(_MEDIA_STORE, exist_ok=True)
+    safe_id = str(_uuid.uuid4())
+    ext = os.path.splitext(file.filename)[1].lower()
+    stored_name = f"{safe_id}{ext}"
+    stored_path = os.path.join(_MEDIA_STORE, stored_name)
+
+    content = await file.read()
+    with open(stored_path, "wb") as f:
+        f.write(content)
+
+    doc_type = _DOC_TYPE_MAP.get(ext, "text")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if not actor.get("is_super"):
+            visible = await visible_project_ids(conn, actor)
+            if project_id not in visible:
+                os.unlink(stored_path)
+                raise HTTPException(403, "no access to target project")
+
+        workspace_id = await conn.fetchval(
+            "SELECT workspace_id FROM projects WHERE id = $1", project_id
+        )
+        if workspace_id is None:
+            os.unlink(stored_path)
+            raise HTTPException(404, "project not found")
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO documents (uri, filename, doc_type, workspace_id, project_id, visibility, status)
+            VALUES ($1, $2, $3, $4, $5, $6, 'queued')
+            RETURNING id, uri, filename, doc_type, workspace_id, project_id,
+                      visibility::text, status, retry_count,
+                      processing_started_at, last_indexed, processing_metrics,
+                      base_weight, created_at
+            """,
+            stored_path, file.filename, doc_type,
+            workspace_id, project_id, visibility,
+        )
+        await conn.execute("SELECT pg_notify('ecodb_ingest', $1)", str(row["id"]))
+        await conn.execute(
+            """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+            VALUES ($1, 'upload_document', 'document', $2, $3::jsonb, $4)""",
+            int(actor["sub"]), str(row["id"]),
+            json.dumps({"filename": file.filename, "project_id": project_id, "size": len(content)}),
+            actor.get("organization_id"),
+        )
+        return _row_to_response(row)
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=list[DocumentListItem])
