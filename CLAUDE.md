@@ -246,7 +246,7 @@ docker compose restart mcp
 - **v0.8.6** ✓ completada: Fix seguridad + primer arranque + robustez. Sin features nuevas.
 - **v0.9.0** ✓ completada: Multi-tenant — organization_id en JWT, CEO scoping, API key rotation con grace period, rate limiting headers, audit log completo, schema v5.1.0.
 - **v0.9.5** ✓ completada: Debt resolution — SSE org-scoped broadcast, method-aware rate limiting, Louvain SQL pre-filtering, search user_id document exclusion, graph org scoping design doc, trigger verification tests, 10 mechanical fixes. Dashboard backend endpoints (B1-B9) included.
-- **v1.0**: Dashboard Electron — React+Vite+Tailwind. Frontend. Spec+Plan by Prima. Lienzo building. Backend endpoints delivered:
+- **v1.0** ✓ completada: Dashboard Electron — React+Vite+Tailwind. 118 archivos. Graph Studio, Knowledge Explorer, Command Center, Settings. Backend endpoints delivered:
   - `GET /graph/all` — full graph paginated (limit/offset, degree DESC, cluster_id)
   - `POST/PUT/DELETE /admin/predicates` — predicates CRUD (super-only)
   - `POST /admin/merge-entities` — keep_as_alias flag for merge+alias

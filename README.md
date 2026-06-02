@@ -3,10 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/release-v0.9.0-orange" alt="Release"></a>
+  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/release-v1.0.0-0d9488" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
   <img src="https://img.shields.io/badge/MCP-32%20tools-0d9488" alt="MCP Tools">
+  <img src="https://img.shields.io/badge/dashboard-Electron-0d9488" alt="Dashboard">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
 </p>
 
@@ -339,7 +340,7 @@ docker compose --profile with-llm up --build -d          # local LLM for classif
 |---------|--------|-------------|
 | **v0.8.6** | Done | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. Security hardening + infrastructure consolidation. |
 | **v0.9.0** | **Current** | Multi-tenant. Organization isolation, CEO role, API key rotation with grace period, rate limiting headers, audit log complete, schema v5.1.0. |
-| **v1.0** | Next | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
+| **v1.0** | Current | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
 
 ## Documentation
 
