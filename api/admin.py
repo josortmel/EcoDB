@@ -1158,11 +1158,11 @@ async def get_graph_vocabulary(
             "SELECT name, entity_type FROM entity_dictionary ORDER BY entity_type, name"
         )
         predicates = await conn.fetch(
-            "SELECT name, COALESCE(description, '') AS description FROM predicates_canonical WHERE state = 'approved' ORDER BY cluster, name"
+            "SELECT name, COALESCE(description, '') AS description, state, cluster FROM predicates_canonical WHERE state = 'approved' ORDER BY cluster, name"
         )
     return {
         "entities": [{"name": r["name"], "type": r["entity_type"]} for r in entities],
-        "predicates": [{"name": r["name"], "description": r["description"]} for r in predicates],
+        "predicates": [{"name": r["name"], "description": r["description"], "state": r["state"], "cluster": r["cluster"]} for r in predicates],
         "entity_count": len(entities),
         "predicate_count": len(predicates),
     }

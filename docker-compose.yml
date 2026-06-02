@@ -112,6 +112,7 @@ services:
       ENABLE_TRUST_TIERS: "true"
       ENABLE_STOP_ENTITIES_DYNAMIC: "true"
       ENABLE_TENSION_DETECTION: "true"
+      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET:-fa8b0c02ef55b172afdf48ecc32330ae}
       RATE_LIMIT_SEARCH: "200"
       RATE_LIMIT_DEFAULT: "400"
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
@@ -130,6 +131,8 @@ services:
       llm:
         condition: service_started
         required: false
+    volumes:
+      - ecodb_media:/app/media
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 10s
@@ -200,6 +203,7 @@ services:
       CUDA_VISIBLE_DEVICES: ""
       NER_SERVICE_URL: http://ner:8091
       WINDOWS_MEDIA_PREFIX: ${WINDOWS_MEDIA_PREFIX:-}
+      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET:-fa8b0c02ef55b172afdf48ecc32330ae}
     volumes:
       - ecodb_media:/app/media:ro
     healthcheck:
