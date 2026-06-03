@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/release-v1.1.0-0d9488" alt="Release"></a>
+  <a href="https://github.com/josortmel/EcoDB/releases/latest"><img src="https://img.shields.io/github/v/release/josortmel/EcoDB?color=0d9488&label=release" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
   <img src="https://img.shields.io/badge/MCP-32%20tools-0d9488" alt="MCP Tools">
