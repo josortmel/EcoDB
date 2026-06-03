@@ -31,7 +31,16 @@ services:
       - "127.0.0.1:5435:5432"
     volumes:
       - ecodb_data:/var/lib/postgresql/data
+      # Schema bootstrap. docker-entrypoint-initdb.d runs these in filename
+      # order ONLY on an empty data volume (first boot) — on an existing
+      # install nothing here re-runs, so adding migrations is safe. init.sql
+      # is the 5.0.0 baseline; the four files carry it to 5.1.1 (the version
+      # the API expects). All four are idempotent.
       - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./sql/migrate_3_0h_multimodal.sql:/docker-entrypoint-initdb.d/02-multimodal.sql:ro
+      - ./sql/migrate_5.0.1_to_5.1.0.sql:/docker-entrypoint-initdb.d/03-multitenant.sql:ro
+      - ./sql/migrate_5.1.0_to_5.1.1.sql:/docker-entrypoint-initdb.d/04-graph-clusters.sql:ro
+      - ./sql/trigger_age_sync.sql:/docker-entrypoint-initdb.d/05-age-sync-triggers.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ecodb -d ecodb"]
       interval: 5s

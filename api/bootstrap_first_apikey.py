@@ -1,7 +1,11 @@
 """Bootstrap script — crea la PRIMERA API key del sistema (out-of-band).
 
 Uso:
+    python bootstrap_first_apikey.py
     python bootstrap_first_apikey.py --user-id=1 --name="hilo-orquestador"
+
+Sin argumentos crea la key para el super user (el admin que siembra init.sql
+en un fresh install). Con --user-id apunta a un user concreto.
 
 Conecta directo a la DB con DATABASE_URL del entorno y crea una API key activa
 para el user indicado. Imprime la API key plain UNA vez y nunca mas.
@@ -25,15 +29,29 @@ import settings
 from auth import generate_api_key
 
 
-async def main(user_id: int, name: str) -> int:
+async def main(user_id: int | None, name: str) -> int:
     conn = await asyncpg.connect(dsn=settings.DATABASE_URL)
     try:
-        target = await conn.fetchrow(
-            "SELECT id, name, active FROM users WHERE id = $1", user_id
-        )
-        if target is None:
-            print(f"[bootstrap] ERROR: user_id={user_id} no existe", file=sys.stderr)
-            return 2
+        if user_id is None:
+            # Sin --user-id: el super user. El partial unique index de init.sql
+            # garantiza que solo hay uno (el admin sembrado en fresh install).
+            target = await conn.fetchrow(
+                "SELECT id, name, active FROM users WHERE is_super = true"
+            )
+            if target is None:
+                print(
+                    "[bootstrap] ERROR: no hay super user. Pasa --user-id explicitamente.",
+                    file=sys.stderr,
+                )
+                return 2
+            user_id = target["id"]
+        else:
+            target = await conn.fetchrow(
+                "SELECT id, name, active FROM users WHERE id = $1", user_id
+            )
+            if target is None:
+                print(f"[bootstrap] ERROR: user_id={user_id} no existe", file=sys.stderr)
+                return 2
         if not target["active"]:
             print(f"[bootstrap] ERROR: user_id={user_id} esta inactivo", file=sys.stderr)
             return 2
@@ -79,7 +97,9 @@ async def main(user_id: int, name: str) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--user-id", type=int, required=True, help="ID del user destino")
-    parser.add_argument("--name", type=str, required=True, help="Nombre legible de la key")
+    parser.add_argument("--user-id", type=int, default=None,
+                        help="ID del user destino (default: el super user)")
+    parser.add_argument("--name", type=str, default="bootstrap",
+                        help="Nombre legible de la key (default: 'bootstrap')")
     args = parser.parse_args()
     sys.exit(asyncio.run(main(args.user_id, args.name)))

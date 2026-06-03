@@ -311,6 +311,12 @@ cd ecodb
 docker compose up --build -d # first boot builds images + downloads models (~35 GB)
 ```
 
+On **Windows**, run the setup step with PowerShell instead of `setup.sh`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
 Monitor first boot (model downloads take time):
 
 ```bash
