@@ -636,7 +636,30 @@
         "pending": "Pending",
         "approved": "Resolved",
         "rejected": "Rejected"
+      },
+      "direction": {
+        "label": "Merge direction",
+        "invert": "Invert",
+        "survives": "Survives",
+        "absorbed": "Absorbed"
       }
+    },
+    "aliasScan": {
+      "title": "Find candidates",
+      "threshold": "Similarity threshold",
+      "thresholdHint": "Higher = stricter, fewer matches",
+      "noiseHint": "Low thresholds may surface noise (e.g. dates).",
+      "maxPerName": "Max per name",
+      "nameFilter": "Filter by name",
+      "preview": "Preview",
+      "previewing": "Previewing…",
+      "scan": "Scan",
+      "scanning": "Scanning…",
+      "result": "Found {{found}} · {{inserted}} new · {{updated}} updated",
+      "previewResult": "{{found}} would match (preview)",
+      "totalPending": "{{count}} pending total",
+      "more": "+{{count}} more",
+      "failed": "Scan failed — try again."
     }
   },
   "cmdk": {

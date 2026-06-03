@@ -9,11 +9,11 @@ import { useToastStore } from '../stores/toast';
 import { useAuthMe } from '../hooks/auth';
 import { useGraphVocabulary, useEntityDictionary, useStopEntities, useSaveEntity, useDeleteEntity, useCreatePredicate, useUpdatePredicate, useDeletePredicate, PREDICATE_STATES, type VocabEntity, type VocabPredicate, type DictEntity, type StopEntity, type GraphVocabulary, type PredicateState } from '../hooks/settings';
 import { useMergeEntities, useUndoMerge, searchNodes, type NodeMatch } from '../hooks/ontology';
-import { useAliasCandidates, useReviewAliasCandidate, type AliasItem, type AliasStatus } from '../hooks/inbox';
+import { useAliasCandidates, useReviewAliasCandidate, useScanAliasCandidates, type AliasItem, type AliasStatus, type AliasScanResponse } from '../hooks/inbox';
 
 const ACCENT = 'var(--sec-ontology)'; // §2.9 ontology #8E78BC
 
-function SearchInput({ value, onChange, placeholder, onKeyDown, testid = 'ont-search' }: { value: string; onChange: (v: string) => void; placeholder: string; onKeyDown?: (e: ReactKeyboardEvent<HTMLInputElement>) => void; testid?: string }) {
+function SearchInput({ value, onChange, placeholder, onKeyDown, testid = 'ont-search', ariaLabel }: { value: string; onChange: (v: string) => void; placeholder: string; onKeyDown?: (e: ReactKeyboardEvent<HTMLInputElement>) => void; testid?: string; ariaLabel?: string }) {
   const [focused, setFocused] = useState(false);
   return (
     <input
@@ -23,6 +23,7 @@ function SearchInput({ value, onChange, placeholder, onKeyDown, testid = 'ont-se
       onBlur={() => setFocused(false)}
       onKeyDown={onKeyDown}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       data-testid={testid}
       className="w-full rounded-md px-3 py-2 font-mono text-[12px] text-ink-1 outline-none placeholder:text-ink-3"
       style={{
@@ -630,9 +631,138 @@ function PredicatesTab({ isAdmin }: { isAdmin: boolean }) {
 }
 
 // Alias candidates — same source of truth as the Decisions Inbox. Pending shows
-// the approve/reject flow (approve-with-merge collapses source → target);
+// the approve/reject flow with a direction control (approve-with-merge collapses
+// source → target by default; ⇄ flips it so the source survives instead);
 // Resolved shows already-approved aliases read-only (#45).
 const ALIAS_STATUSES: AliasStatus[] = ['pending', 'approved'];
+
+// Retroactive discovery panel. threshold is pg_trgm similarity (higher = stricter).
+// Preview (dry_run) shows what WOULD be persisted without touching the DB.
+function AliasScanPanel() {
+  const { t } = useTranslation();
+  const toast = useToastStore((s) => s.show);
+  const scan = useScanAliasCandidates();
+  const [threshold, setThreshold] = useState(0.65);
+  const [maxPerName, setMaxPerName] = useState(3);
+  const [nameFilter, setNameFilter] = useState('');
+  const [result, setResult] = useState<{ res: AliasScanResponse; preview: boolean } | null>(null);
+  const busy = scan.isPending;
+  const [lastOp, setLastOp] = useState<'preview' | 'scan' | null>(null);
+
+  const run = (dry: boolean) => {
+    if (busy) return;
+    setLastOp(dry ? 'preview' : 'scan'); // H1: show the loading label only on the clicked button
+    setResult(null); // BC1: drop a prior result so a failed new scan can't show stale numbers
+    scan.mutate(
+      { threshold, max_per_name: maxPerName, ...(nameFilter.trim() ? { name_filter: nameFilter.trim() } : {}), dry_run: dry },
+      {
+        onSuccess: (res) => {
+          setResult({ res, preview: dry });
+          if (!dry) toast(t('ont.aliasScan.result', { found: res.found, inserted: res.inserted, updated: res.updated }));
+        },
+        onError: (e) => toast(errMsg(e, t, t('ont.aliasScan.failed'))),
+      },
+    );
+  };
+
+  const preview = result?.res.candidates ?? [];
+
+  return (
+    <GlassCard className="flex flex-col gap-3 p-3">
+      <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: ACCENT }}>
+        <span className="h-[7px] w-[7px] flex-none rounded-full" style={{ background: ACCENT, boxShadow: `0 0 8px ${ACCENT}` }} />
+        {t('ont.aliasScan.title')}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-baseline justify-between">
+          <label htmlFor="alias-threshold" className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">{t('ont.aliasScan.threshold')}</label>
+          <span className="font-mono text-[13px] tabular-nums text-ink-1">{threshold.toFixed(2)}</span>
+        </div>
+        <input
+          id="alias-threshold"
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={threshold}
+          onChange={(e) => setThreshold(parseFloat(e.target.value))}
+          data-testid="alias-scan-threshold"
+          className="w-full"
+          style={{ accentColor: 'var(--sec-ontology)' }}
+        />
+        <span className="font-mono text-[9.5px] text-ink-3">{threshold < 0.6 ? t('ont.aliasScan.noiseHint') : t('ont.aliasScan.thresholdHint')}</span>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="alias-maxpername" className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">{t('ont.aliasScan.maxPerName')}</label>
+          <input
+            id="alias-maxpername"
+            type="number"
+            min={1}
+            max={10}
+            value={maxPerName}
+            onChange={(e) => setMaxPerName(Math.min(10, Math.max(1, Math.round(Number(e.target.value) || 1))))}
+            data-testid="alias-scan-maxpername"
+            className="w-[64px] rounded-md px-2.5 py-2 font-mono text-[12px] text-ink-1 outline-none"
+            style={{ background: 'var(--field-bg)', boxShadow: 'inset 0 1px 3px var(--inset), inset 0 0 0 1px var(--card-hairline)' }}
+          />
+        </div>
+        <div className="min-w-[140px] flex-1">
+          <SearchInput value={nameFilter} onChange={setNameFilter} placeholder={t('ont.aliasScan.nameFilter')} ariaLabel={t('ont.aliasScan.nameFilter')} testid="alias-scan-filter" />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => run(true)}
+          disabled={busy}
+          data-testid="alias-scan-preview"
+          className="rounded-btn px-3.5 py-2 font-body text-[12px] font-semibold text-ink-1 transition-colors hover:bg-[var(--inset)] disabled:opacity-50"
+          style={{ background: 'var(--field-bg)', boxShadow: 'inset 0 1px 0 var(--card-edge), inset 0 0 0 1px var(--card-hairline)' }}
+        >
+          {busy && lastOp === 'preview' ? t('ont.aliasScan.previewing') : t('ont.aliasScan.preview')}
+        </button>
+        <button
+          type="button"
+          onClick={() => run(false)}
+          disabled={busy}
+          data-testid="alias-scan-run"
+          className="rounded-btn bg-btn-primary px-4 py-2 font-body text-[12px] font-semibold text-white transition-[filter] hover:brightness-105 disabled:opacity-50"
+          style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), inset 0 0 0 1px rgba(150,62,32,0.45), 0 5px 14px -5px rgba(180,82,48,0.45)' }}
+        >
+          {busy && lastOp === 'scan' ? t('ont.aliasScan.scanning') : t('ont.aliasScan.scan')}
+        </button>
+      </div>
+
+      {result && (
+        <div className="flex flex-col gap-1.5 rounded-md p-2.5" style={{ background: 'var(--inset)', boxShadow: 'inset 0 0 0 1px var(--card-hairline)' }}>
+          <span className="font-mono text-[11.5px] text-ink-1">
+            {result.preview
+              ? t('ont.aliasScan.previewResult', { found: result.res.found, inserted: result.res.inserted, updated: result.res.updated })
+              : t('ont.aliasScan.result', { found: result.res.found, inserted: result.res.inserted, updated: result.res.updated })}
+          </span>
+          <span className="font-mono text-[10px] text-ink-3">{t('ont.aliasScan.totalPending', { count: result.res.total_pending })}</span>
+          {result.preview && preview.length > 0 && (
+            <div className="mt-1 flex flex-col gap-1">
+              {preview.slice(0, 6).map((c, i) => (
+                <div key={`${c.source_name}-${c.target_node_id}-${i}`} className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-2">
+                  <span className="min-w-0 truncate">{c.source_name}</span>
+                  <span className="flex-none text-ink-3">→</span>
+                  <span className="min-w-0 truncate">{c.target_node_name ?? `#${c.target_node_id}`}</span>
+                  <span className="flex-none tabular-nums text-ink-3">{c.confidence.toFixed(2)}</span>
+                </div>
+              ))}
+              {preview.length > 6 && <span className="font-mono text-[9.5px] text-ink-3">{t('ont.aliasScan.more', { count: preview.length - 6 })}</span>}
+            </div>
+          )}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
 
 function AliasesTab({ isAdmin }: { isAdmin: boolean }) {
   const { t } = useTranslation();
@@ -641,14 +771,22 @@ function AliasesTab({ isAdmin }: { isAdmin: boolean }) {
   const aliases = useAliasCandidates(isAdmin ? 50 : 0, status);
   const review = useReviewAliasCandidate();
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  // Single direction flag — only one confirm is open at a time. openConfirm resets
+  // it to false (canonical: target survives) so an invert never leaks across rows.
+  const [reverse, setReverse] = useState(false);
 
   const items = asArray<AliasItem>(aliases.data);
   const acting = review.isPending;
   const isPending = status === 'pending';
 
-  const onReview = (id: number, st: 'approved' | 'rejected', merge?: boolean) =>
+  const openConfirm = (id: number) => {
+    setReverse(false);
+    setConfirmId(id);
+  };
+
+  const onReview = (id: number, st: 'approved' | 'rejected', merge?: boolean, rev?: boolean) =>
     review.mutate(
-      { id, status: st, ...(merge != null ? { merge } : {}) },
+      { id, status: st, ...(merge != null ? { merge } : {}), ...(rev != null ? { reverse: rev } : {}) },
       {
         onSuccess: () => {
           toast(t('ont.aliasReview.done'));
@@ -660,8 +798,8 @@ function AliasesTab({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <StateWrap query={aliases} isAdmin={isAdmin}>
-      <GlassCard className="flex max-h-[calc(100vh-250px)] flex-col p-3">
-        <div className="mb-2.5 flex gap-1.5">
+      <div className="flex flex-col gap-4">
+        <div className="flex gap-1.5">
           {ALIAS_STATUSES.map((s) => (
             <button
               key={s}
@@ -669,6 +807,7 @@ function AliasesTab({ isAdmin }: { isAdmin: boolean }) {
               onClick={() => {
                 setStatus(s);
                 setConfirmId(null);
+                setReverse(false);
               }}
               aria-pressed={status === s}
               data-testid={`ont-alias-status-${s}`}
@@ -683,80 +822,115 @@ function AliasesTab({ isAdmin }: { isAdmin: boolean }) {
             </button>
           ))}
         </div>
-        {items.length === 0 ? (
-          <div className="grid place-items-center py-12 font-mono text-[12.5px] text-ink-3">{isPending ? t('ont.aliasReview.empty') : t('ont.aliasReview.emptyResolved')}</div>
-        ) : (
-          <div role="list" className="min-h-0 flex-1 overflow-y-auto">
-            {items.map((a) => (
-              <div key={a.id} data-testid="ont-alias" className="border-b border-[var(--card-hairline)] px-2.5 py-3 last:border-0">
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 truncate text-[13px] text-ink-1">{a.source_name}</span>
-                  <span className="flex-none text-ink-3">→</span>
-                  <span className="min-w-0 truncate text-[13px] text-ink-1">{a.target_node_name}</span>
-                  {!isPending && <Marker label={t(`ont.aliasReview.status.${a.status === 'rejected' ? 'rejected' : 'approved'}`)} color={a.status === 'rejected' ? 'var(--red)' : 'var(--grn)'} />}
-                </div>
-                <div className="mt-1 flex items-center gap-3 font-mono text-[10px] text-ink-3">
-                  <span>{t('ont.aliasReview.confidence')} {a.confidence.toFixed(2)}</span>
-                  <span>{t('ont.aliasReview.occurrences')} {a.occurrences}</span>
-                </div>
-                {isPending && (
-                <div className="mt-2.5">
-                  {confirmId === a.id ? (
-                    <div className="flex flex-col gap-2">
-                      <span className="font-mono text-[11px] leading-relaxed text-ink-1">{t('ont.aliasReview.mergePrompt', { source: a.source_name, target: a.target_node_name })}</span>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onReview(a.id, 'approved', true)}
-                          disabled={acting}
-                          data-testid="ont-alias-confirm"
-                          className="rounded-btn bg-btn-primary px-3.5 py-2 font-body text-[12px] font-semibold text-white transition-[filter] hover:brightness-105 disabled:opacity-50"
-                          style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), inset 0 0 0 1px rgba(150,62,32,0.45), 0 5px 14px -5px rgba(180,82,48,0.45)' }}
-                        >
-                          {t('ont.aliasReview.confirmMerge')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmId(null)}
-                          disabled={acting}
-                          className="rounded-btn px-3.5 py-2 font-body text-[12px] font-semibold text-ink-1 transition-colors hover:bg-[var(--inset)] disabled:opacity-50"
-                          style={{ background: 'var(--field-bg)', boxShadow: 'inset 0 0 0 1px var(--card-hairline)' }}
-                        >
-                          {t('ont.aliasReview.cancel')}
-                        </button>
+
+        {isPending && <AliasScanPanel />}
+
+        <GlassCard className="flex max-h-[calc(100vh-340px)] flex-col p-3">
+          {items.length === 0 ? (
+            <div className="grid place-items-center py-12 font-mono text-[12.5px] text-ink-3">{isPending ? t('ont.aliasReview.empty') : t('ont.aliasReview.emptyResolved')}</div>
+          ) : (
+            <div role="list" className="min-h-0 flex-1 overflow-y-auto">
+              {items.map((a) => {
+                const survivor = reverse ? a.source_name : a.target_node_name;
+                const absorbed = reverse ? a.target_node_name : a.source_name;
+                return (
+                  <div key={a.id} data-testid="ont-alias" className="border-b border-[var(--card-hairline)] px-2.5 py-3 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 truncate text-[13px] text-ink-1">{a.source_name}</span>
+                      <span className="flex-none text-ink-3">→</span>
+                      <span className="min-w-0 truncate text-[13px] text-ink-1">{a.target_node_name}</span>
+                      {!isPending && <Marker label={t(`ont.aliasReview.status.${a.status === 'rejected' ? 'rejected' : 'approved'}`)} color={a.status === 'rejected' ? 'var(--red)' : 'var(--grn)'} />}
+                    </div>
+                    <div className="mt-1 flex items-center gap-3 font-mono text-[10px] text-ink-3">
+                      <span>{t('ont.aliasReview.confidence')} {a.confidence.toFixed(2)}</span>
+                      <span>{t('ont.aliasReview.occurrences')} {a.occurrences}</span>
+                    </div>
+                    {isPending && (
+                      <div className="mt-2.5">
+                        {confirmId === a.id ? (
+                          <div className="flex flex-col gap-2.5">
+                            <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">{t('ont.aliasReview.direction.label')}</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-sm px-2 py-1 font-mono text-[11.5px] text-ink-1" style={{ background: 'color-mix(in srgb, var(--red) 12%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--red) 32%, transparent)' }}>{absorbed}</span>
+                              <span className="flex-none text-ink-3">→</span>
+                              <span className="rounded-sm px-2 py-1 font-mono text-[11.5px] text-ink-1" style={{ background: 'color-mix(in srgb, var(--sec-ontology) 14%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--sec-ontology) 38%, transparent)' }}>{survivor}</span>
+                              <button
+                                type="button"
+                                onClick={() => setReverse((r) => !r)}
+                                disabled={acting}
+                                data-testid="ont-alias-invert"
+                                aria-pressed={reverse}
+                                className="flex-none rounded-md px-2.5 py-1.5 font-mono text-[10.5px] transition-colors disabled:opacity-50"
+                                style={
+                                  reverse
+                                    ? { color: 'var(--sec-ontology)', background: 'color-mix(in srgb, var(--sec-ontology) 14%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--sec-ontology) 38%, transparent)' }
+                                    : { color: 'var(--ink-2)', background: 'var(--field-bg)', boxShadow: 'inset 0 0 0 1px var(--card-hairline)' }
+                                }
+                              >
+                                ⇄ {t('ont.aliasReview.direction.invert')}
+                              </button>
+                            </div>
+                            <span className="font-mono text-[11px] leading-relaxed text-ink-1">
+                              <span className="text-ink-3">{t('ont.aliasReview.direction.survives')}:</span> {survivor} · <span className="text-ink-3">{t('ont.aliasReview.direction.absorbed')}:</span> {absorbed}
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => onReview(a.id, 'approved', true, reverse)}
+                                disabled={acting}
+                                data-testid="ont-alias-confirm"
+                                className="rounded-btn bg-btn-primary px-3.5 py-2 font-body text-[12px] font-semibold text-white transition-[filter] hover:brightness-105 disabled:opacity-50"
+                                style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), inset 0 0 0 1px rgba(150,62,32,0.45), 0 5px 14px -5px rgba(180,82,48,0.45)' }}
+                              >
+                                {t('ont.aliasReview.confirmMerge')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfirmId(null);
+                                  setReverse(false);
+                                }}
+                                disabled={acting}
+                                className="rounded-btn px-3.5 py-2 font-body text-[12px] font-semibold text-ink-1 transition-colors hover:bg-[var(--inset)] disabled:opacity-50"
+                                style={{ background: 'var(--field-bg)', boxShadow: 'inset 0 0 0 1px var(--card-hairline)' }}
+                              >
+                                {t('ont.aliasReview.cancel')}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openConfirm(a.id)}
+                              disabled={acting}
+                              data-testid="ont-alias-approve"
+                              className="rounded-btn bg-btn-primary px-3.5 py-2 font-body text-[12px] font-semibold text-white transition-[filter] hover:brightness-105 disabled:opacity-50"
+                              style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), inset 0 0 0 1px rgba(150,62,32,0.45), 0 5px 14px -5px rgba(180,82,48,0.45)' }}
+                            >
+                              {t('ont.aliasReview.approve')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onReview(a.id, 'rejected')}
+                              disabled={acting}
+                              data-testid="ont-alias-reject"
+                              className="rounded-btn px-3.5 py-2 font-body text-[12px] font-semibold text-ink-1 transition-colors hover:bg-[var(--inset)] disabled:opacity-50"
+                              style={{ background: 'var(--field-bg)', boxShadow: 'inset 0 0 0 1px var(--card-hairline)' }}
+                            >
+                              {t('ont.aliasReview.reject')}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setConfirmId(a.id)}
-                        disabled={acting}
-                        data-testid="ont-alias-approve"
-                        className="rounded-btn bg-btn-primary px-3.5 py-2 font-body text-[12px] font-semibold text-white transition-[filter] hover:brightness-105 disabled:opacity-50"
-                        style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), inset 0 0 0 1px rgba(150,62,32,0.45), 0 5px 14px -5px rgba(180,82,48,0.45)' }}
-                      >
-                        {t('ont.aliasReview.approve')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onReview(a.id, 'rejected')}
-                        disabled={acting}
-                        data-testid="ont-alias-reject"
-                        className="rounded-btn px-3.5 py-2 font-body text-[12px] font-semibold text-ink-1 transition-colors hover:bg-[var(--inset)] disabled:opacity-50"
-                        style={{ background: 'var(--field-bg)', boxShadow: 'inset 0 0 0 1px var(--card-hairline)' }}
-                      >
-                        {t('ont.aliasReview.reject')}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </GlassCard>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </GlassCard>
+      </div>
     </StateWrap>
   );
 }
