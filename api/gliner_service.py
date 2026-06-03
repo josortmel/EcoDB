@@ -56,7 +56,7 @@ DEFAULT_THRESHOLD = 0.7
 
 MODEL_NAME = os.getenv("GLINER_MODEL", "urchade/gliner_multi-v2.1")
 
-_ALIAS_SIM_THRESHOLD = 0.80
+_ALIAS_SIM_THRESHOLD = 0.65
 _ALIAS_MAX_CANDIDATES = 3
 
 
@@ -359,5 +359,118 @@ async def detect_alias_candidates(entities: list[dict], pool: asyncpg.Pool) -> N
                         )
     except Exception as exc:
         logger.warning("detect_alias_candidates failed: %r", exc)
+
+
+async def scan_all_alias_candidates(
+    pool: asyncpg.Pool,
+    threshold: float = 0.65,
+    max_per_name: int = 3,
+    name_filter: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Scan all active nodes for alias candidates. User-triggered from dashboard.
+
+    Args:
+        pool: database pool.
+        threshold: pg_trgm similarity threshold (0.0-1.0).
+        max_per_name: max candidates per source name.
+        name_filter: optional ILIKE pattern to filter node names.
+        dry_run: if True, return candidates without inserting.
+
+    Returns: {found, inserted, updated, total_existing_pending, candidates: [...]}
+    """
+    found = 0
+    inserted = 0
+    updated = 0
+    preview: list[dict] = []
+
+    try:
+        async with pool.acquire() as conn:
+            # Get candidate source names
+            if name_filter:
+                name_rows = await conn.fetch(
+                    "SELECT name FROM nodes WHERE status = 'active' AND name ILIKE $1",
+                    f"%{name_filter}%",
+                )
+            else:
+                name_rows = await conn.fetch(
+                    "SELECT name FROM nodes WHERE status = 'active'"
+                )
+            names = sorted({r["name"] for r in name_rows})
+
+            for name in names:
+                similar_rows = await conn.fetch(
+                    """
+                    SELECT id, name AS target_name, similarity(name, $1) AS sim
+                    FROM nodes
+                    WHERE similarity(name, $1) >= $2
+                      AND lower(name) != lower($1)
+                      AND status = 'active'
+                    ORDER BY sim DESC
+                    LIMIT $3
+                    """,
+                    name, threshold, max_per_name,
+                )
+                for node in similar_rows:
+                    found += 1
+                    confidence = float(node["sim"])
+                    info = {
+                        "source_name": name,
+                        "target_node_id": node["id"],
+                        "target_node_name": node["target_name"],
+                        "confidence": round(confidence, 4),
+                    }
+                    if dry_run:
+                        preview.append(info)
+                        continue
+
+                    existing = await conn.fetchrow(
+                        """SELECT id, status FROM entity_alias_candidates
+                           WHERE source_name = $1 AND target_node_id = $2
+                           ORDER BY id DESC LIMIT 1""",
+                        name, node["id"],
+                    )
+                    if existing:
+                        new_status = "pending"
+                        await conn.execute(
+                            """UPDATE entity_alias_candidates
+                               SET occurrences = occurrences + 1,
+                                   confidence = GREATEST(confidence, $2),
+                                   status = $3,
+                                   last_seen = now(),
+                                   reviewed_by = NULL
+                               WHERE id = $1""",
+                            existing["id"], confidence, new_status,
+                        )
+                        updated += 1
+                    else:
+                        await conn.execute(
+                            """INSERT INTO entity_alias_candidates
+                                   (source_name, target_node_id, confidence, occurrences)
+                               VALUES ($1, $2, $3, 1)""",
+                            name, node["id"], confidence,
+                        )
+                        inserted += 1
+
+        existing_pending = 0
+        if not dry_run:
+            async with pool.acquire() as conn:
+                existing_pending = await conn.fetchval(
+                    "SELECT count(*) FROM entity_alias_candidates WHERE status = 'pending'"
+                )
+
+        result: dict = {
+            "found": found,
+            "inserted": inserted,
+            "updated": updated,
+            "total_pending": existing_pending,
+        }
+        if dry_run:
+            result["candidates"] = preview
+        return result
+
+    except Exception as exc:
+        logger.warning("scan_all_alias_candidates failed: %r", exc)
+        raise
 
 

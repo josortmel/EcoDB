@@ -145,6 +145,18 @@ Todos controlados por env vars, `_env_bool()`:
 - MCP hace intercambio API key → JWT automáticamente, con refresh en 401
 - `validate_production_secrets()` bloquea arranque en producción con secretos dev
 
+## Sistema de alias de entidades
+
+Detección de nombres similares de entidades para unificar duplicados. Pipeline:
+
+1. **Detección automática**: al crear una memoria, `link_entities_from_content()` (graph.py) extrae entidades vía GLiNER + diccionario y llama a `detect_alias_candidates()` (gliner_service.py). Compara cada nombre contra nodos existentes con `pg_trgm.similarity() >= 0.65`.
+2. **Escaneo manual**: `POST /admin/alias-candidates/scan` con threshold, max_per_name, name_filter y dry_run configurables desde la dashboard.
+3. **Revisión**: `PUT /admin/alias-candidates/{id}` — approve/reject manual. Campos `merge` (ejecutar fusión) y `reverse` (invertir dirección: target→source en vez de source→target).
+4. **Listado**: `GET /admin/alias-candidates?status=pending|approved|rejected|archived` — histórico completo.
+5. **Inbox**: `GET /admin/attention-inbox/summary` incluye `pending_alias_candidates` count.
+
+Archivos clave: `gliner_service.py` (detección + scan), `graph.py` (link_entities_from_content), `admin.py` (endpoints review/scan/list), `background.py` (purga >90 días).
+
 ## Desarrollo local
 
 ```bash
@@ -187,6 +199,8 @@ docker compose restart mcp
 - **Media volume no compartido**: API y worker deben montar el MISMO volumen `ecodb_media:/app/media`. Si solo worker lo monta, uploads vía API caen en capa efímera invisible al worker → "file not found". Verificar `volumes:` en ambos servicios docker-compose.
 - **Docker build --no-cache**: innecesario para añadir dependencias pip. Basta con modificar `requirements.txt` → la capa COPY se invalida sola y pip install re-ejecuta. `--no-cache` baja torch entero (532MB+) sin necesidad.
 - **Media dir permissions**: el volumen Docker se crea como root. El contenedor API corre como `apiuser`. Post-deploy: `docker exec -u root ecodb-api sh -c "mkdir -p /app/media && chown apiuser:apiuser /app/media"`.
+- **Alias candidates vacíos**: si `GET /admin/alias-candidates?status=pending` devuelve 0 resultados con muchos nodos activos, el pipeline de memoria probablemente no está llamando a `detect_alias_candidates()`. Verificar que `link_entities_from_content()` recibe `pool`. Ejecutar `POST /admin/alias-candidates/scan` para poblar retroactivamente.
+- **Alias threshold muy alto**: `_ALIAS_SIM_THRESHOLD` en `gliner_service.py`. Si no se generan candidatos, bajar a 0.55-0.60. Si hay demasiado ruido (fechas, números), subir a 0.70-0.75. El valor 0.65 está calibrado para nombres de entidad.
 
 ## Deuda técnica — deep hunt v0.9 (2026-06-01)
 
@@ -240,6 +254,9 @@ docker compose restart mcp
 13. `users.organization_id` debe ser consistente con workspace membership — si un user es CEO de org A, sus workspaces deben pertenecer a org A. Violarlo corrompe el modelo de permisos en cascada.
 14. `_CEO_ALLOWED_ADMIN_OPS` frozenset en `permissions.py` controla qué operaciones admin puede ejecutar un CEO. Añadir operaciones a este set tiene implicaciones de seguridad — requiere revisión explícita antes de cada adición.
 15. `INTERNAL_BROADCAST_SECRET` env var must be set for worker SSE events to reach the broadcast endpoint. Without it, all document lifecycle events are silently dropped.
+16. `_ALIAS_SIM_THRESHOLD = 0.65` en `gliner_service.py` — threshold pg_trgm para detección de alias. Bajarlo genera ruido (falsos positivos); subirlo pierde candidatos reales. 0.65 captura variaciones tipo "DeepSeek"↔"DeepSeek V4" (sim=0.75).
+17. Alias candidates NUNCA se auto-resuelven. El sistema solo genera `status='pending'`. La revisión (approve/reject + merge) siempre es manual desde la dashboard o API.
+18. `link_entities_from_content()` en `graph.py` acepta `pool` opcional — si se omite, se salta la detección de alias (usado en migraciones).
 
 ## Roadmap
 
@@ -257,6 +274,9 @@ docker compose restart mcp
   - `POST /memories/preview` — GLiNER dry-run
   - `GET /graph/clusters` — Louvain communities (paginated)
   - FB-ALIAS pipeline fix: rejected candidates not re-proposed
+  - `POST /admin/alias-candidates/scan` — manual scan with configurable threshold, max_per_name, name_filter, dry_run
+  - `PUT /admin/alias-candidates/{id}` — approve/reject with `merge` and `reverse` flags (reverse = merge target INTO source)
+  - Alias pipeline fix: `detect_alias_candidates()` now called from `link_entities_from_content()` (memory path), threshold 0.80→0.65
 
 ## Licencia
 

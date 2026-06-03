@@ -790,6 +790,7 @@ class AliasCandidateReview(BaseModel):
 
     status: Literal["approved", "rejected"]
     merge: bool = Field(False, description="If approved and true, trigger entity merge.")
+    reverse: bool = Field(False, description="If true, merge target INTO source instead of source into target.")
     reason: Optional[str] = Field(None, max_length=500)
 
 
@@ -856,6 +857,43 @@ async def list_alias_candidates(
     ]
 
 
+class AliasScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    threshold: float = Field(0.65, ge=0.0, le=1.0, description="pg_trgm similarity threshold")
+    max_per_name: int = Field(3, ge=1, le=10, description="Max candidates per source name")
+    name_filter: str | None = Field(None, min_length=1, max_length=256, description="Optional ILIKE filter on node names")
+    dry_run: bool = Field(False, description="If true, preview without inserting")
+
+
+class AliasScanResponse(BaseModel):
+    found: int
+    inserted: int
+    updated: int
+    total_pending: int
+    candidates: list[dict] | None = None
+
+
+@router.post("/alias-candidates/scan", response_model=AliasScanResponse)
+async def scan_alias_candidates(
+    body: AliasScanRequest,
+    actor: dict = Depends(get_current_user),
+) -> AliasScanResponse:
+    """Scan all active nodes for alias candidates. Super or CEO (own org)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await _check_admin_op(conn, actor, "alias_candidates")
+    from gliner_service import scan_all_alias_candidates
+    result = await scan_all_alias_candidates(
+        pool,
+        threshold=body.threshold,
+        max_per_name=body.max_per_name,
+        name_filter=body.name_filter,
+        dry_run=body.dry_run,
+    )
+    return AliasScanResponse(**result)
+
+
 @router.put("/alias-candidates/{candidate_id}", response_model=AliasCandidateRow)
 async def review_alias_candidate(
     candidate_id: int,
@@ -904,17 +942,27 @@ async def review_alias_candidate(
 
             from graph import merge_entities as _merge_entities
             try:
-                merge_result = await _merge_entities(
-                    source_node["id"], row["target_node_id"],
-                    int(actor["sub"]), body.reason, pool,
-                )
+                if body.reverse:
+                    merge_result = await _merge_entities(
+                        row["target_node_id"], source_node["id"],
+                        int(actor["sub"]), body.reason, pool,
+                    )
+                else:
+                    merge_result = await _merge_entities(
+                        source_node["id"], row["target_node_id"],
+                        int(actor["sub"]), body.reason, pool,
+                    )
             except ValueError as exc:
                 raise HTTPException(422, str(exc))
+            audit_source = row["source_name"]
+            audit_target = target_name
+            if body.reverse:
+                audit_source, audit_target = audit_target, audit_source
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'merge_via_alias_review', 'entity', $2, $3::jsonb, $4)""",
                 int(actor["sub"]), str(candidate_id),
-                json.dumps({"source": row["source_name"], "target": target_name, "candidate_id": candidate_id}),
+                json.dumps({"source": audit_source, "target": audit_target, "candidate_id": candidate_id, "reverse": body.reverse}),
                 actor.get("organization_id"),
             )
 

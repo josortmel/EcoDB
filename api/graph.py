@@ -207,7 +207,7 @@ async def _ensure_node(conn, name: str) -> int:
     return sql_id
 
 
-async def link_entities_from_content(conn, memory_id, content: str) -> int:
+async def link_entities_from_content(conn, memory_id, content: str, pool=None) -> int:
     """.
 
     Decisiones :
@@ -226,7 +226,7 @@ async def link_entities_from_content(conn, memory_id, content: str) -> int:
     """
     # Import lazy para no acoplar graph.py a gliner_service en imports top-level
     # — facilita testing y desacoplamiento.
-    from gliner_service import extract_entities
+    from gliner_service import extract_entities, detect_alias_candidates
     import logging
     _log = logging.getLogger("ecodb.gliner_link")
 
@@ -273,6 +273,14 @@ async def link_entities_from_content(conn, memory_id, content: str) -> int:
                 memory_id, node_sql_id,
             )
             count += 1
+
+    # Detect alias candidates from extracted entities (best-effort, outside tx)
+    if pool is not None and entities:
+        try:
+            await detect_alias_candidates(entities, pool)
+        except Exception as _alias_exc:
+            _log.warning("link_entities_from_content: alias detection failed for memory=%s: %r", memory_id, _alias_exc)
+
     return count
 
 

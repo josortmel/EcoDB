@@ -397,7 +397,7 @@ async def create_memory(
     try:
         async with pool.acquire() as gliner_conn:
             async with gliner_conn.transaction():
-                await link_entities_from_content(gliner_conn, row["id"], body.content)
+                await link_entities_from_content(gliner_conn, row["id"], body.content, pool)
     except Exception as _gliner_exc:
         #         # logger.warning explícito en lugar de silencio total. Antes este
         # except suprimia errores de AGE/SQL (conexion caida, constraint
