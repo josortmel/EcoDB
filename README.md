@@ -3,12 +3,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/josortmel/ecodb/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/release-v1.0.0-0d9488" alt="Release"></a>
+  <a href="https://github.com/josortmel/ecodb/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/release-v1.1.0-0d9488" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
   <img src="https://img.shields.io/badge/MCP-32%20tools-0d9488" alt="MCP Tools">
   <img src="https://img.shields.io/badge/dashboard-Electron-0d9488" alt="Dashboard">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
+</p>
+
+<p align="center">
+  <img src="docs/images/ecodb-reel.gif" alt="EcoDB in motion — GAMR search, knowledge graph, ingestion, and the desktop dashboard" width="100%">
 </p>
 
 Personal AI memory tools serve one agent, one session. EcoDB extends this to teams: a shared memory system where **multiple agents** store, search, connect, and govern knowledge across projects, with workspace isolation, role-based permissions, and a knowledge graph that links entities across memories and documents.
@@ -86,6 +90,24 @@ Measured on a single NVIDIA RTX 2080 Ti (11 GB). The full 10-stage GAMR pipeline
 ### Internal golden set
 
 We also maintain a harder internal benchmark against EcoDB's production corpus: 1,400+ memories across multiple languages and dozens of topics, paragraph-level retrieval instead of session-level. This is where we explore our margin of improvement. It's the benchmark that still challenges the system. Detailed methodology and results in [`eval/BENCHMARKS.md`](eval/BENCHMARKS.md).
+
+## Dashboard
+
+EcoDB v1.1 ships a **desktop dashboard** (Electron) — visual governance over the entire system. The engine was reachable only through the REST API and MCP tools; now there's a GUI to search, explore, ingest, and govern the knowledge base.
+
+<p align="center">
+  <img src="docs/images/dashboard-tour.gif" alt="EcoDB desktop dashboard — quick tour" width="100%">
+</p>
+
+- **Command Center** — workspace overview: attention inbox, live activity (SSE), knowledge health, ingestion pipeline.
+- **Knowledge Explorer** — GAMR search across memories and documents, with author / tag / workspace / project filters, UltraSearch, and document preview.
+- **Graph Studio** — the knowledge graph on a canvas: pan, zoom, re-center, expand neighbors, merge entities.
+- **Decisions Inbox** — review what the system flagged: stale memories, alias candidates, unconfirmed relations, low-trust documents.
+- **Ingestion** — upload documents and watch them flow through the pipeline (pending → indexed) in real time.
+- **Ontology Console** — curate the graph's vocabulary: entity dictionary, canonical predicates, alias management (manual scan + merge direction), merges.
+- **Settings** — configurable backend URL (connect to a local Docker stack or a remote EcoDB instance on your network), API keys, trust tiers.
+
+Built with React + TypeScript + Tailwind on Electron, talking to the same REST API. The API key never leaves the main process. Windows installer (unsigned — SmartScreen will warn on first run).
 
 ## GAMR Engine
 
@@ -280,23 +302,6 @@ The organization is the tenant boundary. Every memory, document, workspace, proj
 
 For the complete architecture — authentication flow, data isolation model, admin operations, and design decisions — see [`docs/architecture/multi-tenant.en.md`](docs/architecture/multi-tenant.en.md).
 
-## Dashboard
-
-EcoDB v1.0 ships a **desktop dashboard** (Electron) — visual governance over the entire system. The engine was reachable only through the REST API and MCP tools; now there's a GUI to search, explore, ingest, and govern the knowledge base.
-
-<!-- DEMO REEL: drag the screen-recording .mp4 into this block from GitHub's web editor (it renders as an inline player), or replace with a GIF once the final reel lands. -->
-<p align="center"><em>▶ Dashboard walkthrough — demo reel landing with the v1.0 launch</em></p>
-
-- **Command Center** — workspace overview: attention inbox, live activity (SSE), knowledge health, ingestion pipeline.
-- **Knowledge Explorer** — GAMR search across memories and documents, with author / tag / workspace / project filters, UltraSearch, and document preview.
-- **Graph Studio** — the knowledge graph on a canvas: pan, zoom, re-center, expand neighbors, merge entities.
-- **Decisions Inbox** — review what the system flagged: stale memories, alias candidates, unconfirmed relations, low-trust documents.
-- **Ingestion** — upload documents and watch them flow through the pipeline (pending → indexed) in real time.
-- **Ontology Console** — curate the graph's vocabulary: entity dictionary, canonical predicates, alias management, merges.
-- **Settings** — configurable backend URL (connect to a local Docker stack or a remote EcoDB instance on your network), API keys, trust tiers.
-
-Built with React + TypeScript + Tailwind on Electron, talking to the same REST API. The API key never leaves the main process. Windows installer (unsigned — SmartScreen will warn on first run).
-
 ## Quick Start
 
 ```bash
@@ -333,14 +338,6 @@ docker compose --profile with-llm up --build -d          # local LLM for classif
 - Docker with Compose v2
 - NVIDIA GPU with CUDA drivers
 - ~35 GB disk space
-
-## Roadmap
-
-| Version | Status | What it adds |
-|---------|--------|-------------|
-| **v0.8.6** | Done | Single-tenant. Full feature set: 10-stage GAMR, cross-encoder reranker, UltraSearch, graph, ingestion, MCP, governance foundations. Security hardening + infrastructure consolidation. |
-| **v0.9.0** | **Current** | Multi-tenant. Organization isolation, CEO role, API key rotation with grace period, rate limiting headers, audit log complete, schema v5.1.0. |
-| **v1.0** | Current | Dashboard. Electron app with visual governance, graph studio, attention inbox, knowledge explorer. |
 
 ## Documentation
 
