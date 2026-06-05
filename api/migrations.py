@@ -1,0 +1,45 @@
+"""Idempotent migration runner for EcoDB.
+
+Applies pending SQL migrations on every API startup. All migrations
+are idempotent (IF NOT EXISTS / OR REPLACE / ON CONFLICT DO NOTHING),
+so re-applying is a no-op on an up-to-date schema.
+
+Runs inside the FastAPI lifespan, after validate_production_secrets()
+and before the dictionary cache. Uses pg_advisory_lock to serialize
+concurrent startups (future multi-replica).
+"""
+import logging
+import time
+from pathlib import Path
+
+import settings
+
+log = logging.getLogger("ecodb.migrations")
+
+MIGRATIONS: list[tuple[str, str]] = [
+    ("3_0h_multimodal",   "sql/migrate_3_0h_multimodal.sql"),
+    ("5.1.0_multitenant", "sql/migrate_5.0.1_to_5.1.0.sql"),
+    ("5.1.1_clusters",    "sql/migrate_5.1.0_to_5.1.1.sql"),
+    ("age_sync_triggers", "sql/trigger_age_sync.sql"),
+]
+
+_LOCK_KEY = 728_1990
+
+
+async def run_migrations(pool) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute("SELECT pg_advisory_lock($1)", _LOCK_KEY, timeout=600)
+        try:
+            for name, path in MIGRATIONS:
+                sql = Path(path).read_text(encoding="utf-8")
+                t0 = time.monotonic()
+                try:
+                    await conn.execute(sql, timeout=300)
+                except Exception:
+                    log.error("migration FAILED: %s", name)
+                    raise
+                elapsed = (time.monotonic() - t0) * 1000
+                log.info("migration OK: %s (%.0f ms)", name, elapsed)
+            log.info("schema at target %s", settings.SCHEMA_VERSION)
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock($1)", _LOCK_KEY)

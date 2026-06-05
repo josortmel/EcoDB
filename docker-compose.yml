@@ -121,7 +121,7 @@ services:
       ENABLE_TRUST_TIERS: "true"
       ENABLE_STOP_ENTITIES_DYNAMIC: "true"
       ENABLE_TENSION_DETECTION: "true"
-      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET:-fa8b0c02ef55b172afdf48ecc32330ae}
+      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET}
       RATE_LIMIT_SEARCH: "200"
       RATE_LIMIT_DEFAULT: "400"
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
@@ -142,6 +142,7 @@ services:
         required: false
     volumes:
       - ecodb_media:/app/media
+      - ./sql:/app/sql:ro
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 10s
@@ -203,7 +204,7 @@ services:
   worker:
     image: ecodb-api:0.23.0
     container_name: ecodb-worker
-    entrypoint: ["python", "worker.py"]
+    entrypoint: ["gosu", "apiuser", "python", "worker.py"]
     environment:
       DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:-ecodb_test_pass}@postgres:5432/ecodb
       EMBEDDINGS_URL: http://embeddings:8090
@@ -212,7 +213,7 @@ services:
       CUDA_VISIBLE_DEVICES: ""
       NER_SERVICE_URL: http://ner:8091
       WINDOWS_MEDIA_PREFIX: ${WINDOWS_MEDIA_PREFIX:-}
-      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET:-fa8b0c02ef55b172afdf48ecc32330ae}
+      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET}
     volumes:
       - ecodb_media:/app/media:ro
     healthcheck:

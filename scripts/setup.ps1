@@ -59,13 +59,16 @@ $lines = @(
     "ECODB_CORS_ORIGINS=http://localhost:8080,http://localhost:8091"
     "ECODB_API_KEY="
 )
-if ($UseSeed) { $lines += ""; $lines += "ECODB_SEED_DEMO=true" }
-
 # UTF-8 WITHOUT BOM — docker compose misparses a .env that starts with a BOM.
 $content = ($lines -join "`n") + "`n"
 $envPath = Join-Path (Get-Location) ".env"
 [System.IO.File]::WriteAllText($envPath, $content, (New-Object System.Text.UTF8Encoding $false))
 Info ".env generated with random secrets."
+
+if (-not (Select-String -Path .env -Pattern "INTERNAL_BROADCAST_SECRET" -Quiet -ErrorAction SilentlyContinue)) {
+    $broadcastSecret = New-HexSecret 32
+    Add-Content -Path .env -Value "INTERNAL_BROADCAST_SECRET=$broadcastSecret" -Encoding utf8
+}
 
 if (-not (Test-Path media)) { New-Item -ItemType Directory -Path media | Out-Null }
 Info "Created media/ directory for image storage."

@@ -88,6 +88,10 @@ async def lifespan(app: FastAPI):
     # Si BD no esta disponible (tests CI sin postgres), la carga falla
     # silenciosa y el cache queda vacío — extract_entities sigue funcionando
     # sin override (solo GLiNER puro).
+    from migrations import run_migrations
+    pool = await get_pool()
+    await run_migrations(pool)
+
     try:
         from gliner_service import load_dictionary_to_cache
         pool = await get_pool()

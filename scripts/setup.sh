@@ -71,12 +71,13 @@ ECODB_CORS_ORIGINS=http://localhost:8080,http://localhost:8091
 ECODB_API_KEY=
 EOF
 
-if [ "$USE_SEED" = "true" ]; then
-    printf '\nECODB_SEED_DEMO=true\n' >> .env
-fi
-
 chmod 600 .env
 info ".env generated with random secrets."
+
+if ! grep -q "INTERNAL_BROADCAST_SECRET" .env 2>/dev/null; then
+    BROADCAST_SECRET=$(openssl rand -hex 32)
+    echo "INTERNAL_BROADCAST_SECRET=$BROADCAST_SECRET" >> .env
+fi
 
 mkdir -p media
 info "Created media/ directory for image storage."

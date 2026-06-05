@@ -9,7 +9,8 @@
   "errors": {
     "rateLimited": "Rate limited — wait a moment and retry.",
     "rateLimitedWait": "Rate limited — try again in {{secs}}s.",
-    "forbidden": "Admin access required for this action."
+    "forbidden": "Admin access required for this action.",
+    "serverError": "Server error ({{status}}). Check server logs for details."
   },
   "auth": {
     "title": "Connect to EcoDB",

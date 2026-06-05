@@ -305,8 +305,8 @@ For the complete architecture — authentication flow, data isolation model, adm
 ## Quick Start
 
 ```bash
-git clone https://github.com/josortmel/ecodb
-cd ecodb
+git clone https://github.com/josortmel/EcoDB
+cd EcoDB
 ./scripts/setup.sh          # generates .env, verifies dependencies
 docker compose up --build -d # first boot builds images + downloads models (~35 GB)
 ```
@@ -344,6 +344,32 @@ docker compose --profile with-llm up --build -d          # local LLM for classif
 - Docker with Compose v2
 - NVIDIA GPU with CUDA drivers
 - ~35 GB disk space
+
+## Environment Variables
+
+The setup script (`scripts/setup.sh` / `scripts/setup.ps1`) generates `.env` with all required secrets. For production deployments, set these manually:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `ECODB_ENV` | Runtime environment (`development`/`production`) | `development` |
+| `DATABASE_URL` | PostgreSQL DSN | dev default (`localhost:5435`) |
+| `ECODB_JWT_SECRET` | JWT signing secret | dev-only default — refused in production |
+| `ECODB_API_KEY_PEPPER` | API key hash pepper | dev-only default — refused in production |
+| `ECODB_API_KEY` | API key for MCP server | — generate with `bootstrap_first_apikey.py` |
+| `INTERNAL_BROADCAST_SECRET` | Worker → API broadcast auth | no default — generate with `openssl rand -hex 32` |
+| `ECODB_CORS_ORIGINS` | Allowed CORS origins | `http://localhost:8080,http://localhost:8091` |
+| `HF_CACHE_PATH` | HuggingFace model cache path | named volume `hf_cache` |
+
+> **Production**: `ECODB_ENV=production` activates security validation. The API refuses to start if `ECODB_JWT_SECRET` or `ECODB_API_KEY_PEPPER` are missing, too short (< 16 chars), or at their dev defaults.
+
+> **`INTERNAL_BROADCAST_SECRET`**: required for document ingestion events (`--profile with-ingestion`). Without it, worker SSE events are silently dropped. If upgrading from v1.1.x or earlier, the old public default (`fa8b0c02...`) was shipped in docker-compose — rotate it: `openssl rand -hex 32` → update `.env` → `docker compose restart api worker`.
+
+**Verify schema version after upgrade:**
+```bash
+docker exec ecodb-postgres psql -U ecodb -d ecodb -c \
+  "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1;"
+```
+Expected: `5.1.1`
 
 ## Documentation
 

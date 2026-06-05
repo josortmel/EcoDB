@@ -11,7 +11,7 @@ Core tools (agent workflow — save, search, read, graph):
 - save_triple       → POST /graph/triples
 - neighbors         → GET  /graph/neighbors/{node}
 
-Full 31-tool set covers all GAMR phases (memory, graph, documents, identity).
+Full 32-tool set covers all GAMR phases (memory, graph, documents, identity).
 
 Auth:
 - ECODB_API_KEY en env (formato `ecodb_<32-bytes-base64url>`).

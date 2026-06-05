@@ -10,7 +10,7 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - Embeddings: `0.2.5`
 - NER: `1.0.0`
 - Postgres: `1.0.0` (PG16 + pgvector + AGE 1.5.0)
-- Release pública: `v0.9.5`
+- Release pública: `v1.2.0`
 
 ## Arquitectura — 6 servicios Docker
 
@@ -196,6 +196,7 @@ docker compose restart mcp
 - **Primer boot MCP**: MCP no arranca hasta generar API key con `bootstrap_first_apikey.py` y reiniciar el servicio.
 - **Backup/restore scripts**: verificar que `ECODB_CONTAINER` coincide con el container_name en docker-compose.yml (default: `ecodb-postgres`).
 - **Worker SSE events**: require `INTERNAL_BROADCAST_SECRET` in `.env`. If dashboard shows no document events, check this env var first.
+- **INTERNAL_BROADCAST_SECRET rotation (existing installs)**: versions before v1.2.0 shipped with a public default (`fa8b0c02ef55b172afdf48ecc32330ae`) in docker-compose.yml. Any install that didn't override this var was using a known-public secret. Rotate: `openssl rand -hex 32` → set `INTERNAL_BROADCAST_SECRET=<new>` in `.env` → `docker compose restart api worker`.
 - **Media volume no compartido**: API y worker deben montar el MISMO volumen `ecodb_media:/app/media`. Si solo worker lo monta, uploads vía API caen en capa efímera invisible al worker → "file not found". Verificar `volumes:` en ambos servicios docker-compose.
 - **Docker build --no-cache**: innecesario para añadir dependencias pip. Basta con modificar `requirements.txt` → la capa COPY se invalida sola y pip install re-ejecuta. `--no-cache` baja torch entero (532MB+) sin necesidad.
 - **Media dir permissions**: el volumen Docker se crea como root. El contenedor API corre como `apiuser`. Post-deploy: `docker exec -u root ecodb-api sh -c "mkdir -p /app/media && chown apiuser:apiuser /app/media"`.
@@ -257,6 +258,18 @@ docker compose restart mcp
 16. `_ALIAS_SIM_THRESHOLD = 0.65` en `gliner_service.py` — threshold pg_trgm para detección de alias. Bajarlo genera ruido (falsos positivos); subirlo pierde candidatos reales. 0.65 captura variaciones tipo "DeepSeek"↔"DeepSeek V4" (sim=0.75).
 17. Alias candidates NUNCA se auto-resuelven. El sistema solo genera `status='pending'`. La revisión (approve/reject + merge) siempre es manual desde la dashboard o API.
 18. `link_entities_from_content()` en `graph.py` acepta `pool` opcional — si se omite, se salta la detección de alias (usado en migraciones).
+
+## Migration convention
+
+New schema changes go in `sql/migrate_*.sql` files and MUST be appended to the `MIGRATIONS` list in `api/migrations.py` (order matters — runner applies sequentially).
+
+Rules for new migration files:
+- **Idempotent**: use `IF NOT EXISTS`, `CREATE OR REPLACE`, `ON CONFLICT DO NOTHING`. Re-applying must be a no-op on an up-to-date schema.
+- **Atomicity**: wrap in `BEGIN; ... COMMIT;` if the migration must succeed or fail atomically. The runner does NOT add a transaction wrapper (3 of 4 current files have their own `BEGIN/COMMIT`).
+- **Name format**: `migrate_<from-version>_to_<to-version>.sql` for schema bumps; descriptive name for feature migrations (e.g. `trigger_age_sync.sql`).
+- **Bump `SCHEMA_VERSION`** in `api/settings.py` when adding a migration that changes the schema version.
+
+The runner uses `pg_advisory_lock` (session-level) to serialize concurrent startups. Migration failure aborts API startup — intentional: a broken schema should never silently serve traffic.
 
 ## Roadmap
 

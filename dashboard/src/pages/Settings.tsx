@@ -53,7 +53,7 @@ function ApiKeyManagement() {
   };
 
   return (
-    <Panel title={t('set.apiKeys.title')} accent={SETTINGS_ACCENT} tag="v0.9">
+    <Panel title={t('set.apiKeys.title')} accent={SETTINGS_ACCENT}>
       {is403 ? (
         <div className="grid place-items-center py-6 text-center font-mono text-[12px] text-ink-3">{t('set.limitedAccess')}</div>
       ) : (

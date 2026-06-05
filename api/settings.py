@@ -1,13 +1,13 @@
 """Central API configuration. All values come from environment variables with reasonable defaults.
 
 Variables:
-- ENVIRONMENT          : "development" or "production" (default production).
+- ENVIRONMENT          : "development" or "production" (default development).
 - DATABASE_URL         : async postgres DSN (default localhost:5435 ecodb test).
 - JWT_SECRET           : HMAC secret for signing JWTs (default DEV ONLY).
 - JWT_TTL_SECONDS      : JWT lifetime, default 3600 (1 hour).
 - API_KEY_PEPPER       : pepper for hashing API keys (default DEV ONLY).
-- CORS_ORIGINS         : comma-separated, default http://localhost:8080.
-- API_VERSION          : external version string, default 0.1.0.
+- CORS_ORIGINS         : comma-separated, default http://localhost:8080,http://localhost:8091.
+- API_VERSION          : external version string, default 0.9.0.
 
 NEVER use the JWT_SECRET / API_KEY_PEPPER defaults in production.
 The Docker image will FAIL to start if ENVIRONMENT=production and secrets
@@ -15,12 +15,12 @@ are still set to their development defaults.
 """
 import os
 
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "production").lower()
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
 IS_DEVELOPMENT = ENVIRONMENT == "development"
 
 API_VERSION = os.environ.get("API_VERSION", "0.9.0")
-SCHEMA_VERSION = "5.1.0"
+SCHEMA_VERSION = "5.1.1"
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -39,7 +39,7 @@ API_KEY_PEPPER = os.environ.get("API_KEY_PEPPER", _API_KEY_PEPPER_DEV)
 API_KEY_PREFIX = "ecodb_"  # prefijo visible para identificar API keys de ecodb
 
 # CORS — restrictive policy, no wildcard, no credentials.
-_default_origins = "http://localhost:8080,http://localhost:8081"
+_default_origins = "http://localhost:8080,http://localhost:8091"
 CORS_ORIGINS = [
     o.strip() for o in os.environ.get("CORS_ORIGINS", _default_origins).split(",") if o.strip()
 ]
@@ -129,6 +129,14 @@ def validate_production_secrets() -> None:
                 f"DEEPSEEK_URL host not allowed in production: {parsed_ds.hostname!r}. "
                 f"Must end with deepseek.com"
             )
+    _broadcast_secret = os.environ.get("INTERNAL_BROADCAST_SECRET", "")
+    if not _broadcast_secret or len(_broadcast_secret) < 16:
+        import logging
+        logging.getLogger("ecodb.security").warning(
+            "INTERNAL_BROADCAST_SECRET empty or too short in production. "
+            "Worker SSE events will be silently dropped. "
+            "Generate with: openssl rand -hex 32"
+        )
 
 
 # Feature flags — all false by default. Activate one at a time

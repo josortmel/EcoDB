@@ -52,4 +52,15 @@ describe('errMsg', () => {
   it('non-ApiError → fallback', () => {
     expect(errMsg(new Error('boom'), t, 'fb')).toBe('fb');
   });
+
+  it('500 → serverError with status interpolated', () => {
+    const tFull = ((k: string, o?: Record<string, unknown>) =>
+      k === 'errors.serverError' && o
+        ? `Server error (${o.status}). Check server logs for details.`
+        : k
+    ) as unknown as TFunction;
+    expect(errMsg(new ApiError(500, 'internal'), tFull, 'fb')).toBe(
+      'Server error (500). Check server logs for details.'
+    );
+  });
 });

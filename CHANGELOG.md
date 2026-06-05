@@ -2,6 +2,77 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] — 2026-06-05
+
+### Added
+- **Migration runner** (`api/migrations.py`): idempotent SQL migrations on every API startup. Advisory lock serializes concurrent startups. Failure aborts startup — a broken schema never silently serves traffic.
+- **Docker entrypoint** (`api/entrypoint.sh`): gosu-based entrypoint fixes media volume ownership automatically at container start. Eliminates manual `chown` post-deploy.
+- **Schema version test** (`api/tests/test_health.py`): `test_schema_version_matches_db` asserts DB schema matches `settings.SCHEMA_VERSION`; auto-skips without postgres.
+- **Dashboard 5xx error sanitization**: server errors return `"Server error (N). Check server logs."` — no raw exception detail leaked to the UI (info-disclosure guard).
+- **`INTERNAL_BROADCAST_SECRET` auto-generated**: setup scripts (`setup.sh`, `setup.ps1`) now generate and append the secret on first run. Duplicate-safe (grep/Select-String guard).
+
+### Changed
+- `docker-compose.yml`: `INTERNAL_BROADCAST_SECRET` hardcoded default removed — must be set explicitly. `./sql:/app/sql:ro` volume mount added so migration runner can read SQL files.
+- `api/settings.py`: ENVIRONMENT default `"production"` → `"development"`. CORS default port corrected `8081` → `8091`. `validate_production_secrets()` now warns (non-fatal) if `INTERNAL_BROADCAST_SECRET` is unset or too short in production.
+- `.env.example`: `INTERNAL_BROADCAST_SECRET` documented.
+- `CLAUDE.md`: migration convention section added; schema version updated to `5.1.1`; release updated to `v1.1.1`.
+
+### Fixed
+- `api/Dockerfile`: `migrations.py` added to explicit COPY list (was missing — would crash at import).
+- API_VERSION docstring corrected from `0.1.0` to `0.9.0`.
+- `dashboard/src/pages/Settings.tsx`: stale `tag="v0.9"` prop removed.
+- `mcp/server.py` docstring updated from "31-tool" to "32-tool".
+
+## [1.1.1] — 2026-06-04
+
+### Added
+- **Schema v5.1.1** (`sql/migrate_5.1.0_to_5.1.1.sql`): `graph_clusters` table for Louvain communities, `name_canonical` index, `grace_until` on memories.
+- **AGE sync triggers** (`sql/trigger_age_sync.sql`): SQL→AGE graph auto-sync on entity insert/update/delete.
+- **Retype entity**: change entity type from Ontology Console.
+- **Alias merge direction**: `reverse` flag on `PUT /admin/alias-candidates/{id}` — merge target INTO source instead of source INTO target, with Survives/Absorbed labels in the UI.
+
+### Changed
+- Dashboard Ontology Console: alias review with directional controls and invert button.
+- Schema version target: `5.1.0` → `5.1.1`.
+
+## [1.1.0] — 2026-06-02
+
+### Added
+- **Alias candidates auto-generation**: `detect_alias_candidates()` now called from `link_entities_from_content()` — candidates created automatically on every `save_memory`, not just manual scans.
+- **Manual alias scan**: `POST /admin/alias-candidates/scan` with configurable `threshold`, `max_per_name`, `name_filter`, `dry_run`.
+- **Undo merge**: `POST /admin/undo-merge` + MCP `undo_merge` tool.
+- **Dashboard Ontology Console**: entity dictionary management, predicate CRUD, full alias review flow.
+- **`get_relevant_context` MCP tool**: returns formatted context block for LLM consumption (context injection).
+
+### Changed
+- Alias similarity threshold `0.80` → `0.65` (captures near-duplicates like `DeepSeek` ↔ `DeepSeek V4`, sim=0.75).
+- Rejected alias candidates no longer re-proposed on subsequent scans.
+
+## [1.0.0] — 2026-06-01
+
+### Added
+- **Desktop dashboard** (Electron + React 18 + Vite + TypeScript + Tailwind): Command Center, Knowledge Explorer, Graph Studio, Decisions Inbox, Ingestion, Ontology Console, Settings.
+- **Graph Studio**: interactive force graph — pan, zoom, expand neighbors, merge entities with optional alias flag.
+- **Ingestion panel**: upload documents, real-time SSE status (pending → indexed).
+- **Command Center**: attention inbox (stale memories, alias candidates, unconfirmed relations, low-trust docs), live activity stream, knowledge health, ingestion pipeline stats.
+- **Backend endpoints for dashboard**: `GET /graph/all`, `POST /admin/merge-entities`, `GET /api/v1/stats/timeline`, `PUT /memories/{id}/staleness`, `POST /memories/preview`, `GET /graph/clusters`, `POST /documents/upload`.
+- **`POST /admin/attention-inbox/summary`** + `/details`: org-scoped governance inbox.
+
+## [0.9.5] — 2026-06-01
+
+### Added
+- **Louvain community detection**: SQL-based pre-filtering for graph cluster queries.
+- **SSE org-scoped broadcast**: `/events/broadcast` restricted per org; worker events include `organization_id`.
+- **Method-aware rate limiting**: separate limits for read vs. write operations.
+- **Trigger verification tests**: test coverage for AGE sync triggers.
+
+### Changed
+- `search()` excludes requesting user's own documents from results.
+- Graph org scoping architecture documented in `docs/architecture/`.
+
+### Fixed
+- 10 mechanical fixes from deep hunt v0.9 (audit log gaps, CORS consistency, header normalization).
+
 ## [0.9.0] — 2026-06-01
 
 ### Added

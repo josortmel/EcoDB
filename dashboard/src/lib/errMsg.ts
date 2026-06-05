@@ -31,6 +31,9 @@ export function errMsg(err: unknown, t: TFunction, fallback: string): string {
       const d = detail422(err.body);
       if (d) return d;
     }
+    if (err.status >= 500) {
+      return t('errors.serverError', { status: err.status });
+    }
   }
   return fallback;
 }

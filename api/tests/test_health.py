@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi.testclient import TestClient
 from main import create_app
-from settings import API_VERSION, SCHEMA_VERSION
+from settings import API_VERSION, DATABASE_URL, SCHEMA_VERSION
 
 # App de production (default) y development para tests segun caso.
 app_prod = create_app("production")
@@ -101,3 +101,32 @@ def test_inexistent_endpoint_returns_404():
 def test_post_health_method_not_allowed():
     """POST /health debe devolver 405 — solo GET y HEAD aceptados."""
     assert client_prod.post("/health").status_code == 405
+
+
+# --- Schema version DB check ---
+
+def test_schema_version_matches_db():
+    """DB schema_version table must report settings.SCHEMA_VERSION.
+
+    Skipped automatically when postgres is not reachable (CI without postgres).
+    """
+    import asyncio
+    import asyncpg
+
+    async def _check():
+        try:
+            conn = await asyncpg.connect(DATABASE_URL)
+        except Exception:
+            pytest.skip("postgres not available")
+        try:
+            row = await conn.fetchrow(
+                "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1"
+            )
+        finally:
+            await conn.close()
+        assert row is not None, "schema_version table is empty"
+        assert row["version"] == SCHEMA_VERSION, (
+            f"DB schema {row['version']!r} != settings.SCHEMA_VERSION {SCHEMA_VERSION!r}"
+        )
+
+    asyncio.run(_check())
