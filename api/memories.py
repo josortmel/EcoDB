@@ -414,7 +414,7 @@ async def create_memory(
                 body.tags, weight_base, weight_base, body.media_path,
                 embedding_literal, EMBEDDING_MODEL_TAG,
                 body.foresight_start, body.foresight_end,
-                json.dumps(body.metadata) if body.metadata else None,
+                json.dumps(body.metadata or {}),
             )
         except ForeignKeyViolationError:
             # NV1-10 cierre Deuda #22 (2026-05-08): TOCTOU FASE1→FASE3. Si
@@ -1223,5 +1223,5 @@ def _row_to_response(row, agent_identifier=None) -> MemoryResponse:
         staleness=row.get("staleness"),
         foresight_start=row.get("foresight_start"),
         foresight_end=row.get("foresight_end"),
-        metadata=dict(row["metadata"]) if row.get("metadata") else None,
+        metadata=json.loads(row["metadata"]) if isinstance(row.get("metadata"), str) else (dict(row["metadata"]) if row.get("metadata") else None),
     )
