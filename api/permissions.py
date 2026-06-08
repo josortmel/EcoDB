@@ -330,6 +330,41 @@ async def visible_project_ids(conn, actor: dict) -> set[int]:
     return {r["id"] for r in rows}
 
 
+async def precompute_read_visibility(conn, actor: dict) -> dict:
+    """Pre-fetch all visibility data for batch filtering. Eliminates N+1 queries."""
+    if actor.get("is_super"):
+        return {"is_super": True}
+    user_id = int(actor["sub"])
+    vis_ws = await visible_workspace_ids(conn, actor)
+    is_ceo = bool(actor.get("is_ceo"))
+    org_id = actor.get("organization_id") if is_ceo else None
+    ws_org_map = {}
+    if is_ceo and org_id and vis_ws:
+        rows = await conn.fetch(
+            "SELECT id, organization_id FROM workspaces WHERE id = ANY($1::int[])",
+            list(vis_ws))
+        ws_org_map = {r["id"]: r["organization_id"] for r in rows}
+    return {
+        "is_super": False, "user_id": user_id,
+        "is_ceo": is_ceo, "org_id": org_id,
+        "visible_ws": vis_ws, "ws_org_map": ws_org_map,
+    }
+
+
+def check_read_memory(vis: dict, memory) -> bool:
+    """Check visibility without DB queries. Requires precomputed context."""
+    if vis.get("is_super"):
+        return True
+    if memory["visibility"] == "private":
+        if memory["user_id"] == vis["user_id"]:
+            return True
+        if vis["is_ceo"] and vis["org_id"]:
+            ws_org = vis["ws_org_map"].get(memory["workspace_id"])
+            return ws_org == vis["org_id"]
+        return False
+    return memory["workspace_id"] in vis["visible_ws"]
+
+
 async def can_read_memory(conn, actor: dict, memory) -> bool:
     """Permiso de lectura de una memoria concreta.
     - super: siempre.
@@ -370,3 +405,40 @@ async def can_write_memory(conn, actor: dict, memory) -> bool:
     if memory["workspace_id"] in (actor.get("lead_workspaces") or []):
         return True
     return memory["user_id"] == user_id
+
+
+async def resolve_agent_for_actor(conn, actor: dict, agent_identifier: str) -> dict:
+    """Resolve agent + verify ownership. 404 anti-discovery.
+    Shared by all metacognition endpoints."""
+    from fastapi import HTTPException
+    row = await conn.fetchrow(
+        "SELECT id, identifier, user_id FROM agents "
+        "WHERE identifier = $1 AND active = true",
+        agent_identifier)
+    if row is None:
+        raise HTTPException(404, f"agent {agent_identifier!r} not found")
+    if actor.get("is_super"):
+        return dict(row)
+    if row["user_id"] is not None and int(row["user_id"]) == int(actor["sub"]):
+        return dict(row)
+    raise HTTPException(404, f"agent {agent_identifier!r} not found")
+
+
+async def resolve_cluster_for_actor(conn, actor: dict, cluster_id) -> dict:
+    """Resolve cluster + verify agent ownership. 404 anti-discovery."""
+    from fastapi import HTTPException
+    from uuid import UUID as _UUID
+    cid = cluster_id if isinstance(cluster_id, _UUID) else _UUID(str(cluster_id))
+    row = await conn.fetchrow(
+        "SELECT mc.*, a.user_id AS agent_user_id, a.identifier AS agent_identifier "
+        "FROM memory_clusters mc "
+        "JOIN agents a ON a.id = mc.agent_id "
+        "WHERE mc.id = $1", cid)
+    if row is None:
+        raise HTTPException(404)
+    if actor.get("is_super"):
+        return dict(row)
+    if row["agent_user_id"] is not None \
+       and int(row["agent_user_id"]) == int(actor["sub"]):
+        return dict(row)
+    raise HTTPException(404)

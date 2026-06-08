@@ -43,15 +43,17 @@ Hardening:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from auth import get_current_user
 from db import get_pool
+from permissions import can_read_memory, can_write_memory, precompute_read_visibility, check_read_memory
 
 
 # Límites duros (DoS prevention + sanity).
@@ -101,6 +103,38 @@ class IdentityCreateResponse(BaseModel):
     version: int
     fragments_count: int
     created_at: datetime
+
+
+class AgentPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cognition_class: Optional[str] = Field(None, pattern="^(narrative|work|mixed)$")
+
+
+class ObservedTrait(BaseModel):
+    dimension: str
+    observed_value: str
+    evidence_count: int
+    last_seen: datetime
+    confidence: float
+
+
+class ObservedIdentityResponse(BaseModel):
+    agent_identifier: str
+    traits: list[ObservedTrait]
+    computed_at: Optional[datetime] = None
+
+
+class TensionAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(..., pattern="^(resolve|dismiss)$")
+    note: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator("note")
+    @classmethod
+    def _no_nulls(cls, v):
+        if v is not None and "\x00" in v:
+            raise ValueError("note contains null bytes")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -266,3 +300,183 @@ async def create_identity_version(
         fragments_count=len(body.fragments),
         created_at=datetime.now(timezone.utc),
     )
+
+
+@router.patch("/{agent_identifier}")
+async def patch_agent(
+    agent_identifier: str,
+    body: AgentPatch,
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    if body.cognition_class is None:
+        raise HTTPException(400, "no fields to update")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        agent = await _resolve_agent_or_404(conn, actor, agent_identifier)
+        await conn.execute(
+            "UPDATE agents SET cognition_class=$1 WHERE id=$2",
+            body.cognition_class, agent["id"])
+    return {"ok": True, "agent_identifier": agent_identifier}
+
+
+@router.get("/{agent_identifier}/observed-identity")
+async def get_observed_identity(
+    agent_identifier: str = Path(..., min_length=1, max_length=200),
+    actor: dict = Depends(get_current_user),
+) -> ObservedIdentityResponse:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        agent = await _resolve_agent_or_404(conn, actor, agent_identifier)
+        agent_id = agent["id"]
+        traits = []
+
+        # 1. Type distribution (last 90 days)
+        type_dist = await conn.fetch("""
+            SELECT type::text, COUNT(*) AS cnt FROM memories
+            WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'
+            GROUP BY type ORDER BY cnt DESC
+        """, agent_id)
+        if type_dist:
+            total = sum(r["cnt"] for r in type_dist)
+            traits.append({
+                "dimension": "type_distribution",
+                "observed_value": ", ".join(f"{r['type']}:{r['cnt']}" for r in type_dist),
+                "evidence_count": total,
+                "last_seen": datetime.now(timezone.utc),
+                "confidence": min(total / 50, 1.0),
+            })
+
+        # 2. Top entities via memory_entity_links
+        top_entities = await conn.fetch("""
+            SELECT n.name, COUNT(*) AS cnt FROM memory_entity_links mel
+            JOIN memories m ON m.id = mel.memory_id
+            JOIN nodes n ON n.id = mel.entity_node_id
+            WHERE m.agent_id=$1 AND m.created_at > NOW()-INTERVAL '90 days'
+              AND n.status='active'
+            GROUP BY n.name ORDER BY cnt DESC LIMIT 10
+        """, agent_id)
+        if top_entities:
+            traits.append({
+                "dimension": "top_entities",
+                "observed_value": ", ".join(f"{r['name']}:{r['cnt']}" for r in top_entities),
+                "evidence_count": sum(r["cnt"] for r in top_entities),
+                "last_seen": datetime.now(timezone.utc),
+                "confidence": min(len(top_entities) / 10, 1.0),
+            })
+
+        # 3. Top predicates via triples
+        top_preds = await conn.fetch("""
+            SELECT t.predicate, COUNT(*) AS cnt FROM triples t
+            WHERE t.author = $1
+            GROUP BY t.predicate ORDER BY cnt DESC LIMIT 10
+        """, agent_identifier)
+        if top_preds:
+            traits.append({
+                "dimension": "top_predicates",
+                "observed_value": ", ".join(f"{r['predicate']}:{r['cnt']}" for r in top_preds),
+                "evidence_count": sum(r["cnt"] for r in top_preds),
+                "last_seen": datetime.now(timezone.utc),
+                "confidence": min(len(top_preds) / 10, 1.0),
+            })
+
+        # 4. Weight distribution
+        weight_stats = await conn.fetchrow("""
+            SELECT AVG(weight) AS avg_w, STDDEV(weight) AS std_w,
+                   MIN(weight) AS min_w, MAX(weight) AS max_w
+            FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'
+        """, agent_id)
+        if weight_stats and weight_stats["avg_w"]:
+            traits.append({
+                "dimension": "weight_distribution",
+                "observed_value": f"avg:{weight_stats['avg_w']:.2f} std:{(weight_stats['std_w'] or 0):.2f} min:{weight_stats['min_w']:.2f} max:{weight_stats['max_w']:.2f}",
+                "evidence_count": await conn.fetchval(
+                    "SELECT COUNT(*) FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'",
+                    agent_id),
+                "last_seen": datetime.now(timezone.utc),
+                "confidence": 0.9,
+            })
+
+        # 5. Temporal patterns (day of week activity)
+        temporal = await conn.fetch("""
+            SELECT EXTRACT(DOW FROM created_at)::int AS dow, COUNT(*) AS cnt
+            FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'
+            GROUP BY dow ORDER BY cnt DESC
+        """, agent_id)
+        if temporal:
+            day_names = ["dom", "lun", "mar", "mie", "jue", "vie", "sab"]
+            traits.append({
+                "dimension": "temporal_pattern",
+                "observed_value": ", ".join(f"{day_names[r['dow']]}:{r['cnt']}" for r in temporal),
+                "evidence_count": sum(r["cnt"] for r in temporal),
+                "last_seen": datetime.now(timezone.utc),
+                "confidence": min(len(temporal) / 7, 1.0),
+            })
+
+        # Check precomputed observed_identity from latest cluster
+        precomp = await conn.fetchrow("""
+            SELECT metadata->'observed_identity' AS obs, created_at
+            FROM memory_clusters
+            WHERE agent_id=$1 AND status='active' AND metadata ? 'observed_identity'
+            ORDER BY created_at DESC LIMIT 1
+        """, agent_id)
+        computed_at = precomp["created_at"] if precomp else None
+
+    return {"agent_identifier": agent_identifier, "traits": traits,
+            "computed_at": computed_at}
+
+
+@router.get("/{agent_identifier}/tensions")
+async def get_tensions(
+    agent_identifier: str = Path(..., min_length=1, max_length=200),
+    status: Optional[str] = Query(None, pattern="^(open|resolved|dismissed)$"),
+    actor: dict = Depends(get_current_user),
+) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        agent = await _resolve_agent_or_404(conn, actor, agent_identifier)
+        conditions = ["agent_id = $1", "'identity_tension' = ANY(tags)"]
+        params: list = [agent["id"]]
+        if status:
+            if status == "open":
+                conditions.append(
+                    "(metadata->>'tension_status' IS NULL OR metadata->>'tension_status' = 'open')")
+            else:
+                params.append(status)
+                conditions.append(f"metadata->>'tension_status' = ${len(params)}")
+        where = " AND ".join(conditions)
+        rows = await conn.fetch(f"""
+            SELECT * FROM memories WHERE {where}
+            ORDER BY created_at DESC LIMIT 20
+        """, *params)
+        vis = await precompute_read_visibility(conn, actor)
+        visible = [dict(r) for r in rows if check_read_memory(vis, r)]
+    return {"items": visible, "total": len(visible)}
+
+
+@router.put("/{agent_identifier}/tensions/{tension_id}")
+async def resolve_tension(
+    agent_identifier: str, tension_id: UUID,
+    body: TensionAction, actor: dict = Depends(get_current_user),
+) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        agent = await _resolve_agent_or_404(conn, actor, agent_identifier)
+        mem = await conn.fetchrow("SELECT * FROM memories WHERE id=$1", tension_id)
+        if mem is None or 'identity_tension' not in (mem["tags"] or []):
+            raise HTTPException(404)
+        if mem["agent_id"] != agent["id"]:
+            raise HTTPException(404)
+        if not await can_write_memory(conn, actor, mem):
+            raise HTTPException(403)
+        status_map = {"resolve": "resolved", "dismiss": "dismissed"}
+        update = {"tension_status": status_map[body.action]}
+        if body.action == "dismiss":
+            update["tension_cooldown_until"] = (
+                datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        if body.note:
+            update["tension_note"] = body.note
+        await conn.execute("""
+            UPDATE memories SET metadata = coalesce(metadata,'{}'::jsonb) || $1::jsonb,
+              updated_at = NOW() WHERE id = $2
+        """, json.dumps(update), tension_id)
+    return {"ok": True}

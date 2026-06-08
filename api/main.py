@@ -146,7 +146,7 @@ def create_app(environment: str = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "HEAD"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -262,6 +262,25 @@ def create_app(environment: str = None) -> FastAPI:
     # Telemetry router (Fase B.1) — internal-only injection telemetry.
     import telemetry_api
     app.include_router(telemetry_api.router)
+
+    # --- Metacognicion routers (v2.0) ---
+    import clusters
+    app.include_router(clusters.router, prefix="/api/v1")
+
+    import briefing
+    app.include_router(briefing.router, prefix="/api/v1")
+
+    import foresights
+    app.include_router(foresights.router, prefix="/api/v1")
+
+    import cases
+    app.include_router(cases.router, prefix="/api/v1")
+
+    import skills
+    app.include_router(skills.router, prefix="/api/v1")
+
+    import cells
+    app.include_router(cells.router, prefix="/api/v1")
 
     return app
 

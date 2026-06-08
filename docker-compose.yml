@@ -20,6 +20,7 @@ services:
       dockerfile: Dockerfile.postgres
     image: ecodb-postgres:1.0.0
     container_name: ecodb-postgres
+    command: -c ecodb.cell_password=${CELL_DB_PASSWORD:-ecodb_cell_dev_only}
     environment:
       POSTGRES_DB: ecodb
       POSTGRES_USER: ecodb
@@ -41,6 +42,12 @@ services:
       - ./sql/migrate_5.0.1_to_5.1.0.sql:/docker-entrypoint-initdb.d/03-multitenant.sql:ro
       - ./sql/migrate_5.1.0_to_5.1.1.sql:/docker-entrypoint-initdb.d/04-graph-clusters.sql:ro
       - ./sql/trigger_age_sync.sql:/docker-entrypoint-initdb.d/05-age-sync-triggers.sql:ro
+      - ./docker-entrypoint-initdb.d/00-cell-role.sql:/docker-entrypoint-initdb.d/00-cell-role.sql:ro
+      - ./sql/migrate_06_foresight.sql:/docker-entrypoint-initdb.d/06-foresight.sql:ro
+      - ./sql/migrate_07a_types_schema.sql:/docker-entrypoint-initdb.d/07a-types-schema.sql:ro
+      - ./sql/migrate_07b_types_config.sql:/docker-entrypoint-initdb.d/07b-types-config.sql:ro
+      - ./sql/migrate_08_agents.sql:/docker-entrypoint-initdb.d/08-agents.sql:ro
+      - ./sql/migrate_09_metacognition.sql:/docker-entrypoint-initdb.d/09-metacognition.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ecodb -d ecodb"]
       interval: 5s
@@ -94,7 +101,7 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
-    image: ecodb-api:0.23.0
+    image: ecodb-api:0.24.0
     container_name: ecodb-api
     environment:
       ENVIRONMENT: ${ECODB_ENV:-development}
@@ -202,7 +209,7 @@ services:
       - ecodb-net
 
   worker:
-    image: ecodb-api:0.23.0
+    image: ecodb-api:0.24.0
     container_name: ecodb-worker
     entrypoint: ["gosu", "apiuser", "python", "worker.py"]
     environment:
@@ -264,6 +271,45 @@ services:
     restart: unless-stopped
     profiles:
       - with-llm
+    networks:
+      - ecodb-net
+
+  ecodb-cell:
+    image: ecodb-api:0.24.0
+    container_name: ecodb-cell
+    entrypoint: ["gosu", "apiuser", "python", "cell_worker.py"]
+    environment:
+      DATABASE_URL: postgresql://ecodb_cell:${CELL_DB_PASSWORD:-ecodb_cell_dev_only}@postgres:5432/ecodb
+      CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}
+      CELL_LLM_URL: ${CELL_LLM_URL:-https://api.deepseek.com}
+      CELL_LLM_KEY: ${CELL_LLM_KEY}
+      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-chat}
+      EMBEDDINGS_URL: http://embeddings:8090
+      ECODB_API_INTERNAL_URL: http://ecodb-api:8080
+      INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET}
+      CONSOLIDATION_ALPHA: ${CONSOLIDATION_ALPHA:-0.70}
+      CONSOLIDATION_BETA1: ${CONSOLIDATION_BETA1:-0.50}
+      CONSOLIDATION_BETA2: ${CONSOLIDATION_BETA2:-0.50}
+      CONSOLIDATION_BETA3: ${CONSOLIDATION_BETA3:-0.0}
+      THRESHOLD_NARRATIVE: ${THRESHOLD_NARRATIVE:-0.45}
+      THRESHOLD_WORK: ${THRESHOLD_WORK:-0.55}
+      MIN_CLUSTER_SIZE: ${MIN_CLUSTER_SIZE:-2}
+      MAX_MEMORIES_PER_WINDOW: ${MAX_MEMORIES_PER_WINDOW:-500}
+      FORESIGHT_CONFIDENCE_THRESHOLD: ${FORESIGHT_CONFIDENCE_THRESHOLD:-0.70}
+      FORESIGHT_SCAN_HOURS: ${FORESIGHT_SCAN_HOURS:-48}
+      SKILL_MIN_CASES: ${SKILL_MIN_CASES:-3}
+      SKILL_MIN_SUCCESS_RATE: ${SKILL_MIN_SUCCESS_RATE:-0.60}
+      SKILL_STALE_THRESHOLD: ${SKILL_STALE_THRESHOLD:-0.30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - with-metacognition
     networks:
       - ecodb-net
 

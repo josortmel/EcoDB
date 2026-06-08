@@ -81,7 +81,7 @@ router = APIRouter(prefix="/memories", tags=["memories"])
 
 # OBS-2 (verificador L1): Literal explícitos para validacion 422 desde Pydantic
 # ANTES de tocar DB. Coincide con los ENUMs del schema §1.5.
-MemoryType = Literal["momento", "decision", "acuerdo", "tecnico", "descubrimiento", "observacion", "referencia"]
+MemoryType = Literal["momento", "decision", "acuerdo", "tecnico", "descubrimiento", "observacion", "referencia", "caso", "skill"]
 ContentModality = Literal["text", "image", "audio", "document", "video"]
 Visibility = Literal["public", "private"]
 
@@ -92,7 +92,7 @@ class MemoryCreate(BaseModel):
     # silencioso con su memoria sin agente.
     model_config = ConfigDict(extra="forbid")
 
-    type: MemoryType = Field(..., description="Uno de: momento, decision, acuerdo, tecnico, descubrimiento, observacion, referencia")
+    type: MemoryType = Field(..., description="Uno de: momento, decision, acuerdo, tecnico, descubrimiento, observacion, referencia, caso, skill")
     content: str = Field(..., min_length=1, max_length=MAX_CONTENT_LEN, description="Texto de la memoria")
     workspace_id: int
     project_id: int
@@ -110,6 +110,9 @@ class MemoryCreate(BaseModel):
         None,
         description="UUID del documento fuente (Task 4.9). Si presente, se inserta en memory_document_links.",
     )
+    foresight_start: Optional[datetime] = None
+    foresight_end: Optional[datetime] = None
+    metadata: Optional[dict] = None
 
     @field_validator("content")
     @classmethod
@@ -140,6 +143,56 @@ class MemoryCreate(BaseModel):
             return v
         return _no_null_bytes(v, "media_path")
 
+    @field_validator("foresight_end")
+    @classmethod
+    def _v_foresight(cls, v, info):
+        if v is not None:
+            fs = info.data.get("foresight_start")
+            if fs is None:
+                raise ValueError("foresight_end requires foresight_start")
+            if v <= fs:
+                raise ValueError("foresight_end must be after foresight_start")
+            from datetime import timedelta
+            if v - fs > timedelta(days=730):
+                raise ValueError("foresight window cannot exceed 2 years")
+        return v
+
+    @field_validator("metadata")
+    @classmethod
+    def _v_metadata(cls, v, info):
+        mem_type = info.data.get("type")
+        if v is None:
+            if mem_type == "caso":
+                raise ValueError("caso requires metadata with task_type and success")
+            if mem_type == "skill":
+                raise ValueError("skill requires metadata with task_signature and steps")
+            return v
+        def _has_null(obj):
+            if isinstance(obj, str):
+                return "\x00" in obj
+            if isinstance(obj, dict):
+                return any(_has_null(k) or _has_null(vv) for k, vv in obj.items())
+            if isinstance(obj, (list, tuple)):
+                return any(_has_null(item) for item in obj)
+            return False
+        if _has_null(v):
+            raise ValueError("metadata contains null bytes")
+        raw = json.dumps(v)
+        if len(raw.encode("utf-8")) > 65536:
+            raise ValueError("metadata exceeds 64KB")
+        mem_type = info.data.get("type")
+        if mem_type == "caso":
+            if "task_type" not in v:
+                raise ValueError("caso requires metadata.task_type")
+            if "success" not in v:
+                raise ValueError("caso requires metadata.success")
+        elif mem_type == "skill":
+            if "task_signature" not in v:
+                raise ValueError("skill requires metadata.task_signature")
+            if "steps" not in v or not isinstance(v["steps"], list):
+                raise ValueError("skill requires metadata.steps (list)")
+        return v
+
 
 class MemoryUpdate(BaseModel):
     content: Optional[str] = Field(None, min_length=1, max_length=MAX_CONTENT_LEN)
@@ -147,6 +200,7 @@ class MemoryUpdate(BaseModel):
     visibility: Optional[Visibility] = None
     tags: Optional[list[str]] = Field(None, max_length=MAX_TAGS)
     media_path: Optional[str] = Field(None, max_length=MAX_MEDIA_PATH_LEN)
+    metadata: Optional[dict] = None
 
     @field_validator("content")
     @classmethod
@@ -171,6 +225,26 @@ class MemoryUpdate(BaseModel):
             return v
         return _no_null_bytes(v, "media_path")
 
+    @field_validator("metadata")
+    @classmethod
+    def _v_metadata(cls, v):
+        if v is None:
+            return v
+        def _has_null(obj):
+            if isinstance(obj, str):
+                return "\x00" in obj
+            if isinstance(obj, dict):
+                return any(_has_null(k) or _has_null(vv) for k, vv in obj.items())
+            if isinstance(obj, (list, tuple)):
+                return any(_has_null(item) for item in obj)
+            return False
+        if _has_null(v):
+            raise ValueError("null bytes in metadata")
+        raw = json.dumps(v)
+        if len(raw.encode()) > 65536:
+            raise ValueError("metadata > 64KB")
+        return v
+
 
 class MemoryResponse(BaseModel):
     id: UUID
@@ -190,6 +264,11 @@ class MemoryResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_accessed: Optional[datetime]
+    summary: Optional[str] = None
+    staleness: Optional[str] = None
+    foresight_start: Optional[datetime] = None
+    foresight_end: Optional[datetime] = None
+    metadata: Optional[dict] = None
 
 
 class MemoryListResponse(BaseModel):
@@ -269,17 +348,22 @@ async def create_memory(
             raise HTTPException(422, f"unknown memory type: {body.type}")
         weight_base = float(weight_row["base_weight"])
 
-        # NV2-10 fix Deuda #22 (2026-05-08): API por nombre. Cliente envia
-        # `agent_identifier` is the agent's string identifier; backend resolves to agent_id internally.
-        # VS9 preservado: si el nombre no existe, 422 igual que antes pero sin
-        # exponer numeros enumerables al cliente (cierra oracle NV2-10).
+        # Ownership check (DEBT-13): resolve agent + verify ownership before INSERT.
+        actor_id = int(actor["sub"])
+        is_super = bool(actor.get("is_super"))
         resolved_agent_id: Optional[int] = None
-        if body.agent_identifier is not None:
-            resolved_agent_id = await conn.fetchval(
-                "SELECT id FROM agents WHERE identifier = $1", body.agent_identifier
-            )
-            if resolved_agent_id is None:
-                raise HTTPException(422, "agent not found or invalid")
+        if body.agent_identifier:
+            agent_row = await conn.fetchrow(
+                "SELECT id, user_id FROM agents WHERE identifier = $1 AND active = true",
+                body.agent_identifier)
+            if agent_row is None:
+                raise HTTPException(422, f"agent '{body.agent_identifier}' not found")
+            if not is_super:
+                if agent_row["user_id"] is None:
+                    raise HTTPException(403, "cannot create memory for system agent")
+                if int(agent_row["user_id"]) != actor_id:
+                    raise HTTPException(403, "cannot create memory for agent owned by another user")
+            resolved_agent_id = agent_row["id"]
     # Pool liberado aqui — la conexion vuelve al pool para otros endpoints.
 
     # FASE 2 — embed FUERA del pool. Si falla, lanzamos 503 sin tocar DB.
@@ -313,10 +397,12 @@ async def create_memory(
                   INSERT INTO memories
                     (user_id, agent_id, workspace_id, project_id, type, content_type,
                      visibility, content, tags, weight, weight_base, media_path,
-                     embedding, embedding_model)
+                     embedding, embedding_model,
+                     foresight_start, foresight_end, metadata)
                   VALUES ($1, $2, $3, $4, $5::memory_type, $6::content_modality,
                           $7::visibility, $8, $9, $10, $11, $12,
-                          $13::vector, $14)
+                          $13::vector, $14,
+                          $15, $16, $17::jsonb)
                   RETURNING *
                 )
                 SELECT i.*, a.identifier AS agent_identifier
@@ -327,6 +413,8 @@ async def create_memory(
                 body.type, body.content_type, body.visibility, body.content,
                 body.tags, weight_base, weight_base, body.media_path,
                 embedding_literal, EMBEDDING_MODEL_TAG,
+                body.foresight_start, body.foresight_end,
+                json.dumps(body.metadata) if body.metadata else None,
             )
         except ForeignKeyViolationError:
             # NV1-10 cierre Deuda #22 (2026-05-08): TOCTOU FASE1→FASE3. Si
@@ -456,6 +544,18 @@ async def create_memory(
             _logging.getLogger("ecodb.auto_tag").warning(
                 "Auto-tag failed for memory=%s: %r", str(row["id"]), _at_exc
             )
+
+        # Auto-tag case_candidate for tecnico/observacion with task_type+result in metadata
+        if body.type in ('tecnico', 'observacion') and body.metadata:
+            if 'task_type' in body.metadata and 'result' in body.metadata:
+                try:
+                    await conn.execute("""
+                        UPDATE memories SET tags = array_append(tags, 'case_candidate')
+                        WHERE id = $1 AND NOT ('case_candidate' = ANY(tags))
+                    """, row["id"])
+                except Exception as _cc_exc:
+                    _logging.getLogger("ecodb.case_candidate").warning(
+                        "case_candidate auto-tag failed for memory=%s: %r", str(row["id"]), _cc_exc)
 
         _t_autotag = _time.time()
         _perf_log.info("create_memory phase=auto_tag %.2fs", _t_autotag - _t_gliner)
@@ -872,6 +972,8 @@ async def update_memory(
             sets.append(f"tags = ${i}"); params.append(body.tags); i += 1
         if body.media_path is not None:
             sets.append(f"media_path = ${i}"); params.append(body.media_path); i += 1
+        if body.metadata is not None:
+            sets.append(f"metadata = ${i}::jsonb"); params.append(json.dumps(body.metadata)); i += 1
         if not sets:
             raise HTTPException(400, "no fields to update")
         sets.append("updated_at = now()")
@@ -1098,11 +1200,11 @@ async def preview_memory(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _row_to_response(row) -> MemoryResponse:
+def _row_to_response(row, agent_identifier=None) -> MemoryResponse:
     return MemoryResponse(
         id=row["id"],
         user_id=row["user_id"],
-        agent_identifier=row["agent_identifier"],
+        agent_identifier=agent_identifier or row.get("agent_identifier"),
         workspace_id=row["workspace_id"],
         project_id=row["project_id"],
         type=row["type"],
@@ -1117,4 +1219,9 @@ def _row_to_response(row) -> MemoryResponse:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         last_accessed=row["last_accessed"],
+        summary=row.get("summary"),
+        staleness=row.get("staleness"),
+        foresight_start=row.get("foresight_start"),
+        foresight_end=row.get("foresight_end"),
+        metadata=dict(row["metadata"]) if row.get("metadata") else None,
     )

@@ -18,3 +18,7 @@ openai-whisper>=20231117
 
 # GAMR Etapa 9 — cross-encoder reranker
 sentence-transformers>=3.0.0
+
+# Cell worker — metacognition v2.0
+numpy>=1.26
+scipy>=1.12

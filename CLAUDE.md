@@ -4,12 +4,13 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 
 ## Versiones actuales
 
-- API: `0.23.0` (imagen Docker) / API_VERSION `0.9.0`
-- Schema: `5.1.1`
+- API: `0.24.0` (imagen Docker) / API_VERSION `0.9.0`
+- Schema: `5.2.0`
 - MCP: `1.6.0`
 - Embeddings: `0.2.5`
 - NER: `1.0.0`
 - Postgres: `1.0.0` (PG16 + pgvector + AGE 1.5.0)
+- Cell Worker: `0.1.0` (profile `with-metacognition`)
 - Release pública: `v1.2.0`
 
 ## Arquitectura — 6 servicios Docker
@@ -22,12 +23,12 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
                        │   │  │         │ AGE graph   │
               ┌────────┘   │  └───────┐ │ pg_trgm     │
               ▼            ▼          ▼ └─────────────┘
-     ┌────────────┐  ┌──────────┐  ┌──────┐
-     │ Embeddings │  │   NER    │  │ LLM  │
-     │ Jina v4    │  │ GLiNER   │  │ opt. │
-     │ GPU/CUDA   │  │ CPU      │  │ CPU  │
-     │ (interno)  │  │ :8092→   │  └──────┘
-     └────────────┘  │    8091  │
+     ┌────────────┐  ┌──────────┐  ┌──────┐  ┌──────────┐
+     │ Embeddings │  │   NER    │  │ LLM  │  │ Cell     │
+     │ Jina v4    │  │ GLiNER   │  │ opt. │  │ Worker   │
+     │ GPU/CUDA   │  │ CPU      │  │ CPU  │  │ opt.     │
+     │ (interno)  │  │ :8092→   │  └──────┘  │ DeepSeek │
+     └────────────┘  │    8091  │             └──────────┘
                      └──────────┘
 ```
 
@@ -38,6 +39,7 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - **ner** — GLiNER NER para extracción de entidades. CPU-only. Puerto host `8092`, interno `8091`.
 - **llm** (opcional, profile `with-llm`) — llama.cpp + Qwen 2.5 3B. Para clasificación, HyDE.
 - **worker** (opcional, profile `with-ingestion`) — Ingesta de documentos (PDF/DOCX/audio).
+- **ecodb-cell** (opcional, profile `with-metacognition`) — Cell worker: consolidation (weekly clustering), foresight extraction (daily), skill distillation (weekly). Conecta directamente a postgres con role `ecodb_cell` (least-privilege, sin acceso a narrative ni api_keys). LLM via DeepSeek API.
 
 ## Estructura del repo
 
@@ -53,6 +55,13 @@ EcoDB/
 │   ├── auth.py             # JWT + API keys
 │   ├── permissions.py      # Cascada de permisos (workspace→project)
 │   ├── worker.py           # Pipeline ingesta documentos (23K)
+│   ├── cell_worker.py      # Metacognition cells: consolidation + foresight + skill distillation
+│   ├── clusters.py         # Cluster CRUD (8 endpoints)
+│   ├── briefing.py         # Briefing endpoint (foresights + tensions + telescopic)
+│   ├── foresights.py       # Foresight listing endpoint
+│   ├── cases.py            # Case listing endpoint
+│   ├── skills.py           # Skill listing + detail + status endpoints
+│   ├── cells.py            # Cell telemetry endpoints (runs + health)
 │   ├── gliner_service.py   # NER client + entity dictionary
 │   ├── embeddings_client.py # Client httpx → embeddings service
 │   ├── reranker.py         # Cross-encoder (Etapa 10 GAMR)
@@ -100,7 +109,9 @@ Tablas principales:
 - `projects` — dentro de workspace, `is_common` para proyectos compartidos
 - `workspace_leads`, `project_leads`, `project_members` — permisos por rol
 - `teams`, `team_members`, `team_resources` — equipos ad-hoc cross-workspace
-- `memories` — con `embedding vector(512)`, `visibility`, `type`, `tags TEXT[]`, soft-delete
+- `memories` — con `embedding vector(512)`, `visibility`, `type`, `tags TEXT[]`, soft-delete, `foresight_start/end` (temporal signals), `metadata JSONB` (structured per-type data)
+- `memory_clusters` — clusters de memorias por agente. Niveles: weekly/monthly/quarterly/yearly. `narrative` (solo escribible por owner, no por ecodb_cell). `centroid vector(512)`, `member_ids UUID[]` (cap 500), `source_ids UUID[]` (apilamiento telescópico), `status` (candidate/active/rejected/superseded)
+- `cell_runs` — telemetría de ejecuciones de células. RLS habilitado para role ecodb_cell.
 - `agent_identity` — fragmentos ordenados por `(agent_id, version, fragment_idx)`
 - `memory_type_config` — pesos base y decay por tipo
 - `entity_dictionary` — diccionario curado para NER
@@ -258,10 +269,15 @@ docker compose restart mcp
 16. `_ALIAS_SIM_THRESHOLD = 0.65` en `gliner_service.py` — threshold pg_trgm para detección de alias. Bajarlo genera ruido (falsos positivos); subirlo pierde candidatos reales. 0.65 captura variaciones tipo "DeepSeek"↔"DeepSeek V4" (sim=0.75).
 17. Alias candidates NUNCA se auto-resuelven. El sistema solo genera `status='pending'`. La revisión (approve/reject + merge) siempre es manual desde la dashboard o API.
 18. `link_entities_from_content()` en `graph.py` acepta `pool` opcional — si se omite, se salta la detección de alias (usado en migraciones).
+19. `ecodb_cell` role: GRANT column-level excluye `narrative` y `narrated_at` de INSERT/UPDATE en `memory_clusters`. Verificar con CI test en cada deploy. No usar trigger (rompe pg_restore).
+20. `memory_clusters.member_ids` cap 500 (CHECK constraint). `source_ids` cap 200. Clusters vacíos rechazados (CHECK `array_length > 0`).
+21. Cell worker conecta a postgres con role `ecodb_cell` (DATABASE_URL separado en docker-compose). NO puede leer `api_keys`, `users`, `organizations`. SÍ puede leer `memories`, `agents`, `nodes`, `triples`, `memory_entity_links`, `memory_clusters`, `cell_runs`, `workspaces`, `projects`.
+22. `caso` y `skill` memory types require `metadata` not null con campos obligatorios (validated at Pydantic level in MemoryCreate._v_metadata).
+23. `cognition_class` en `agents`: valores válidos `narrative|work|mixed`. Default `work`. Determina threshold de clustering (0.45 vs 0.55).
 
 ## Migration convention
 
-New schema changes go in `sql/migrate_*.sql` files and MUST be appended to the `MIGRATIONS` list in `api/migrations.py` (order matters — runner applies sequentially).
+New schema changes go in `sql/migrate_*.sql` files and MUST be appended to the `MIGRATIONS` list in `api/migrations.py` (order matters — runner applies sequentially). Current migrations: 3_0h_multimodal, 5.1.0_multitenant, 5.1.1_clusters, age_sync_triggers, 5.2.0_foresight, 5.2.0_types_schema, 5.2.0_types_config, 5.2.0_agents, 5.2.0_metacognition.
 
 Rules for new migration files:
 - **Idempotent**: use `IF NOT EXISTS`, `CREATE OR REPLACE`, `ON CONFLICT DO NOTHING`. Re-applying must be a no-op on an up-to-date schema.
@@ -290,6 +306,46 @@ The runner uses `pg_advisory_lock` (session-level) to serialize concurrent start
   - `POST /admin/alias-candidates/scan` — manual scan with configurable threshold, max_per_name, name_filter, dry_run
   - `PUT /admin/alias-candidates/{id}` — approve/reject with `merge` and `reverse` flags (reverse = merge target INTO source)
   - Alias pipeline fix: `detect_alias_candidates()` now called from `link_entities_from_content()` (memory path), threshold 0.80→0.65
+
+- **v2.0** en progreso: Metacognition — schema 5.2.0. 3 cell workers (consolidation, foresight, skill distillation). 22 new endpoints + 5 extensions. memory_clusters + cell_runs tables. ecodb_cell DB role (least-privilege). Identity evolution (observed vs declared). Briefing with telescopic summary. related_clusters in search. Authorship frontier (GRANT column-level: cell cannot write narrative).
+  - Endpoints nuevos: `/api/v1/clusters` (8), `/api/v1/briefing` (3), `/api/v1/foresights` (1), `/api/v1/cases` (1), `/api/v1/skills` (3), `/api/v1/cells` (2), `/api/v1/stats/metacognition` (1), `PATCH /agents/{id}` (1), `GET /agents/{id}/observed-identity` (1), `GET /agents/{id}/tensions` (1), `PUT /agents/{id}/tensions/{id}` (1)
+  - Extensions: `POST /memories` (+foresight, +metadata, +ownership check, +auto-tag), `GET /memories` (+5 response fields), `POST /search` (+related_clusters)
+  - Cell worker: `docker compose --profile with-metacognition up -d`
+  - **Pendiente**: dashboard integration (manual triggers, cluster narration UI, agent cognition_class config), frozen replay eval, ecodb-langchain SDK
+
+## Memory types
+
+Tipos disponibles en `memory_type` enum: `momento`, `decision`, `acuerdo`, `tecnico`, `descubrimiento`, `observacion`, `referencia`, `caso`, `skill`.
+
+- `caso`: requires `metadata.task_type` + `metadata.success`. Auto-tagged `case_candidate` for tecnico/observacion with task_type+result.
+- `skill`: requires `metadata.task_signature` + `metadata.steps`. Created by skill distillation cell from 3+ cases with success_rate >= 0.60.
+
+## Agent cognition classes
+
+`agents.cognition_class`: `narrative` (Eco, Prima, Hilo, Lienzo), `work` (default, most agents), `mixed`.
+Determines clustering threshold: narrative=0.45 (more permissive), work=0.55 (stricter).
+Set via `PATCH /agents/{identifier}` with `{"cognition_class": "narrative"}`.
+
+## Authorship frontier
+
+The `narrative` column in `memory_clusters` can only be written by the agent owner (via `PUT /clusters/{id}/narrate`). The cell worker (ecodb_cell role) is blocked at 3 levels:
+1. **GRANT column-level**: PostgreSQL rejects INSERT/UPDATE on narrative for ecodb_cell
+2. **CI test**: verifies the GRANT in every deploy
+3. **API check**: PUT /narrate verifies agent ownership in Python
+
+No trigger guard (pg_restore compatibility).
+
+## Deuda técnica v2.0
+
+| # | Item | Severity |
+|---|------|----------|
+| D7 | _paginate duplicated in 4 files (cases, skills, clusters, cells) | LOW |
+| D8-D9 | CaseResponse, TensionAction duplicated across files | LOW |
+| D10 | `total` in list responses = page count, not DB total | LOW |
+| D11 | PATCH /agents no audit_log | LOW |
+| D15 | Tension cooldown written but not enforced at API level (cell enforces) | LOW |
+| — | Cell worker cron assumes always-on server. Needs manual triggers from dashboard | MEDIUM |
+| — | Dashboard pages for cluster narration, cell management, agent config | MEDIUM |
 
 ## Licencia
 

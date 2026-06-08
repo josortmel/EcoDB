@@ -20,7 +20,7 @@ IS_PRODUCTION = ENVIRONMENT == "production"
 IS_DEVELOPMENT = ENVIRONMENT == "development"
 
 API_VERSION = os.environ.get("API_VERSION", "0.9.0")
-SCHEMA_VERSION = "5.1.1"
+SCHEMA_VERSION = "5.2.0"
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -190,3 +190,28 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com")
 MAX_LLM_TOKENS = int(os.environ.get("MAX_LLM_TOKENS", "512"))
+
+# --- Cell worker configuration ---
+CELL_LLM_PROVIDER = os.environ.get("CELL_LLM_PROVIDER", "deepseek")
+CELL_LLM_URL = os.environ.get("CELL_LLM_URL", "https://api.deepseek.com")
+CELL_LLM_KEY = os.environ.get("CELL_LLM_KEY", "")
+CELL_LLM_MODEL = os.environ.get("CELL_LLM_MODEL", "deepseek-chat")
+
+# --- Consolidation parameters ---
+CONSOLIDATION_ALPHA = float(os.environ.get("CONSOLIDATION_ALPHA", "0.70"))
+CONSOLIDATION_BETA1 = float(os.environ.get("CONSOLIDATION_BETA1", "0.50"))
+CONSOLIDATION_BETA2 = float(os.environ.get("CONSOLIDATION_BETA2", "0.50"))
+CONSOLIDATION_BETA3 = float(os.environ.get("CONSOLIDATION_BETA3", "0.0"))
+THRESHOLD_NARRATIVE = float(os.environ.get("THRESHOLD_NARRATIVE", "0.45"))
+THRESHOLD_WORK = float(os.environ.get("THRESHOLD_WORK", "0.55"))
+MIN_CLUSTER_SIZE = int(os.environ.get("MIN_CLUSTER_SIZE", "2"))
+MAX_MEMORIES_PER_WINDOW = int(os.environ.get("MAX_MEMORIES_PER_WINDOW", "500"))
+
+# --- Foresight extraction ---
+FORESIGHT_CONFIDENCE_THRESHOLD = float(os.environ.get("FORESIGHT_CONFIDENCE_THRESHOLD", "0.70"))
+FORESIGHT_SCAN_HOURS = int(os.environ.get("FORESIGHT_SCAN_HOURS", "48"))
+
+# --- Skill distillation ---
+SKILL_MIN_CASES = int(os.environ.get("SKILL_MIN_CASES", "3"))
+SKILL_MIN_SUCCESS_RATE = float(os.environ.get("SKILL_MIN_SUCCESS_RATE", "0.60"))
+SKILL_STALE_THRESHOLD = float(os.environ.get("SKILL_STALE_THRESHOLD", "0.30"))

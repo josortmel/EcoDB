@@ -21,6 +21,12 @@ MIGRATIONS: list[tuple[str, str]] = [
     ("5.1.0_multitenant", "sql/migrate_5.0.1_to_5.1.0.sql"),
     ("5.1.1_clusters",    "sql/migrate_5.1.0_to_5.1.1.sql"),
     ("age_sync_triggers", "sql/trigger_age_sync.sql"),
+    # --- Metacognicion ---
+    ("5.2.0_foresight",      "sql/migrate_06_foresight.sql"),
+    ("5.2.0_types_schema",   "sql/migrate_07a_types_schema.sql"),
+    ("5.2.0_types_config",   "sql/migrate_07b_types_config.sql"),
+    ("5.2.0_agents",         "sql/migrate_08_agents.sql"),
+    ("5.2.0_metacognition",  "sql/migrate_09_metacognition.sql"),
 ]
 
 _LOCK_KEY = 728_1990

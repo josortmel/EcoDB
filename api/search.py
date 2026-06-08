@@ -795,6 +795,38 @@ class SearchInDocumentRequest(BaseModel):
         return _no_null_bytes(v, "query_text")
 
 
+async def _get_related_clusters(conn, query_embedding, query_text, actor):
+    actor_id = int(actor["sub"])
+    vis_pids = await visible_project_ids(conn, actor)
+    if not vis_pids:
+        return []
+    try:
+        rows = await conn.fetch("""
+            SELECT mc.id, mc.level, mc.label,
+                   1 - (mc.centroid <=> $1::vector) AS vector_score,
+                   ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4)) AS bm25_score
+            FROM memory_clusters mc
+            JOIN agents a ON a.id = mc.agent_id
+            WHERE mc.status = 'active'
+              AND (1 - (mc.centroid <=> $1::vector) > 0.5
+                   OR ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4)) > 0.1)
+              AND a.user_id = $2
+              AND mc.member_ids && (
+                  SELECT coalesce(array_agg(m.id), ARRAY[]::uuid[])
+                  FROM memories m
+                  WHERE m.project_id = ANY($3::int[])
+              )
+            ORDER BY (1 - (mc.centroid <=> $1::vector)
+                      + ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4))) DESC
+            LIMIT 3
+        """, query_embedding, actor_id, list(vis_pids), query_text)
+        return [dict(r) for r in rows]
+    except Exception as _rc_err:
+        import logging as _rc_log
+        _rc_log.getLogger("ecodb.search").warning("related_clusters query failed: %r", _rc_err)
+        return []
+
+
 class SearchResponse(BaseModel):
     query: str
     query_type: str = Field(..., description="Tipo clasificado: factual/historical/analytical/contextual")
@@ -805,6 +837,7 @@ class SearchResponse(BaseModel):
     graph_context: list[dict] = Field(default_factory=list, description="Entidades del grafo usadas en expansion")
     contradictions: list[ContradictionPair] = Field(default_factory=list, description="Pares de memorias potencialmente contradictorias")
     warnings: list[str] = Field(default_factory=list, description="Machine-parseable warnings about query behavior")
+    related_clusters: list[dict] = Field(default_factory=list, description="Clusters related to query by centroid + label BM25")
     audit_id: Optional[str] = Field(
         None,
         description="UUID del audit_log row si expand_scope=true (.",
@@ -1372,6 +1405,12 @@ async def search_memories(
         "results_count": len(results),
     }, org_id=_actor_org)
 
+    _related = []
+    if query_vec is not None and body.query_text:
+        async with pool.acquire() as _rc_conn:
+            _related = await _get_related_clusters(
+                _rc_conn, query_vec, body.query_text, actor)
+
     return SearchResponse(
         query=body.query_text or "(image query)",
         query_type=resolved_query_type,
@@ -1382,6 +1421,7 @@ async def search_memories(
         graph_context=graph_context,
         contradictions=contradictions,
         warnings=_search_warnings,
+        related_clusters=_related,
         audit_id=audit_uuid,
     )
 
