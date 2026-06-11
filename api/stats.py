@@ -544,7 +544,11 @@ async def stats_metacognition(actor: dict = Depends(get_current_user)) -> Metaco
             WHERE cell_type='consolidation' AND status='completed'
             ORDER BY finished_at DESC LIMIT 1
         """)
-        cm = (last_run["metrics"] if last_run else {}).get("clustering", {})
+        import json as _json
+        _raw_metrics = last_run["metrics"] if last_run else {}
+        if isinstance(_raw_metrics, str):
+            _raw_metrics = _json.loads(_raw_metrics)
+        cm = (_raw_metrics or {}).get("clustering", {})
         avg_size = await conn.fetchval(
             "SELECT AVG(array_length(member_ids,1)) FROM memory_clusters WHERE status='active'")
 

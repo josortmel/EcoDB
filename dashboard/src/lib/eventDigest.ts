@@ -14,7 +14,14 @@ export type SseEventName =
   | 'agent_disconnected'
   | 'document_indexed'
   | 'document_failed'
-  | 'duplicate_detected';
+  | 'duplicate_detected'
+  // Metacognition (v1.3) — emitted on the SAME /events/stream broadcast (no new
+  // SSE endpoint; auth inherited from the bridge). Drive the Memory Agent tabs.
+  | 'cell.run.started'
+  | 'cell.run.completed'
+  | 'cell.run.failed'
+  | 'cluster.created'
+  | 'foresight.triggered';
 
 type Policy = 'immediate' | 'batch' | 'debounce';
 
@@ -61,6 +68,28 @@ const EVENTS: Record<SseEventName, EventConfig> = {
   // into one refetch instead of N immediate ones.
   agent_connected: { policy: 'debounce', keys: [['stats', 'agents']] },
   agent_disconnected: { policy: 'debounce', keys: [['stats', 'agents']] },
+
+  // ── Memory Agent (v1.3) ──
+  // A run starting just adds a row to the telemetry list — immediate, low-freq.
+  'cell.run.started': { policy: 'immediate', keys: [['ma', 'cell-runs']] },
+  // A run completing can emit a burst of cluster.created alongside it (a
+  // consolidation writes many clusters) — debounce so the burst is one refetch.
+  'cell.run.completed': {
+    policy: 'debounce',
+    keys: [
+      ['ma', 'cell-runs'],
+      ['ma', 'cell-health'],
+      ['ma', 'clusters'],
+      ['ma', 'briefing'],
+    ],
+  },
+  // Failures matter now — surface immediately in telemetry + health.
+  'cell.run.failed': { policy: 'immediate', keys: [['ma', 'cell-runs'], ['ma', 'cell-health']] },
+  // Consolidation creates clusters in bursts → debounce; refreshes the cluster
+  // list and the briefing's pending_clusters.
+  'cluster.created': { policy: 'debounce', keys: [['ma', 'clusters'], ['ma', 'briefing']] },
+  // A new foresight changes what the briefing shows — immediate, low-freq.
+  'foresight.triggered': { policy: 'immediate', keys: [['ma', 'briefing']] },
 };
 
 export const BATCH_MS = 10_000;

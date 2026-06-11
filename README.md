@@ -6,7 +6,8 @@
   <a href="https://github.com/josortmel/EcoDB/releases/latest"><img src="https://img.shields.io/github/v/release/josortmel/EcoDB?color=0d9488&label=release" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
-  <img src="https://img.shields.io/badge/MCP-32%20tools-0d9488" alt="MCP Tools">
+  <img src="https://img.shields.io/badge/MCP-38%20tools-0d9488" alt="MCP Tools">
+  <img src="https://img.shields.io/badge/LangChain-integration-1c3c3c" alt="LangChain">
   <img src="https://img.shields.io/badge/dashboard-Electron-0d9488" alt="Dashboard">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
 </p>
@@ -105,9 +106,39 @@ EcoDB v1.1 ships a **desktop dashboard** (Electron) — visual governance over t
 - **Decisions Inbox** — review what the system flagged: stale memories, alias candidates, unconfirmed relations, low-trust documents.
 - **Ingestion** — upload documents and watch them flow through the pipeline (pending → indexed) in real time.
 - **Ontology Console** — curate the graph's vocabulary: entity dictionary, canonical predicates, alias management (manual scan + merge direction), merges.
+- **Memory Agent** — the metacognition surface: schedule the reflection cells, review consolidated clusters, and track foresights, distilled skills, and run telemetry (see [Metacognition](#metacognition)).
 - **Settings** — configurable backend URL (connect to a local Docker stack or a remote EcoDB instance on your network), API keys, trust tiers.
 
 Built with React + TypeScript + Tailwind on Electron, talking to the same REST API. The API key never leaves the main process. Windows installer (unsigned — SmartScreen will warn on first run).
+
+## Metacognition
+
+Most memory systems are passive: they store what you give them and retrieve it on demand. EcoDB also **reflects on its own memory** — on a schedule, without prompting. Background workers ("cells") read the accumulated memories of each agent and write back higher-order knowledge: consolidated narratives, predicted events, distilled skills, and identity tensions.
+
+<p align="center">
+  <img src="docs/images/metacognition.png" alt="EcoDB metacognition — cell workers turn raw memories into consolidated knowledge" width="100%">
+</p>
+
+Each cell is a cron-scheduled job over one agent's memory:
+
+| Cell | What it does | Produces |
+|------|--------------|----------|
+| **Consolidation** | Clusters related memories across time horizons (weekly → monthly → quarterly → yearly) and narrates each cluster | Telescopic memory: a zoomable summary of what happened |
+| **Foresight extraction** | Scans recent memories for temporal signals (deadlines, scheduled events) above a confidence threshold | Foresights: events the system expects, urgency-scored |
+| **Skill distillation** | Finds cases that share a task type with a high success rate and abstracts the procedure | Skills: reusable steps, tools, and failure modes |
+| **Identity tension** | Compares how an agent behaves against how it describes itself | Tensions: gaps between observed and declared traits |
+
+The result is a memory that gets **more organized over time, not just bigger**. A year of raw memories collapses into a telescopic narrative; recurring work becomes a named skill; an upcoming deadline surfaces before you ask.
+
+It's all governed and surfaced in the dashboard's **Memory Agent** page:
+
+- **Briefing** — what the system is watching right now: urgency-sorted foresights, open identity tensions, and a telescopic preview.
+- **Configs** — schedule and tune the cells per agent (cron builder, model, prompt template), manage LLM providers (keys stored encrypted, never returned in clear).
+- **Clusters** — browse, search, and approve the consolidated narratives; drill into members and sources.
+- **Foresights** / **Skills** — the full per-agent view of predicted events and distilled procedures.
+- **Telemetry** — cell-run history and health: runs, durations, cost, errors.
+
+Nothing runs without a schedule you set, and every consolidation is reviewable before it's trusted. The system distills and suggests; the human approves.
 
 ## GAMR Engine
 
@@ -209,6 +240,13 @@ Connect any MCP-compatible client (Claude Code, Claude Desktop, Cursor, Windsurf
 | `seed_dictionary` | Bulk-add entries to entity dictionary |
 | `validate_link` | Validate entity↔memory link |
 | `get_graph_vocabulary` | Read entity dictionary and approved predicates |
+| **Metacognition** | |
+| `search_clusters` | Semantic search over fractal memory clusters (cosine + label BM25) |
+| `list_clusters` | List an agent's clusters by level / status |
+| `read_cluster` | Read a cluster's narrative (+ optional members / sources) |
+| `get_telescopic_view` | Load an agent's full fractal memory chain (yearly → weekly + last 3 days) |
+| `get_briefing` | Agent briefing: foresights + tensions + telescopic summary |
+| `narrate_cluster` | Write / update a cluster narrative (owner-only) |
 
 ### UltraSearch
 
@@ -217,6 +255,45 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 `search(limit=5, deep_factor=4)` fetches 20 candidates internally, runs the full GAMR pipeline on all 20, and returns only the best 5. You get **K=20 retrieval quality at K=5 token cost**: the LLM consuming the results processes 5 memories instead of 20.
 
 `deep_factor` ranges from 1 (standard) to 10. Hard cap at 200 internal candidates. The only trade-off is compute time, not output cost.
+
+## LangChain Integration
+
+EcoDB ships a first-class LangChain integration. Use it as a **Retriever**, a durable cross-session **Memory**, or a full **agentic toolset** (13 native tools, or 38 via MCP parity) — all backed by the GAMR retrieval engine.
+
+The package lives in the repo at [`ecodb-langchain/`](ecodb-langchain/) and installs from source (not yet on PyPI):
+
+```bash
+pip install -e ./ecodb-langchain
+
+# optional extras
+pip install -e "./ecodb-langchain[mcp]"      # full 38-tool MCP parity (langchain-mcp-adapters)
+pip install -e "./ecodb-langchain[openai]"   # langchain-openai for the agent LLM
+```
+
+```python
+from ecodb_langchain import EcoDBClient, EcoDBRetriever, make_ecodb_tools
+
+# base_url + api_key also default to env (ECODB_API_URL, ECODB_API_KEY)
+client = EcoDBClient(base_url="http://localhost:8080", api_key="ecodb_...")
+
+# 1. As a LangChain Retriever over GAMR search
+retriever = EcoDBRetriever(client=client)
+docs = retriever.invoke("what did we decide about auth")
+
+# 2. As an agentic toolset (13 native LangChain tools)
+tools = make_ecodb_tools(client)
+```
+
+| Interface | What it is |
+|-----------|-----------|
+| `EcoDBClient` | Sync `httpx` client with JWT auth, 1:1 with the MCP surface |
+| `EcoDBRetriever` | `BaseRetriever` over GAMR search → `list[Document]` (semantic + graph + temporal) |
+| `EcoDBMemory` | Durable cross-session LangChain memory |
+| `make_ecodb_tools(client)` | 13 native tools: search, recent, save, graph nav, clusters, telescopic, briefing |
+| `build_ecodb_agent()` | Prebuilt LangGraph ReAct agent, model-agnostic |
+| `load_ecodb_mcp_tools()` / `build_ecodb_agent_from_mcp()` | Full 38-tool parity via `langchain-mcp-adapters` |
+
+**Requirements:** Python ≥ 3.10, `langchain-core` ≥ 0.3, `httpx` ≥ 0.27. Extras: `[mcp]` needs `langchain-mcp-adapters` ≥ 0.1, `[openai]` needs `langchain-openai` ≥ 0.3.
 
 ## Architecture
 
@@ -227,7 +304,7 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 **Two interfaces, same data:**
 
 - **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
-- **MCP Server**: 32 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
+- **MCP Server**: 38 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
 
 **Six Docker services:**
 
@@ -369,7 +446,7 @@ The setup script (`scripts/setup.sh` / `scripts/setup.ps1`) generates `.env` wit
 docker exec ecodb-postgres psql -U ecodb -d ecodb -c \
   "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1;"
 ```
-Expected: `5.1.1`
+Expected: `5.3.0`
 
 ## Documentation
 

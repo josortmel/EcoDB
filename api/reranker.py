@@ -71,7 +71,7 @@ def rerank(query: str, results: list[dict], top_k: int) -> list[dict]:
         log.warning("Reranker inference failed, returning original order: %s", e)
         return results[:top_k]
 
-    for r, score in zip(results, scores):
+    for r, score in zip(results, scores, strict=True):
         r["reranker_score"] = float(score)
 
     reranked = sorted(results, key=lambda r: r.get("reranker_score", -999), reverse=True)

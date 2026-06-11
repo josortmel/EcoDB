@@ -57,6 +57,7 @@ export default {
           decisions: 'var(--sec-decisions)',
           ingestion: 'var(--sec-ingestion)',
           ontology: 'var(--sec-ontology)',
+          'memory-agent': 'var(--sec-memory-agent)',
           settings: 'var(--sec-settings)',
           insights: 'var(--sec-insights)',
         },

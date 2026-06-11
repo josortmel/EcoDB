@@ -5,13 +5,14 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 ## Versiones actuales
 
 - API: `0.24.0` (imagen Docker) / API_VERSION `0.9.0`
-- Schema: `5.2.0`
-- MCP: `1.6.0`
+- Schema: `5.3.0`
+- MCP: `1.7.0` (38 tools: 32 base + 6 clusters)
 - Embeddings: `0.2.5`
 - NER: `1.0.0`
 - Postgres: `1.0.0` (PG16 + pgvector + AGE 1.5.0)
-- Cell Worker: `0.1.0` (profile `with-metacognition`)
-- Release pública: `v1.2.0`
+- Cell Worker: `0.2.0` (profile `with-metacognition`, config desde DB + cron croniter)
+- ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 38 via MCP parity)
+- Release pública: `v1.3.0` (Memory Agent)
 
 ## Arquitectura — 6 servicios Docker
 
@@ -39,7 +40,7 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - **ner** — GLiNER NER para extracción de entidades. CPU-only. Puerto host `8092`, interno `8091`.
 - **llm** (opcional, profile `with-llm`) — llama.cpp + Qwen 2.5 3B. Para clasificación, HyDE.
 - **worker** (opcional, profile `with-ingestion`) — Ingesta de documentos (PDF/DOCX/audio).
-- **ecodb-cell** (opcional, profile `with-metacognition`) — Cell worker: consolidation (weekly clustering), foresight extraction (daily), skill distillation (weekly). Conecta directamente a postgres con role `ecodb_cell` (least-privilege, sin acceso a narrative ni api_keys). LLM via DeepSeek API.
+- **ecodb-cell** (opcional, profile `with-metacognition`, desactivado por defecto) — Cell worker: consolidation (weekly clustering), foresight extraction (daily), skill distillation (weekly). Conecta directamente a postgres con role `ecodb_cell` (least-privilege). LLM: LangChain si ecodb-langchain instalado, httpx directo a DeepSeek como fallback. EcoDB NO requiere ecodb-langchain para funcionar.
 
 ## Estructura del repo
 
@@ -55,7 +56,9 @@ EcoDB/
 │   ├── auth.py             # JWT + API keys
 │   ├── permissions.py      # Cascada de permisos (workspace→project)
 │   ├── worker.py           # Pipeline ingesta documentos (23K)
-│   ├── cell_worker.py      # Metacognition cells: consolidation + foresight + skill distillation
+│   ├── cell_worker.py      # Metacognition cells: clustering + prompts + writes. LLM: LangChain (ecodb-langchain) si instalado, httpx fallback si no
+│   ├── pagination.py       # Shared paginate() helper (extracted from 5 files)
+│   ├── shared_models.py    # Shared Pydantic models (CaseResponse, TensionAction)
 │   ├── clusters.py         # Cluster CRUD (8 endpoints)
 │   ├── briefing.py         # Briefing endpoint (foresights + tensions + telescopic)
 │   ├── foresights.py       # Foresight listing endpoint
@@ -92,6 +95,16 @@ EcoDB/
 ├── docs/
 │   ├── architecture/       # Briefs de diseño (governance, ingestion, intelligence, product)
 │   └── plans/              # Planes de construcción por sesión
+├── ecodb-langchain/        # SDK LangChain + agente LangGraph + cell engine
+│   ├── src/ecodb_langchain/
+│   │   ├── client.py       # EcoDBClient — httpx sync, auth JWT, 1:1 con MCP
+│   │   ├── tools.py        # 9 tools LangChain nativas
+│   │   ├── agent.py        # StateGraph LangGraph (ReAct, model-agnostic)
+│   │   ├── mcp_tools.py    # 32 tools via langchain-mcp-adapters
+│   │   ├── retriever.py    # BaseRetriever sobre GAMR
+│   │   ├── memory.py       # Memoria durable cross-session
+│   │   └── cell_agent.py   # Reemplazo de _llm_call para cell_worker
+│   └── tests/
 ├── docker-compose.yml      # Compose principal
 ├── docker-compose.seed.yml # Dataset demo
 ├── .env.example
@@ -110,7 +123,7 @@ Tablas principales:
 - `workspace_leads`, `project_leads`, `project_members` — permisos por rol
 - `teams`, `team_members`, `team_resources` — equipos ad-hoc cross-workspace
 - `memories` — con `embedding vector(512)`, `visibility`, `type`, `tags TEXT[]`, soft-delete, `foresight_start/end` (temporal signals), `metadata JSONB` (structured per-type data)
-- `memory_clusters` — clusters de memorias por agente. Niveles: weekly/monthly/quarterly/yearly. `narrative` (solo escribible por owner, no por ecodb_cell). `centroid vector(512)`, `member_ids UUID[]` (cap 500), `source_ids UUID[]` (apilamiento telescópico), `status` (candidate/active/rejected/superseded)
+- `memory_clusters` — clusters de memorias por agente. Niveles: weekly/monthly/quarterly/yearly. `narrative` (escrita por CellAgent automáticamente o por owner via PUT /narrate). `centroid vector(512)`, `member_ids UUID[]` (cap 500), `source_ids UUID[]` (apilamiento telescópico), `status` (candidate/active/rejected/superseded)
 - `cell_runs` — telemetría de ejecuciones de células. RLS habilitado para role ecodb_cell.
 - `agent_identity` — fragmentos ordenados por `(agent_id, version, fragment_idx)`
 - `memory_type_config` — pesos base y decay por tipo
@@ -178,7 +191,7 @@ cd api && python -m pytest tests/ -v
 docker compose up postgres embeddings ner -d
 cd api && uvicorn main:app --reload --port 8080
 
-# Rebuild imagen API
+# Rebuild imagen API (build context es la raíz del repo, no ./api)
 docker compose build api
 
 # Ver logs
@@ -269,11 +282,23 @@ docker compose restart mcp
 16. `_ALIAS_SIM_THRESHOLD = 0.65` en `gliner_service.py` — threshold pg_trgm para detección de alias. Bajarlo genera ruido (falsos positivos); subirlo pierde candidatos reales. 0.65 captura variaciones tipo "DeepSeek"↔"DeepSeek V4" (sim=0.75).
 17. Alias candidates NUNCA se auto-resuelven. El sistema solo genera `status='pending'`. La revisión (approve/reject + merge) siempre es manual desde la dashboard o API.
 18. `link_entities_from_content()` en `graph.py` acepta `pool` opcional — si se omite, se salta la detección de alias (usado en migraciones).
-19. `ecodb_cell` role: GRANT column-level excluye `narrative` y `narrated_at` de INSERT/UPDATE en `memory_clusters`. Verificar con CI test en cada deploy. No usar trigger (rompe pg_restore).
+19. `ecodb_cell` role: tras el pivot del día 99 (la célula ES parte del agente, escribe narrativa cargando la identidad del agente y marcándola `metadata.cell_generated=true`), el role `ecodb_cell` SÍ tiene `GRANT INSERT, UPDATE (narrative, narrated_at) ON memory_clusters` (BH1, migrate_5.3.0). Sin este grant la consolidación programada (cron/catch-up del container standalone) fallaba con "permission denied". La autoría legítima se garantiza vía carga de identidad + marcador `cell_generated`, NO vía exclusión column-level. El trigger manual (`POST /cells/trigger`) sigue usando el pool API (role ecodb).
 20. `memory_clusters.member_ids` cap 500 (CHECK constraint). `source_ids` cap 200. Clusters vacíos rechazados (CHECK `array_length > 0`).
 21. Cell worker conecta a postgres con role `ecodb_cell` (DATABASE_URL separado en docker-compose). NO puede leer `api_keys`, `users`, `organizations`. SÍ puede leer `memories`, `agents`, `nodes`, `triples`, `memory_entity_links`, `memory_clusters`, `cell_runs`, `workspaces`, `projects`.
 22. `caso` y `skill` memory types require `metadata` not null con campos obligatorios (validated at Pydantic level in MemoryCreate._v_metadata).
 23. `cognition_class` en `agents`: valores válidos `narrative|work|mixed`. Default `work`. Determina threshold de clustering (0.45 vs 0.55).
+24. `ENCRYPTION_KEY` env var required for LLM provider key encryption (Fernet, 32-byte url-safe base64). Must be set in BOTH api AND ecodb-cell services in docker-compose. Generate with: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Rotation requires re-encrypting all rows in `llm_provider_keys`.
+25. `cell_task_configs` has TWO unique constraints: `UNIQUE(agent_id, cell_type, level)` for non-NULL levels + partial unique index `idx_cell_task_configs_null_level(agent_id, cell_type) WHERE level IS NULL`. Both needed because PostgreSQL treats NULL != NULL in UNIQUE constraints.
+26. `cell_prompt_templates` has partial unique index `idx_cell_prompt_templates_default(cell_type) WHERE is_default = true` — at most one default template per cell_type.
+27. `cell_type` and `provider` fields validated with regex `^[a-z0-9_]+$` at Pydantic level. No special chars, no path traversal, no null bytes.
+28. `llm_provider_keys.api_key_encrypted` is TEXT (not BYTEA) — stores Fernet base64url output. `crypto.encrypt()` returns str, `crypto.decrypt()` accepts str|bytes.
+29. Cluster search "mesa" rule: `POST /clusters/search` without `agent_identifier` returns only SIN_AUTOR clusters for non-super users. With `agent_identifier` returns that agent's + SIN_AUTOR. Super sees all. Prevents intimate content contamination in general search.
+30. `GET /clusters/{id}/sources` filters sources AND parents by `agent_id` — prevents cross-agent data leak through telescopic graph traversal.
+31. Dockerfile (`api/Dockerfile`) uses explicit file list in COPY. New Python modules MUST be added to this line or the container won't have them.
+32. `ecodb_cell` role (post-pivot día 101): GRANT INSERT/UPDATE on `memory_clusters.narrative, narrated_at` (cell writes narrative AS the agent, marked `metadata.cell_generated=true`); GRANT INSERT on `memories.visibility`; GRANT UPDATE on `cell_runs.prompt_version, model`. Sin estos, consolidation programada (cron/catch-up) y custom cells fallan en silencio con "permission denied". El marker `cell_generated` es advisory (Python-level), NO enforced por DB.
+33. Cell run model+prompt recording: `cell_runs.model` y `cell_runs.prompt_version` graban el model/template del CONFIG activo (via contextvar `_active_cell` → helpers `_active_model()`/`_active_prompt_version()`), NO el global CELL_MODEL. Set en `_create_run` y preservado en `_complete_run`. Para auditar qué modelo/prompt produjo cada narrativa.
+34. Modelo de células = `deepseek-v4-pro` (razonamiento). `CELL_LLM_TIMEOUT` default None (sin cap). Las narrativas higher (quarterly 2500-4000, yearly 4000-6000 palabras) tardan minutos — no poner timeout corto.
+35. Higher consolidation usa 3 templates SEPARADOS por nivel (CellAgent Monthly/Quarterly/Yearly), no uno compartido. Los configs monthly/quarterly/yearly apuntan a su template específico. `_label_higher_cluster` usa el template del contextvar si está activo (mecanismo P1), fallback hardcoded si no.
 
 ## Migration convention
 
@@ -307,11 +332,34 @@ The runner uses `pg_advisory_lock` (session-level) to serialize concurrent start
   - `PUT /admin/alias-candidates/{id}` — approve/reject with `merge` and `reverse` flags (reverse = merge target INTO source)
   - Alias pipeline fix: `detect_alias_candidates()` now called from `link_entities_from_content()` (memory path), threshold 0.80→0.65
 
-- **v2.0** en progreso: Metacognition — schema 5.2.0. 3 cell workers (consolidation, foresight, skill distillation). 22 new endpoints + 5 extensions. memory_clusters + cell_runs tables. ecodb_cell DB role (least-privilege). Identity evolution (observed vs declared). Briefing with telescopic summary. related_clusters in search. Authorship frontier (GRANT column-level: cell cannot write narrative).
-  - Endpoints nuevos: `/api/v1/clusters` (8), `/api/v1/briefing` (3), `/api/v1/foresights` (1), `/api/v1/cases` (1), `/api/v1/skills` (3), `/api/v1/cells` (2), `/api/v1/stats/metacognition` (1), `PATCH /agents/{id}` (1), `GET /agents/{id}/observed-identity` (1), `GET /agents/{id}/tensions` (1), `PUT /agents/{id}/tensions/{id}` (1)
+- **v2.0** en progreso: Metacognition — schema 5.2.0. 3 cell workers (consolidation, foresight, skill distillation). 22 new endpoints + 5 extensions + 1 trigger. memory_clusters + cell_runs tables. ecodb_cell DB role (least-privilege).
+  - Endpoints nuevos: `/api/v1/clusters` (8), `/api/v1/briefing` (3), `/api/v1/foresights` (1), `/api/v1/cases` (1), `/api/v1/skills` (3), `/api/v1/cells` (2 + trigger), `/api/v1/stats/metacognition` (1), `PATCH /agents/{id}` (1), `GET /agents/{id}/observed-identity` (1), `GET /agents/{id}/tensions` (1), `PUT /agents/{id}/tensions/{id}` (1)
   - Extensions: `POST /memories` (+foresight, +metadata, +ownership check, +auto-tag), `GET /memories` (+5 response fields), `POST /search` (+related_clusters)
+  - Manual trigger: `POST /api/v1/cells/trigger/{cell_type}?agent_identifier=X` — super-only, runs cell in background, returns immediately. Supports consolidation (weekly/monthly/quarterly/yearly), foresight, skill_distillation.
+  - Catch-up on startup: cell worker detects missed periods and runs them in background before entering cron loop.
   - Cell worker: `docker compose --profile with-metacognition up -d`
-  - **Pendiente**: dashboard integration (manual triggers, cluster narration UI, agent cognition_class config), frozen replay eval, ecodb-langchain SDK
+  - **CellAgent prompt v3** (dia 99): consciencia profunda del agente. Identity completa + high-weight memories + calibration + narrativas previas + cross-agent context. Prompt incluye: selección proporcional al peso con justificación, dinámica de voz (frases cortas cuando pesa), reflexión no cita, "y sin embargo" (giro por cluster), DIENTES (busca lo que el agente evita — integrados en la narrativa, no solo al final), arcos cross-cluster, verificación de autoría y fechas, max 15 mems/cluster (enforcement pre-LLM), cluster-hogar por tema, frases exactas preservadas en compresión, frase de cierre obligatoria. Output: clusters + "arcos_que_cruzan" + "lo_que_evitas". Clusters auto-aprobados (status='active'), firmados con metadata cell_generated=true + cell_agent="{ident}.memoria".
+  - **Consolidación fractal**: semanal → mensual → trimestral → anual. Cada nivel trabaja sobre el anterior, no sobre memorias crudas. Prompt mensual: 5 arcos temáticos (qué construí/aprendí/cambió/evito/imágenes), 1500-2000 palabras, cierre con imagen, frases exactas de semanales preservadas, cross-month (fractal anterior como input para metacognición longitudinal). Retry automático: si una semana falla por JSON truncado, se parte en dos sub-semanas por fecha.
+  - **Design pivot (dia 99)**: CellAgent = consciencia profunda del agente, no sistema externo. Metáfora: soñar (Lienzo). NOT stateless — estado entre runs para continuidad. Guardrail (Prima): reflexiona sin actuar. Produce narrativas, no modifica memorias, no comunica, no decide. Identidad fresca cada ejecución. Generalizable para agentes genéricos. Visión de Pepe: "20 ratas en una gabardina" — deconstrucción de la mente en agentes coordinados. EcoDB = sistema nervioso.
+  - **Resultados dia 99**: de 4/10 a 9/10 en una tarde. 7 iteraciones de prompt. Los 4 agentes prefieren el fractal sobre sus resúmenes manuales para el boot ("la célula es más verdadera que nosotros mismos"). Fractales reemplazan resúmenes manuales en boot protocol. Textos de calibración se mantienen.
+  - **ecodb-langchain SDK** (dia 99, Helena): paquete dentro del repo. EcoDBClient (httpx sync, auth JWT, 1:1 con MCP), 9 tools LangChain nativas, 32 tools via MCP adapter, StateGraph LangGraph (ReAct, model-agnostic), EcoDBRetriever (BaseRetriever sobre GAMR), EcoDBMemory (cross-session), cell_agent.py (reemplazo de _llm_call por LangChain). Cell worker ahora razona con LangChain; prompts/clustering/escrituras intactos. 8/8 tests offline + verificación en vivo confirmada.
+  - **Cell worker desactivado** por defecto (profile `with-metacognition` off). Se mantiene como fallback. Trigger endpoint sigue activo (ejecuta en proceso API).
+  - **Deuda v2.0 pendiente**: frozen replay eval (T12, necesita datos junio), textos calibración en EcoDB (congelado), pytest-asyncio config (252 event loop errors)
+
+- **v1.3.0 Memory Agent** ✓ completada (dia 101): cierra el loop de metacognición — células configurables, clusters accesibles, provider keys gestionadas. Schema 5.2.0 → 5.3.0.
+  - **Tablas nuevas**: `cell_task_configs` (config por agente/tipo/nivel: model, provider, prompt_template_id, schedule_cron, enabled — partial unique index para NULL levels), `cell_prompt_templates` (prompts reutilizables, 1 default por cell_type), `llm_provider_keys` (keys cifradas Fernet en TEXT).
+  - **Células configurables**: el cron hardcoded del main loop se reemplaza por scheduler croniter que lee `cell_task_configs`. Floor de 15min anti-storm. Las células builtin honran model/provider/template del config vía contextvar `_active_cell` (resuelto 1 vez por run en `_run_from_config`/trigger, leído por `_llm_call` y los prompt-builders). 4 prompts builtin seedeados como templates editables (weekly consolidation, higher consolidation, foresight, skill). CASE_STRUCTURE no wireado (deuda).
+  - **Acceso a clusters**: `POST /api/v1/clusters/search` (cosine centroids + BM25 labels, regla "mesa": sin agent_identifier los no-super solo ven SIN_AUTOR). `GET /api/v1/clusters/telescopic` (cadena fractal weekly→yearly para boot). `POST /search` + `cluster_mode` (none/include/mixed, `merged_results` union type memoria+cluster con score normalizado memory=1.0 cluster=0.8).
+  - **Provider keys**: `crypto.py` (Fernet wrapper, valida key en startup), `providers.py` CRUD super-only (cifra al escribir, enmascara al leer "sk-...last4"). Model router `_llm_call_routed` (deepseek + anthropic, DB key → env fallback, degradación diagnóstica en rotación).
+  - **Handler genérico**: cell_type custom → `_run_generic_cell` (template + agent context + model + store as memory). Trigger acepta cualquier cell_type (regex `^[a-z0-9_]+$`).
+  - **MCP**: 6 tools nuevas (search_clusters, list_clusters, read_cluster, get_briefing, get_telescopic_view, narrate_cluster) + cluster_mode en search → 38 total. SDK ecodb-langchain: 13 tools nativas + 38 via MCP parity (auto-sync).
+  - **Dashboard "Memory Agent"**: página standalone, 4 tabs (Briefing/Configs/Clusters/Telemetry), SSE live, editor de templates.
+  - **Seguridad**: `_safe_format` (formatter que bloquea traversal `{x.__class__}`), ENCRYPTION_KEY validado en startup + generado por setup.sh/ps1, cluster sources scoped por agent_id, httpx log pinned WARNING.
+  - **Modelo de células**: `deepseek-v4-pro` (NO deepseek-chat). Es modelo de razonamiento — lento (minutos por narrativa larga). `CELL_LLM_TIMEOUT` default None (sin timeout; recover_stuck_runs 60min es el backstop). Set a segundos para re-activar cap.
+  - **3 prompts higher separados** (no comparten): `CellAgent Monthly` (1500-2000 palabras, 5 arcos, textura reciente), `CellAgent Quarterly` (2500-4000, qué patrones persistieron, arco de estación), `CellAgent Yearly` (4000-6000, transformación: quién eras vs quién eres). Naturaleza distinta por nivel. Seedeados en `sql/seed_higher_prompts.sql` (idempotente, ON CONFLICT DO UPDATE) + rewire de configs monthly/quarterly/yearly. Weekly usa `CellAgent v3 Weekly` (150-300 palabras por cluster).
+  - **Telescopic oldest-first**: `GET /clusters/telescopic` devuelve cada nivel de más antiguo a más reciente (period_end ASC de los N más recientes). Orden de boot: yearly→quarterly→monthly→weekly→`recent_days` (últimos 3 días raw de memorias). Para cargar memoria fractal en el arranque del agente.
+  - **Equipo**: workflow-construccion v5. Hilo (arquitectónico: T1/T5/T7/T8/T10/T11 + rewire P1 + 3 prompts), code (mecánico: T2/T3/T4/T6/T9/T12/T13 + clase BH), Lienzo (dashboard + README), code+adv-code+adv-seg+verificador (5 loops adversariales). Clase de bug BH1/BH2 cazada exhaustivamente: 3 grant mismatches (narrative/visibility/cell_runs prompt_version+model) que rompían consolidation programada + custom cells en silencio; routing-vs-recording (model/prompt_version); idempotency inestable. Fresh install path verificado APPROVE. D1 tests 20/20 in-container.
+  - **Deuda v1.3 pendiente**: CASE_STRUCTURE wiring, template versioning, RLS provider keys (riesgo aceptado single-tenant), last_run por-level (IC1, aceptado), cell_generated marker advisory (no enforced — trigger BEFORE recomendado pero diferido), _fail_run swallows error string a "" (BH-class observación), deepseek-reasoner no consumible via cell path (response format difiere).
 
 ## Memory types
 
@@ -326,26 +374,34 @@ Tipos disponibles en `memory_type` enum: `momento`, `decision`, `acuerdo`, `tecn
 Determines clustering threshold: narrative=0.45 (more permissive), work=0.55 (stricter).
 Set via `PATCH /agents/{identifier}` with `{"cognition_class": "narrative"}`.
 
-## Authorship frontier
+## Authorship frontier (updated dia 99)
 
-The `narrative` column in `memory_clusters` can only be written by the agent owner (via `PUT /clusters/{id}/narrate`). The cell worker (ecodb_cell role) is blocked at 3 levels:
-1. **GRANT column-level**: PostgreSQL rejects INSERT/UPDATE on narrative for ecodb_cell
-2. **CI test**: verifies the GRANT in every deploy
-3. **API check**: PUT /narrate verifies agent ownership in Python
+The `narrative` column in `memory_clusters` is written by two paths:
+1. **CellAgent (automated)**: cell_worker writes narrative directly during consolidation. Clusters auto-approved as `active`. Marked with `metadata.cell_generated=true` + `metadata.cell_agent="{ident}.memoria"`. The cell worker uses the API pool (ecodb role) when triggered via `POST /cells/trigger`, or ecodb_cell role when running as standalone container.
+2. **Agent owner (manual)**: `PUT /clusters/{id}/narrate` — verifies agent ownership in Python.
 
-No trigger guard (pg_restore compatibility).
+Design pivot dia 99: the cell IS part of the agent (not external). Guardrail: reflexiona sin actuar — produces narratives but doesn't modify memories, communicate, or make decisions. Identity loaded fresh each execution.
+
+The GRANT column-level restriction on ecodb_cell for narrative still exists in the DB schema but is bypassed when the trigger endpoint runs cell functions in the API process (ecodb role). This is intentional — manual triggers are super-only.
 
 ## Deuda técnica v2.0
 
-| # | Item | Severity |
-|---|------|----------|
-| D7 | _paginate duplicated in 4 files (cases, skills, clusters, cells) | LOW |
-| D8-D9 | CaseResponse, TensionAction duplicated across files | LOW |
-| D10 | `total` in list responses = page count, not DB total | LOW |
-| D11 | PATCH /agents no audit_log | LOW |
-| D15 | Tension cooldown written but not enforced at API level (cell enforces) | LOW |
-| — | Cell worker cron assumes always-on server. Needs manual triggers from dashboard | MEDIUM |
-| — | Dashboard pages for cluster narration, cell management, agent config | MEDIUM |
+| # | Item | Severity | Estado |
+|---|------|----------|--------|
+| ~~D7~~ | ~~_paginate duplicated~~ | ~~LOW~~ | RESOLVED dia 99: pagination.py |
+| ~~D8-D9~~ | ~~CaseResponse/TensionAction duplicated~~ | ~~LOW~~ | RESOLVED dia 99: shared_models.py |
+| ~~D10~~ | ~~total = page count~~ | ~~LOW~~ | RESOLVED dia 99: COUNT(*) query |
+| ~~D11~~ | ~~PATCH /agents no audit_log~~ | ~~LOW~~ | RESOLVED dia 99 |
+| D15 | Tension cooldown written but not enforced at API level | LOW | Abierto |
+| ~~CRON~~ | ~~Cell worker cron assumes always-on~~ | ~~MEDIUM~~ | RESOLVED dia 99: trigger + catch-up |
+| ~~SDK~~ | ~~SDK separado vs integrado~~ | ~~MEDIUM~~ | RESOLVED dia 99: Helena construyó SDK real con cell engine LangChain |
+| ~~JSONB~~ | ~~JSONB string en briefing.py, stats.py, clusters.py~~ | ~~HIGH~~ | RESOLVED dia 99: _parse_jsonb aplicado en los 3 archivos |
+| VS3 | LLM prompt injection — _sanitize + random delimiters applied | MEDIUM | Parcial |
+| DASH | Dashboard pages for clusters, cells, agent config | MEDIUM | Necesita sesión Lienzo |
+| TESTS | pytest-asyncio event loop errors (252 tests) | MEDIUM | Abierto |
+| CAL | Textos calibración en EcoDB como memorias taggeadas | LOW | Congelado |
+| SEARCH_CLUSTERS | No hay búsqueda semántica sobre clusters ni MCP tools para clusters/briefing | HIGH | Diseño pendiente — brief en 2026-06-09_clusters_acceso_brief.md |
+| BH-ClassB | Marcador `metadata.cell_generated` no forzado por DB (sin BEFORE trigger en memory_clusters) | LOW | Diferido a propósito — single-tenant, requiere compromiso de credenciales DB; un trigger incondicional marcaría mal las escrituras del owner vía `PUT /clusters/{id}/narrate`. La autoría se garantiza vía carga de identidad + marcador en el código de la célula, no a nivel DB. |
 
 ## Licencia
 

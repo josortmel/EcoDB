@@ -943,12 +943,12 @@ async def review_alias_candidate(
             from graph import merge_entities as _merge_entities
             try:
                 if body.reverse:
-                    merge_result = await _merge_entities(
+                    await _merge_entities(
                         row["target_node_id"], source_node["id"],
                         int(actor["sub"]), body.reason, pool,
                     )
                 else:
-                    merge_result = await _merge_entities(
+                    await _merge_entities(
                         source_node["id"], row["target_node_id"],
                         int(actor["sub"]), body.reason, pool,
                     )
@@ -1039,7 +1039,6 @@ async def merge_entities_endpoint(
             actor.get("organization_id"),
         )
         if body.keep_as_alias:
-            from graph import _ensure_node
             try:
                 await conn.execute("""
                     INSERT INTO entity_alias_candidates (source_name, target_node_id, confidence, occurrences, status)

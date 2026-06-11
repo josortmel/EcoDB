@@ -20,7 +20,7 @@ IS_PRODUCTION = ENVIRONMENT == "production"
 IS_DEVELOPMENT = ENVIRONMENT == "development"
 
 API_VERSION = os.environ.get("API_VERSION", "0.9.0")
-SCHEMA_VERSION = "5.2.0"
+SCHEMA_VERSION = "5.3.0"
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -129,6 +129,14 @@ def validate_production_secrets() -> None:
                 f"DEEPSEEK_URL host not allowed in production: {parsed_ds.hostname!r}. "
                 f"Must end with deepseek.com"
             )
+    import crypto
+    if not crypto.encryption_key_ok():
+        raise RuntimeError(
+            "ENCRYPTION_KEY not set or invalid in ENVIRONMENT=production. "
+            "Required to encrypt LLM provider keys. Generate with: "
+            "python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\""
+        )
     _broadcast_secret = os.environ.get("INTERNAL_BROADCAST_SECRET", "")
     if not _broadcast_secret or len(_broadcast_secret) < 16:
         import logging

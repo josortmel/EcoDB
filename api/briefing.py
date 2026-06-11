@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from clusters import _parse_jsonb
+
 from auth import get_current_user
 from clusters import ClusterSummary
 from db import get_pool
 from permissions import precompute_read_visibility, check_read_memory, can_write_memory, resolve_agent_for_actor
+from shared_models import TensionAction
 
 
 def _safe_uuid_list(items: list) -> list[UUID]:
@@ -78,19 +80,6 @@ class DismissBody(BaseModel):
         return v
 
 
-class TensionAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    action: str = Field(..., pattern="^(resolve|dismiss)$")
-    note: Optional[str] = Field(None, max_length=1000)
-
-    @field_validator("note")
-    @classmethod
-    def _no_nulls(cls, v):
-        if v is not None and "\x00" in v:
-            raise ValueError("note contains null bytes")
-        return v
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -99,7 +88,7 @@ def _briefing_score(item, now):
     delta_days = max((item["foresight_start"] - now).total_seconds() / 86400, 1.0)
     urgency = 1.0 / delta_days
     evidence = 1.0 if item.get("content") and len(item["content"]) > 20 else 0.5
-    meta = item.get("metadata") or {}
+    meta = _parse_jsonb(item.get("metadata"))
     confidence = float(meta.get("foresight_confidence", 1.0))
     usefulness = 1.0
     if item.get("access_count", 0) == 0:
@@ -184,7 +173,7 @@ async def get_briefing(
                 ORDER BY period_end DESC LIMIT $3
             """, aid, lvl, lim)
             telescopic[_level_key[lvl]] = [
-                ClusterSummary(**dict(r)) for r in rows
+                ClusterSummary(**{**dict(r), "pattern_flags": _parse_jsonb(r.get("pattern_flags"))}) for r in rows
             ]
 
         foresight_items = [
@@ -198,21 +187,20 @@ async def get_briefing(
             ) for f in foresights
         ]
 
-        tension_items = [
-            TensionItem(
+        tension_items = []
+        for t in tensions:
+            meta = _parse_jsonb(t.get("metadata"))
+            tension_items.append(TensionItem(
                 id=t["id"],
-                observed_trait=(t.get("metadata") or {}).get("observed_trait", ""),
-                declared_trait=(t.get("metadata") or {}).get("declared_trait", ""),
-                tension_type=(t.get("metadata") or {}).get("tension_type", ""),
-                evidence_memory_ids=_safe_uuid_list(
-                    (t.get("metadata") or {}).get("evidence_memory_ids", [])
-                ),
+                observed_trait=meta.get("observed_trait", ""),
+                declared_trait=meta.get("declared_trait", ""),
+                tension_type=meta.get("tension_type", ""),
+                evidence_memory_ids=_safe_uuid_list(meta.get("evidence_memory_ids", [])),
                 created_at=t["created_at"],
-                status=(t.get("metadata") or {}).get("tension_status", "open"),
-            ) for t in tensions
-        ]
+                status=meta.get("tension_status", "open"),
+            ))
 
-        pending_items = [ClusterSummary(**dict(r)) for r in pending]
+        pending_items = [ClusterSummary(**{**dict(r), "pattern_flags": _parse_jsonb(r.get("pattern_flags"))}) for r in pending]
 
     return BriefingResponse(
         agent_identifier=agent_identifier,

@@ -1,33 +1,31 @@
 """Foresights endpoint — metacognicion v2.0 §7.5."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from auth import get_current_user
+from briefing import ForesightItem, _briefing_score
 from db import get_pool
+from pagination import paginate
 from permissions import resolve_agent_for_actor, precompute_read_visibility, check_read_memory
 
 
 router = APIRouter(prefix="/foresights", tags=["foresights"])
 
 
-async def _paginate(conn, base_sql, params, limit, cursor=None):
-    if cursor:
-        try:
-            params.append(datetime.fromisoformat(cursor))
-        except (ValueError, TypeError):
-            raise HTTPException(422, "invalid cursor format")
-        base_sql += f" AND created_at < ${len(params)}"
-    base_sql += f" ORDER BY created_at DESC LIMIT ${len(params)+1}"
-    params.append(limit + 1)
-    rows = await conn.fetch(base_sql, *params)
-    has_next = len(rows) > limit
-    items = rows[:limit]
-    next_cursor = items[-1]["created_at"].isoformat() if has_next and items else None
-    return items, next_cursor
+def _to_foresight_item(row, now) -> ForesightItem:
+    item = dict(row)
+    return ForesightItem(
+        memory_id=item["id"],
+        content=item["content"],
+        foresight_start=item["foresight_start"],
+        foresight_end=item["foresight_end"],
+        urgency_score=_briefing_score(item, now),
+        evidence=item["content"][:200] if item["content"] else "",
+    )
 
 
 @router.get("")
@@ -39,6 +37,7 @@ async def list_foresights(
     actor: dict = Depends(get_current_user),
 ) -> dict:
     pool = await get_pool()
+    now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         agent = await resolve_agent_for_actor(conn, actor, agent_identifier)
         if status == "active":
@@ -54,7 +53,10 @@ async def list_foresights(
             WHERE agent_id = $1 AND foresight_start IS NOT NULL {where_extra}
         """
         params: list = [agent["id"]]
-        items, next_cursor = await _paginate(conn, base_sql, params, limit, cursor)
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM memories WHERE agent_id = $1 AND foresight_start IS NOT NULL {where_extra}",
+            agent["id"])
+        items, next_cursor = await paginate(conn, base_sql, params, limit, cursor)
         vis = await precompute_read_visibility(conn, actor)
-        visible = [dict(r) for r in items if check_read_memory(vis, r)]
-    return {"items": visible, "total": len(visible), "cursor_next": next_cursor}
+        visible = [_to_foresight_item(r, now) for r in items if check_read_memory(vis, r)]
+    return {"items": visible, "total": total, "cursor_next": next_cursor}

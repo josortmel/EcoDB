@@ -33,7 +33,7 @@ from embeddings_client import embed_image, embed_text
 from permissions import no_null_bytes as _no_null_bytes
 from permissions import visible_project_ids, visible_workspace_ids
 import settings
-from settings import ENABLE_BM25, ENABLE_BM25_EXPANSION, ENABLE_STOP_ENTITIES_DYNAMIC, ENABLE_TRUST_TIERS, ENABLE_WEIGHT_DYNAMIC, GAMR_WEIGHTS_BM25, WEIGHT_ALPHA
+from settings import ENABLE_BM25, ENABLE_BM25_EXPANSION, ENABLE_STOP_ENTITIES_DYNAMIC, ENABLE_TRUST_TIERS, ENABLE_WEIGHT_DYNAMIC, GAMR_WEIGHTS_BM25
 
 async def generate_hypothetical(query_text: str) -> str | None:
     """Generate a hypothetical answer for HyDE. Returns None if LLM unavailable."""
@@ -704,6 +704,8 @@ class SearchRequest(BaseModel):
     tags: Optional[list[str]] = Field(None, max_length=20, description="Filtrar por tags (AND logic). Max 20 tags, each max 128 chars.")
     include_dormant: bool = Field(False, description="Si true, incluye memorias dormant/archived en resultados. Default false.")
     deep_factor: int = Field(2, ge=1, le=10, description="Internal pool multiplier. fetch_k = limit * deep_factor. Default 2.")
+    cluster_mode: Optional[Literal["none", "include", "mixed"]] = Field(
+        "none", description="Cluster enrichment: none=no clusters, include=add related_clusters, mixed=merged_results interleaving memories+clusters")
 
     @field_validator("query_text")
     @classmethod
@@ -795,7 +797,7 @@ class SearchInDocumentRequest(BaseModel):
         return _no_null_bytes(v, "query_text")
 
 
-async def _get_related_clusters(conn, query_embedding, query_text, actor):
+async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=3):
     actor_id = int(actor["sub"])
     vis_pids = await visible_project_ids(conn, actor)
     if not vis_pids:
@@ -818,13 +820,20 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor):
               )
             ORDER BY (1 - (mc.centroid <=> $1::vector)
                       + ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4))) DESC
-            LIMIT 3
-        """, query_embedding, actor_id, list(vis_pids), query_text)
+            LIMIT $5
+        """, query_embedding, actor_id, list(vis_pids), query_text, limit)
         return [dict(r) for r in rows]
     except Exception as _rc_err:
         import logging as _rc_log
         _rc_log.getLogger("ecodb.search").warning("related_clusters query failed: %r", _rc_err)
         return []
+
+
+class MergedResultItem(BaseModel):
+    result_type: Literal["memory", "cluster"] = Field(..., description="Discriminator for union type")
+    score: float = Field(..., description="Normalized 0-1 score for ranking")
+    memory: Optional[SearchResult] = None
+    cluster: Optional[dict] = None
 
 
 class SearchResponse(BaseModel):
@@ -834,10 +843,12 @@ class SearchResponse(BaseModel):
     count: int = Field(..., description="Resultados devueltos.")
     limit: int
     duration_ms: float
+    cluster_mode: str = Field("none", description="Echo of requested cluster_mode")
     graph_context: list[dict] = Field(default_factory=list, description="Entidades del grafo usadas en expansion")
     contradictions: list[ContradictionPair] = Field(default_factory=list, description="Pares de memorias potencialmente contradictorias")
     warnings: list[str] = Field(default_factory=list, description="Machine-parseable warnings about query behavior")
     related_clusters: list[dict] = Field(default_factory=list, description="Clusters related to query by centroid + label BM25")
+    merged_results: Optional[list[MergedResultItem]] = Field(None, description="Interleaved memories+clusters when cluster_mode=mixed")
     audit_id: Optional[str] = Field(
         None,
         description="UUID del audit_log row si expand_scope=true (.",
@@ -1043,7 +1054,6 @@ async def search_memories(
 
         # check_visibility: visibility filter unificado con expand_scope opt-in.
         # Reemplaza el filter Python-built de .
-        check_idx_start = idx
         where_parts.append(
             f"check_visibility("
             f"m.user_id, m.visibility::text, m.workspace_id, m.project_id, "
@@ -1406,10 +1416,30 @@ async def search_memories(
     }, org_id=_actor_org)
 
     _related = []
+    _merged = None
+    _cluster_mode = body.cluster_mode or "none"
+
     if query_vec is not None and body.query_text:
         async with pool.acquire() as _rc_conn:
-            _related = await _get_related_clusters(
-                _rc_conn, query_vec, body.query_text, actor)
+            if _cluster_mode == "include":
+                _related = await _get_related_clusters(
+                    _rc_conn, query_vec, body.query_text, actor, limit=10)
+            elif _cluster_mode == "mixed":
+                _related = await _get_related_clusters(
+                    _rc_conn, query_vec, body.query_text, actor, limit=10)
+                _merged = []
+                for r in results:
+                    _merged.append(MergedResultItem(
+                        result_type="memory", score=r.score, memory=r))
+                for c in _related:
+                    _merged.append(MergedResultItem(
+                        result_type="cluster",
+                        score=float(c.get("vector_score", 0)) * 0.8,
+                        cluster=c))
+                _merged.sort(key=lambda x: x.score, reverse=True)
+            else:
+                _related = await _get_related_clusters(
+                    _rc_conn, query_vec, body.query_text, actor)
 
     return SearchResponse(
         query=body.query_text or "(image query)",
@@ -1418,10 +1448,12 @@ async def search_memories(
         count=len(results),
         limit=body.limit,
         duration_ms=round((time.time() - t0) * 1000, 2),
+        cluster_mode=_cluster_mode,
         graph_context=graph_context,
         contradictions=contradictions,
         warnings=_search_warnings,
         related_clusters=_related,
+        merged_results=_merged,
         audit_id=audit_uuid,
     )
 
@@ -1456,7 +1488,6 @@ async def search_in_document(
     t0 = time.time()
     pool = await get_pool()
     is_super = bool(actor.get("is_super"))
-    user_id_actor = int(actor["sub"])
 
     async with pool.acquire() as conn:
         doc = await conn.fetchrow(

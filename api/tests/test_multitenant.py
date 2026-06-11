@@ -9,7 +9,6 @@ Pre-requisites:
 - API running on localhost:8080
 """
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -25,7 +24,7 @@ os.environ.setdefault("ENVIRONMENT", "development")
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from main import create_app  # noqa: E402
-from auth import generate_api_key, hash_api_key  # noqa: E402
+from auth import generate_api_key  # noqa: E402
 import asyncpg  # noqa: E402
 
 

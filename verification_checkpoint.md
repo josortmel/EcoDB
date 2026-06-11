@@ -1,75 +1,53 @@
-# verification_checkpoint — 2026-06-05 12:15 Europe/Madrid
+# verification_checkpoint — Memory Agent v1.3 — 2026-06-11
 
-## Metadatos
-- **Proyecto**: C:\Users\Admin\Documents\EcoDB
-- **Fecha y hora**: 2026-06-05 12:15 CET
-- **Autor**: Prima (Arquitecto)
-- **Brief de referencia**: consolidacion_v1_brief.md v2
+## Real system state
 
----
+### Docker services (all healthy)
+ecodb-api :8080, ecodb-postgres :5435, ecodb-worker, ecodb-ner :8092, ecodb-embeddings, ecodb-mcp :8091
 
-## 1. Estado real del sistema (comandos ejecutados)
+### Schema
+- schema_version: 5.2.0
+- 101 API endpoints (OpenAPI verified)
+- memory_clusters: 17 columns (id, agent_id, workspace_id, level, label, detail, narrative, centroid vector(512), member_ids UUID[], source_ids UUID[], pattern_flags jsonb, metadata jsonb, period_start, period_end, created_at, status, narrated_at)
+- cell_runs: 14 columns (id, cell_type, agent_id, model, prompt_version, started_at, finished_at, status, tokens_used, cost_usd, items_created, errors jsonb, metrics jsonb, created_at)
+- agents: 7 columns (id, identifier, user_id, active, last_seen, created_at, cognition_class)
+- NO cell_task_configs table (to be created)
+- NO cell_prompt_templates table (to be created)
 
-### schema_version storage
-- `init.sql:46-50`: TABLE `schema_version` (version TEXT PK, applied_at TIMESTAMPTZ, notes TEXT). NOT a GUC.
-- Query correcta: `SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1`
+### Agents
+| id | identifier | active | cognition_class |
+|----|-----------|--------|-----------------|
+| 1 | Eco | true | narrative |
+| 2 | Prima | true | narrative |
+| 3 | Hilo | true | narrative |
+| 4 | Lienzo | true | narrative |
+| 5 | Faro | true | work |
+| 6 | SIN_AUTOR | true | work |
+| 7 | Escribano | true | work |
 
-### Migration files — transaction wrapping
-- `migrate_3_0h_multimodal.sql`: NO BEGIN/COMMIT — runs in autocommit
-- `migrate_5.0.1_to_5.1.0.sql`: HAS `BEGIN;` on line 3
-- `migrate_5.1.0_to_5.1.1.sql`: HAS `BEGIN;` on line 1
-- `trigger_age_sync.sql`: NO BEGIN/COMMIT — runs in autocommit
-- **Implication**: runner MUST wrap each file in `conn.transaction()` for atomicity. Files with own BEGIN create nested tx (PG WARNING, safe).
+### Clusters
+- 229 weekly active + 4 monthly active = 233 total
+- Prima: 56 weekly + 1 monthly. Avg cluster size: 8.5 members
+- All clusters status='active', all narrated
 
-### settings.py state
-- Line 18: `ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")` — defaults to production (B8)
-- Line 22: `API_VERSION = os.environ.get("API_VERSION", "0.9.0")` — docstring says "0.1.0" (V8)
-- Line 23: `SCHEMA_VERSION = "5.1.0"` — drift, should be "5.1.1" (V1)
-- Line 42: `_default_origins = "http://localhost:8080,http://localhost:8081"` — 8081 orphan (V7)
-- Line 79-124: `validate_production_secrets()` validates JWT_SECRET, API_KEY_PEPPER, CORS, EMBEDDINGS_URL, LLAMA_CPP_URL. Does NOT validate INTERNAL_BROADCAST_SECRET.
+### Cell runs
+- 30 runs in 30 days: 28 consolidation, 2 foresight, 0 skill_distillation
+- 0 errors in 24h. Last consolidation: 2026-06-09. No cost tracking.
 
-### main.py lifespan
-- Line 71: `settings.validate_production_secrets()` — first call
-- Line 91-103: `load_dictionary_to_cache(pool)` — uses `get_pool()` at line 93
-- **Runner insertion point**: after line 71, before line 91. Runner calls `get_pool()` itself.
+### Existing search cluster integration
+`_get_related_clusters()` in search.py: cosine + BM25 on centroids/labels, top 3, status='active', user-scoped.
 
-### Dockerfile.api
-- Line 23: `mkdir -p /app/media && chown -R apiuser:apiuser /app/.cache /app/media` — chown at build time only
-- Line 31: Explicit COPY of .py files — NO sql/ directory
-- Line 40: `USER apiuser` — permanent, no entrypoint override
-- Line 52: CMD uvicorn — no ENTRYPOINT defined
-- **gosu**: NOT installed in image
+### Cell worker config (current — all env vars)
+CELL_MODEL=deepseek-chat, THRESHOLD_NARRATIVE=0.45, THRESHOLD_WORK=0.55, MAX_MEMORIES=500, MIN_CLUSTER=2. Cron hardcoded in main().
 
-### INTERNAL_BROADCAST_SECRET
-- `events.py:21`: `os.environ.get("INTERNAL_BROADCAST_SECRET", "")` — defaults to ""
-- `events.py:157`: `if _INTERNAL_BROADCAST_SECRET and secret_header == _INTERNAL_BROADCAST_SECRET`
-- `worker.py:114`: same pattern
-- `docker-compose.yml:124,215`: hardcoded default `fa8b0c02ef55b172afdf48ecc32330ae`
+### MCP: 32 tools, 0 for clusters/briefing/cells.
 
-### Dashboard errMsg.ts
-- Lines 24-36: handles 429, 403, 422 specifically. All other errors (including 500) fall to `fallback` parameter (generic message from caller). No info disclosure — but misleading message for 500 ("Couldn't reach EcoDB" when backend DID respond).
+## Findings for Spec
 
-### .env.example
-- EXISTS (62 lines). Has DB_PASSWORD, JWT_SECRET, API_KEY_PEPPER, CORS, LLM, reranker.
-- Does NOT have INTERNAL_BROADCAST_SECRET.
-
----
-
-## 2. Contadores reales
-
-- Migration SQL files in sql/: init.sql + 4 migrations + 2 non-idempotent (fase4, fase5) + 2 debt files + 1 pre-migrate
-- Docker-compose services: postgres, embeddings, api, mcp, ner, worker (with-ingestion), llm (with-llm)
-- Dashboard: Electron + Vite + React + TypeScript, package.json version 1.1.0
-
----
-
-## 3. Hallazgos concretos que el Spec debe citar
-
-- **H1**: schema_version es TABLE no GUC (init.sql:46-50). Spec §3 query must use SELECT FROM table.
-- **H2**: 2 of 4 migration files lack BEGIN/COMMIT. Runner must wrap in transaction.
-- **H3**: validate_production_secrets() is at settings.py:79-124. Adding INTERNAL_BROADCAST_SECRET goes here.
-- **H4**: Dockerfile has no ENTRYPOINT, USER apiuser at line 40. D10 requires entrypoint.sh + gosu install.
-- **H5**: errMsg.ts already guards against info disclosure (only 422 shows detail). Fix is adding 5xx case with server-side message, not removing the guard.
-- **H6**: .env.example at root, 62 lines. INTERNAL_BROADCAST_SECRET must be added.
-- **H7**: Runner insertion point: main.py between line 71 (validate_production_secrets) and line 91 (dictionary cache). get_pool() available — called at line 93, runner calls it independently.
-- **H8**: gosu not in image — must be installed via apt-get in Dockerfile build stage.
+F1: _get_related_clusters() already exists — cluster_mode=include extends it, not duplicates.
+F2: agents table is lean (7 cols). Dashboard agent management may need display_name, description.
+F3: cell_runs.prompt_version exists but always null — templates should populate this.
+F4: 41 open tensions, 0 resolved. Tension management in Briefing tab.
+F5: skill_distillation never ran. Seed config should enable it.
+F6: trigger endpoint has hardcoded 3 cell_types regex — must change for extensibility.
+F7: PATCH /agents/{identifier} exists — covers part of agent config.

@@ -70,6 +70,15 @@ if (-not (Select-String -Path .env -Pattern "INTERNAL_BROADCAST_SECRET" -Quiet -
     Add-Content -Path .env -Value "INTERNAL_BROADCAST_SECRET=$broadcastSecret" -Encoding utf8
 }
 
+# ENCRYPTION_KEY for LLM provider key encryption (Fernet = urlsafe base64 of 32 random bytes).
+# Required by providers API + cell worker. Without it, POST /providers 500s.
+if (-not (Select-String -Path .env -Pattern "ENCRYPTION_KEY" -Quiet -ErrorAction SilentlyContinue)) {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    $encKey = [Convert]::ToBase64String($bytes).Replace('+','-').Replace('/','_')
+    Add-Content -Path .env -Value "ENCRYPTION_KEY=$encKey" -Encoding utf8
+}
+
 if (-not (Test-Path media)) { New-Item -ItemType Directory -Path media | Out-Null }
 Info "Created media/ directory for image storage."
 

@@ -22,3 +22,7 @@ sentence-transformers>=3.0.0
 # Cell worker — metacognition v2.0
 numpy>=1.26
 scipy>=1.12
+
+# Memory Agent v1.3 — cron validation + provider key encryption
+croniter>=2.0
+cryptography>=42.0

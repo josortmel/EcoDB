@@ -8,3 +8,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export function assertUuid(id: string): void {
   if (!UUID_RE.test(id)) throw new ApiError(0, 'invalid_id');
 }
+
+// Numeric server ids: the TS `number` type does not survive JSON deserialization,
+// so guard the runtime value before interpolating it into a path (same intent as
+// assertUuid for UUID paths).
+export function assertIntId(id: number): void {
+  if (!Number.isInteger(id)) throw new ApiError(0, 'invalid_id');
+}

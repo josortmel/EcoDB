@@ -31,7 +31,7 @@ import time
 from typing import Optional
 
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException
 
 import settings
 from db import get_pool

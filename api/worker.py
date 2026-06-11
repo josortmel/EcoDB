@@ -179,13 +179,11 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
 
         # Re-index: clear old chunks if present (Task 4.13 Part A)
         linked_memory_ids: list[str] = []
-        is_reindex = False
         async with pool.acquire() as conn:
             existing_chunks = await conn.fetchval(
                 "SELECT count(*) FROM document_chunks WHERE document_id = $1", doc_id
             )
             if existing_chunks > 0:
-                is_reindex = True
                 await conn.execute(
                     "DELETE FROM document_chunks WHERE document_id = $1", doc_id
                 )

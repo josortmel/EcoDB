@@ -2,30 +2,19 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 
 from auth import get_current_user
 from db import get_pool
+from pagination import paginate
 from permissions import resolve_agent_for_actor, precompute_read_visibility, check_read_memory
+from shared_models import CaseResponse
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
-
-
-class CaseResponse(BaseModel):
-    id: UUID
-    content: str
-    task_type: Optional[str] = None
-    steps: Optional[list[str]] = None
-    result: Optional[str] = None
-    success: Optional[bool] = None
-    skill_id: Optional[UUID] = None
-    created_at: datetime
 
 
 def _safe_uuid(val) -> UUID | None:
@@ -35,23 +24,6 @@ def _safe_uuid(val) -> UUID | None:
         return UUID(val)
     except (ValueError, AttributeError):
         return None
-
-
-async def _paginate(conn, base_sql, params, limit, cursor=None):
-    if cursor:
-        try:
-            params.append(datetime.fromisoformat(cursor))
-        except (ValueError, TypeError):
-            from fastapi import HTTPException
-            raise HTTPException(422, "invalid cursor format")
-        base_sql += f" AND created_at < ${len(params)}"
-    base_sql += f" ORDER BY created_at DESC LIMIT ${len(params)+1}"
-    params.append(limit + 1)
-    rows = await conn.fetch(base_sql, *params)
-    has_next = len(rows) > limit
-    items = rows[:limit]
-    next_cursor = items[-1]["created_at"].isoformat() if has_next and items else None
-    return items, next_cursor
 
 
 @router.get("")
@@ -75,8 +47,10 @@ async def list_cases(
             params.append(json.dumps({"success": success}))
             conditions.append(f"metadata @> ${len(params)}::jsonb")
         where = " AND ".join(conditions)
-        items, next_cursor = await _paginate(conn,
-            f"SELECT * FROM memories WHERE {where}", params, limit, cursor)
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM memories WHERE {where}", *params)
+        items, next_cursor = await paginate(conn,
+            f"SELECT * FROM memories WHERE {where}", list(params), limit, cursor)
         vis = await precompute_read_visibility(conn, actor)
         visible = []
         for r in items:
@@ -92,4 +66,4 @@ async def list_cases(
                     skill_id=_safe_uuid(meta.get("skill_id")),
                     created_at=r["created_at"],
                 ))
-    return {"items": visible, "total": len(visible), "cursor_next": next_cursor}
+    return {"items": visible, "total": total, "cursor_next": next_cursor}

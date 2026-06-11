@@ -813,7 +813,6 @@ async def get_subgraph(
                 raise HTTPException(404, f"node '{center}' not found. Did you mean '{suggestion}'?")
             raise HTTPException(404, f"node '{center}' not found")
 
-        center_id = center_row["id"]
         params = json.dumps({"center_name": center, "depth": depth})
 
         # Cypher: traversal hasta depth hops desde center

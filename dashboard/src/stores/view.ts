@@ -8,6 +8,7 @@ export type ViewId =
   | 'decisions'
   | 'ingestion'
   | 'ontology'
+  | 'memory-agent'
   | 'settings'
   | 'insights';
 

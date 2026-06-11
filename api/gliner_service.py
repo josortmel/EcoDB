@@ -128,9 +128,7 @@ def _match_dictionary(text: str) -> tuple[list[dict], str]:
     """
     if not text or not _dictionary_cache:
         return [], text
-    # Normalizar texto del usuario igual que name_normalized — accent-insensitive.
-    text_normalized = normalize_name(text)
-    # Pero necesitamos matches sobre el texto ORIGINAL para preservar la subcadena
+    # Necesitamos matches sobre el texto ORIGINAL para preservar la subcadena
     # con su tilde/case. Solucion: normalizar texto, hacer match sobre normalizado,
     # extraer offsets, sustituir en texto original con esos offsets.
     # Esto funciona porque normalize_name preserva longitud (NFKD descompone pero

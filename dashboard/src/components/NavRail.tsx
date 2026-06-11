@@ -61,6 +61,12 @@ const ICONS: Record<ViewId, (p: IconProps) => ReactNode> = {
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
     </>,
   ),
+  'memory-agent': icon(
+    <>
+      <path d="M12 2a7 7 0 017 7c0 2.5-1.2 4.7-3 6v2a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2c-1.8-1.3-3-3.5-3-6a7 7 0 017-7z" />
+      <path d="M9 21h6M10 17v-2M14 17v-2" strokeLinecap="round" />
+    </>,
+  ),
   insights: icon(<path d="M4 19V5M4 19h16M8 16l3-4 3 2 4-6" strokeLinecap="round" strokeLinejoin="round" />),
 };
 
@@ -72,13 +78,14 @@ const SECTION_COLOR: Record<ViewId, string> = {
   decisions: 'var(--sec-decisions)',
   ingestion: 'var(--sec-ingestion)',
   ontology: 'var(--sec-ontology)',
+  'memory-agent': 'var(--sec-memory-agent)',
   settings: 'var(--sec-settings)',
   insights: 'var(--sec-insights)',
 };
 
 const GROUPS: { key: 'workspace' | 'governance'; items: ViewId[] }[] = [
   { key: 'workspace', items: ['command', 'explorer', 'graph', 'decisions'] },
-  { key: 'governance', items: ['ingestion', 'ontology', 'settings'] },
+  { key: 'governance', items: ['ingestion', 'ontology', 'memory-agent', 'settings'] },
 ];
 
 function NavItem({ id }: { id: ViewId }) {

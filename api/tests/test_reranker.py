@@ -1,6 +1,5 @@
 """Tests for reranker module: loading, degradation, SHA pinning."""
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def test_reranker_disabled_by_env():

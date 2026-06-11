@@ -47,6 +47,7 @@
   --sec-ingestion: #4fa0a0;
   --sec-ontology: #8e78bc;
   --sec-settings: #8a8f9c;
+  --sec-memory-agent: #7a6bc7; /* indigo-violet — cognition; deliberately bluer/more saturated than --sec-ontology #8e78bc so the two read apart in the nav */
   --sec-insights: #d98c4a;
 
   /* Primary button — TERRACOTA, deliberately not orange (orange = signal only,

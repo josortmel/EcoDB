@@ -11,21 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from auth import get_current_user
 from db import get_pool
+from pagination import paginate
 from permissions import resolve_agent_for_actor, precompute_read_visibility, check_read_memory, can_read_memory
+from clusters import _parse_jsonb
+from shared_models import CaseResponse
 
 
 router = APIRouter(prefix="/skills", tags=["skills"])
-
-
-class CaseResponse(BaseModel):
-    id: UUID
-    content: str
-    task_type: Optional[str] = None
-    steps: Optional[list[str]] = None
-    result: Optional[str] = None
-    success: Optional[bool] = None
-    skill_id: Optional[UUID] = None
-    created_at: datetime
 
 
 class SkillCard(BaseModel):
@@ -70,23 +62,6 @@ def _safe_uuid_list(items: list) -> list[UUID]:
     return result
 
 
-async def _paginate(conn, base_sql, params, limit, cursor=None):
-    if cursor:
-        try:
-            params.append(datetime.fromisoformat(cursor))
-        except (ValueError, TypeError):
-            from fastapi import HTTPException
-            raise HTTPException(422, "invalid cursor format")
-        base_sql += f" AND created_at < ${len(params)}"
-    base_sql += f" ORDER BY created_at DESC LIMIT ${len(params)+1}"
-    params.append(limit + 1)
-    rows = await conn.fetch(base_sql, *params)
-    has_next = len(rows) > limit
-    items = rows[:limit]
-    next_cursor = items[-1]["created_at"].isoformat() if has_next and items else None
-    return items, next_cursor
-
-
 @router.get("")
 async def list_skills(
     agent_identifier: str = Query(..., min_length=1),
@@ -104,13 +79,17 @@ async def list_skills(
             params.append(json.dumps({"status": status}))
             conditions.append(f"metadata @> ${len(params)}::jsonb")
         where = " AND ".join(conditions)
-        items, next_cursor = await _paginate(conn,
-            f"SELECT * FROM memories WHERE {where}", params, limit, cursor)
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM memories WHERE {where}", *params)
+        items, next_cursor = await paginate(conn,
+            f"SELECT * FROM memories WHERE {where}", list(params), limit, cursor)
         vis = await precompute_read_visibility(conn, actor)
         visible = []
         for r in items:
             if check_read_memory(vis, r):
-                meta = r["metadata"] or {}
+                meta = _parse_jsonb(r["metadata"])
+                if not isinstance(meta, dict):
+                    meta = {}  # defensive: malformed/partial metadata never 500s the list
                 visible.append(SkillCard(
                     id=r["id"],
                     task_signature=meta.get("task_signature", ""),
@@ -124,7 +103,7 @@ async def list_skills(
                     created_at=r["created_at"],
                     updated_at=r["updated_at"],
                 ))
-    return {"items": visible, "total": len(visible), "cursor_next": next_cursor}
+    return {"items": visible, "total": total, "cursor_next": next_cursor}
 
 
 @router.get("/{skill_id}")
@@ -140,7 +119,7 @@ async def get_skill(
         vis = await precompute_read_visibility(conn, actor)
         if not check_read_memory(vis, mem):
             raise HTTPException(404)
-        meta = mem["metadata"] or {}
+        meta = _parse_jsonb(mem["metadata"])
         case_ids = meta.get("source_case_ids", [])
         source_cases = []
         if case_ids:
@@ -149,7 +128,7 @@ async def get_skill(
                 _safe_uuid_list(case_ids))
             for cr in case_rows:
                 if check_read_memory(vis, cr):
-                    cr_meta = cr["metadata"] or {}
+                    cr_meta = _parse_jsonb(cr["metadata"])
                     source_cases.append(CaseResponse(
                         id=cr["id"], content=cr["content"],
                         task_type=cr_meta.get("task_type"),

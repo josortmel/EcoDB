@@ -11,6 +11,7 @@ import { DecisionsInbox } from '../pages/DecisionsInbox';
 import { OntologyConsole } from '../pages/OntologyConsole';
 import { Ingestion } from '../pages/Ingestion';
 import { Settings } from '../pages/Settings';
+import { MemoryAgentPage } from '../pages/MemoryAgentPage';
 import { MemoryDrawer } from './MemoryDrawer';
 import { CommandPalette } from './CommandPalette';
 import { TemplateModal } from './TemplateModal';
@@ -96,6 +97,8 @@ export function AppShell() {
                 <OntologyConsole />
               ) : view === 'ingestion' ? (
                 <Ingestion />
+              ) : view === 'memory-agent' ? (
+                <MemoryAgentPage />
               ) : view === 'settings' ? (
                 <Settings />
               ) : (

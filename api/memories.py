@@ -41,7 +41,6 @@ from auth import get_current_user
 from db import get_pool
 from embeddings_client import embed_text
 from permissions import (
-    can_read_memory,
     can_write_memory,
     no_null_bytes as _no_null_bytes,
     visible_project_ids,

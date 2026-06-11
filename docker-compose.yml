@@ -99,8 +99,8 @@ services:
 
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     image: ecodb-api:0.24.0
     container_name: ecodb-api
     environment:
@@ -129,12 +129,17 @@ services:
       ENABLE_STOP_ENTITIES_DYNAMIC: "true"
       ENABLE_TENSION_DETECTION: "true"
       INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       RATE_LIMIT_SEARCH: "200"
       RATE_LIMIT_DEFAULT: "400"
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
       RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
       RERANKER_REVISION: ${RERANKER_REVISION:-c5ee24cb16019beea0893ab7796b1df96625c6b8}
       RERANK_FETCH_K: ${RERANK_FETCH_K:-50}
+      CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}
+      CELL_LLM_URL: ${CELL_LLM_URL:-https://api.deepseek.com}
+      CELL_LLM_KEY: ${CELL_LLM_KEY}
+      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-v4-pro}
     ports:
       - "8080:8080"
     depends_on:
@@ -283,10 +288,11 @@ services:
       CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}
       CELL_LLM_URL: ${CELL_LLM_URL:-https://api.deepseek.com}
       CELL_LLM_KEY: ${CELL_LLM_KEY}
-      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-chat}
+      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-v4-pro}
       EMBEDDINGS_URL: http://embeddings:8090
       ECODB_API_INTERNAL_URL: http://ecodb-api:8080
       INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CONSOLIDATION_ALPHA: ${CONSOLIDATION_ALPHA:-0.70}
       CONSOLIDATION_BETA1: ${CONSOLIDATION_BETA1:-0.50}
       CONSOLIDATION_BETA2: ${CONSOLIDATION_BETA2:-0.50}

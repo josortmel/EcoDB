@@ -55,6 +55,9 @@ class SecurityHeadersMiddleware:
                 headers = MutableHeaders(scope=message)
                 headers["X-Content-Type-Options"] = "nosniff"
                 headers["Referrer-Policy"] = "no-referrer"
+                ct = headers.get("content-type", "")
+                if ct.startswith("application/json") and "charset" not in ct:
+                    headers["content-type"] = "application/json; charset=utf-8"
             await send(message)
 
         await self.app(scope, receive, patched_send)
@@ -158,7 +161,6 @@ def create_app(environment: str = None) -> FastAPI:
     app.add_middleware(RateLimitMiddleware)
 
     import json as _json
-    import os as _os
     import httpx as _httpx
 
     from settings import EMBEDDINGS_URL as _EMBEDDINGS_URL_SETTING
@@ -242,6 +244,7 @@ def create_app(environment: str = None) -> FastAPI:
     # Agents router ( — agent_identity endpoints (Sprint Paridad parcial Opción A).
     import agents
     app.include_router(agents.router)
+    app.include_router(agents.router_v1, prefix="/api/v1")
 
     # Stats router ( — métricas de memorias, grafo, agentes, búsqueda, sistema.
     import stats
@@ -281,6 +284,16 @@ def create_app(environment: str = None) -> FastAPI:
 
     import cells
     app.include_router(cells.router, prefix="/api/v1")
+
+    # --- Memory Agent routers (v1.3) ---
+    import cell_configs
+    app.include_router(cell_configs.router, prefix="/api/v1")
+
+    import cell_templates
+    app.include_router(cell_templates.router, prefix="/api/v1")
+
+    import providers
+    app.include_router(providers.router, prefix="/api/v1")
 
     return app
 

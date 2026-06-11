@@ -1,6 +1,5 @@
 """Tests integración — GET/PUT /users/me/preferences."""
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path

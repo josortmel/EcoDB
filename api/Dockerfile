@@ -23,14 +23,17 @@ ENV HF_HOME=/app/.cache/huggingface
 RUN mkdir -p /app/.cache/huggingface /app/media && chown -R apiuser:apiuser /app/.cache /app/media
 
 # Layer separado para deps — cache friendly: requirements.txt cambia menos que el codigo.
-COPY --chown=apiuser:apiuser requirements.txt .
+COPY --chown=apiuser:apiuser api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia explicita de modulos del API. bootstrap_first_apikey.py se incluye para
-# poder ejecutarlo con `docker exec` contra el postgres en el primer arranque.
-COPY --chown=apiuser:apiuser admin.py agents.py auth.py background.py bootstrap_first_apikey.py briefing.py cases.py cell_worker.py cells.py chunker.py classifier.py clusters.py db.py documents.py embeddings_client.py entity_normalization.py events.py foresights.py gliner_service.py graph.py llm_provider.py main.py migrations.py memories.py onboarding.py parsers.py permissions.py projects.py rate_limit.py reranker.py search.py settings.py skills.py stats.py teams.py telemetry.py telemetry_api.py users.py worker.py workspaces.py ./
+# ecodb-langchain SDK (used by cell_worker via LangChain)
+COPY --chown=apiuser:apiuser ecodb-langchain /tmp/ecodb-langchain
+RUN pip install --no-cache-dir "/tmp/ecodb-langchain[openai]" && rm -rf /tmp/ecodb-langchain
 
-COPY --chown=root:root entrypoint.sh /entrypoint.sh
+# Copia explicita de modulos del API.
+COPY --chown=apiuser:apiuser api/admin.py api/agents.py api/auth.py api/background.py api/bootstrap_first_apikey.py api/briefing.py api/cases.py api/cell_configs.py api/cell_templates.py api/cell_worker.py api/cells.py api/chunker.py api/classifier.py api/clusters.py api/crypto.py api/db.py api/documents.py api/embeddings_client.py api/entity_normalization.py api/events.py api/foresights.py api/gliner_service.py api/graph.py api/llm_provider.py api/main.py api/migrations.py api/memories.py api/onboarding.py api/pagination.py api/parsers.py api/permissions.py api/projects.py api/providers.py api/rate_limit.py api/reranker.py api/search.py api/settings.py api/shared_models.py api/skills.py api/stats.py api/teams.py api/telemetry.py api/telemetry_api.py api/users.py api/worker.py api/workspaces.py ./
+
+COPY --chown=root:root api/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Pre-cache reranker model so first request isn't slow (runs as root, writes to HF_HOME).

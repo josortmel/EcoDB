@@ -441,6 +441,7 @@ def search(
     max_document_results: int = 3,
     tags: Optional[list[str]] = None,
     deep_factor: int = 2,
+    cluster_mode: str = "none",
 ) -> list:
     """Busqueda semantica multimodal con motor GAMR (8 etapas).
 
@@ -480,6 +481,9 @@ def search(
         el grafo es denso. Las memorias descubiertas tienen semantic_score=0.0
         y matched_modality="graph". Default false.
       tags: filtrar por tags (AND logico — memoria debe tener TODOS). Ej: ["ancla-visual", "landing"].
+      cluster_mode: enriquecer con clusters de memoria. "none" (default, sin
+        cambios), "include" (related_clusters con narrative_preview), "mixed"
+        (merged_results con memorias y clusters intercalados por score).
 
     Respuesta incluye por cada resultado:
       - score: score compuesto GAMR (lo que ordena los resultados)
@@ -504,6 +508,8 @@ def search(
         return [TextContent(type="text", text=json.dumps({"error": "limit must be between 1 and 100"}, ensure_ascii=False))]
     if deep_factor < 1 or deep_factor > 10:
         return [TextContent(type="text", text=json.dumps({"error": "deep_factor must be between 1 and 10"}, ensure_ascii=False))]
+    if cluster_mode not in ("none", "include", "mixed"):
+        return [TextContent(type="text", text=json.dumps({"error": "cluster_mode must be none|include|mixed"}, ensure_ascii=False))]
     payload: dict = {"limit": limit, "expand_scope": expand_scope, "modality_filter": modality_filter}
     if query_text is not None:
         payload["query_text"] = query_text
@@ -534,6 +540,8 @@ def search(
         payload["tags"] = tags
     if deep_factor != 2:
         payload["deep_factor"] = deep_factor
+    if cluster_mode != "none":
+        payload["cluster_mode"] = cluster_mode
     try:
         data = _api_call("POST", "/search", json=payload)
     except RuntimeError as e:
@@ -1538,6 +1546,131 @@ def get_graph_vocabulary() -> dict:
     """
     try:
         data = _api_call("GET", "/admin/graph-vocabulary")
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# Metacognition cluster tools (Memory Agent v1.3)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def search_clusters(query_text: str, agent_identifier: Optional[str] = None,
+                    level: Optional[str] = None, limit: int = 10) -> dict:
+    """Buscar clusters por similitud semántica (coseno sobre centroides + BM25 en labels).
+
+    Args:
+      query_text: texto de búsqueda (3-2000 chars).
+      agent_identifier: filtrar por agente. Sin él, solo clusters SIN_AUTOR
+        (genéricos/técnicos) para no contaminar con memoria de otro agente.
+      level: weekly|monthly|quarterly|yearly (opcional).
+      limit: máximo de resultados, 1-50 (default 10).
+    """
+    body: dict = {"query_text": query_text, "limit": limit}
+    if agent_identifier is not None:
+        body["agent_identifier"] = agent_identifier
+    if level is not None:
+        body["level"] = level
+    try:
+        data = _api_call("POST", "/api/v1/clusters/search", json=body)
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+@mcp.tool()
+def list_clusters(agent_identifier: str, level: Optional[str] = None,
+                  status: str = "active", limit: int = 20) -> dict:
+    """Listar clusters de memoria de un agente, filtrados por nivel y estado.
+
+    Args:
+      agent_identifier: nombre del agente (obligatorio).
+      level: weekly|monthly|quarterly|yearly (opcional).
+      status: candidate|active|rejected|superseded (default active).
+      limit: máximo de resultados, 1-100 (default 20).
+    """
+    params: dict = {"agent_identifier": agent_identifier, "status": status,
+                    "limit": limit}
+    if level is not None:
+        params["level"] = level
+    try:
+        data = _api_call("GET", "/api/v1/clusters", params=params)
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+@mcp.tool()
+def read_cluster(cluster_id: str, include_members: bool = False,
+                 include_sources: bool = False) -> dict:
+    """Leer el detalle de un cluster, opcionalmente con miembros y fuentes.
+
+    Args:
+      cluster_id: UUID del cluster.
+      include_members: si true, añade la lista de memorias miembro.
+      include_sources: si true, añade fuentes y clusters padre (navegación telescópica).
+    """
+    if not _UUID_RE.match(cluster_id):
+        return _err(RuntimeError("cluster_id must be a valid UUID"))
+    cid = quote(str(cluster_id), safe="")
+    try:
+        data = _api_call("GET", f"/api/v1/clusters/{cid}")
+        if include_members:
+            data["members"] = _api_call("GET", f"/api/v1/clusters/{cid}/members")
+        if include_sources:
+            data["sources_detail"] = _api_call("GET", f"/api/v1/clusters/{cid}/sources")
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+@mcp.tool()
+def get_briefing(agent_identifier: str) -> dict:
+    """Briefing del agente: foresights, tensiones, clusters pendientes y resumen telescópico.
+
+    Args:
+      agent_identifier: nombre del agente (obligatorio).
+    """
+    try:
+        data = _api_call("GET", "/api/v1/briefing",
+                         params={"agent_identifier": agent_identifier})
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+@mcp.tool()
+def get_telescopic_view(agent_identifier: str,
+                        levels: str = "weekly,monthly,quarterly,yearly") -> dict:
+    """Cargar la cadena de memoria fractal del agente para el protocolo de boot.
+
+    Args:
+      agent_identifier: nombre del agente (obligatorio).
+      levels: niveles separados por comas (default "weekly,monthly,quarterly,yearly").
+    """
+    try:
+        data = _api_call("GET", "/api/v1/clusters/telescopic",
+                         params={"agent_identifier": agent_identifier, "levels": levels})
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+@mcp.tool()
+def narrate_cluster(cluster_id: str, narrative: str) -> dict:
+    """Escribir o actualizar la narrativa de un cluster (requiere ser dueño del agente).
+
+    Args:
+      cluster_id: UUID del cluster.
+      narrative: texto de la narrativa (1-5000 chars).
+    """
+    if not _UUID_RE.match(cluster_id):
+        return _err(RuntimeError("cluster_id must be a valid UUID"))
+    cid = quote(str(cluster_id), safe="")
+    try:
+        data = _api_call("PUT", f"/api/v1/clusters/{cid}/narrate",
+                         json={"narrative": narrative})
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
