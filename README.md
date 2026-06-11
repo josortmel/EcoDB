@@ -111,35 +111,6 @@ EcoDB v1.1 ships a **desktop dashboard** (Electron) — visual governance over t
 
 Built with React + TypeScript + Tailwind on Electron, talking to the same REST API. The API key never leaves the main process. Windows installer (unsigned — SmartScreen will warn on first run).
 
-## Metacognition
-
-Most memory systems are passive: they store what you give them and retrieve it on demand. EcoDB also **reflects on its own memory** — on a schedule, without prompting. Background workers ("cells") read the accumulated memories of each agent and write back higher-order knowledge: consolidated narratives, predicted events, distilled skills, and identity tensions.
-
-<p align="center">
-  <img src="docs/images/metacognition.png" alt="EcoDB metacognition — cell workers turn raw memories into consolidated knowledge" width="100%">
-</p>
-
-Each cell is a cron-scheduled job over one agent's memory:
-
-| Cell | What it does | Produces |
-|------|--------------|----------|
-| **Consolidation** | Clusters related memories across time horizons (weekly → monthly → quarterly → yearly) and narrates each cluster | Telescopic memory: a zoomable summary of what happened |
-| **Foresight extraction** | Scans recent memories for temporal signals (deadlines, scheduled events) above a confidence threshold | Foresights: events the system expects, urgency-scored |
-| **Skill distillation** | Finds cases that share a task type with a high success rate and abstracts the procedure | Skills: reusable steps, tools, and failure modes |
-| **Identity tension** | Compares how an agent behaves against how it describes itself | Tensions: gaps between observed and declared traits |
-
-The result is a memory that gets **more organized over time, not just bigger**. A year of raw memories collapses into a telescopic narrative; recurring work becomes a named skill; an upcoming deadline surfaces before you ask.
-
-It's all governed and surfaced in the dashboard's **Memory Agent** page:
-
-- **Briefing** — what the system is watching right now: urgency-sorted foresights, open identity tensions, and a telescopic preview.
-- **Configs** — schedule and tune the cells per agent (cron builder, model, prompt template), manage LLM providers (keys stored encrypted, never returned in clear).
-- **Clusters** — browse, search, and approve the consolidated narratives; drill into members and sources.
-- **Foresights** / **Skills** — the full per-agent view of predicted events and distilled procedures.
-- **Telemetry** — cell-run history and health: runs, durations, cost, errors.
-
-Nothing runs without a schedule you set, and every consolidation is reviewable before it's trusted. The system distills and suggests; the human approves.
-
 ## GAMR Engine
 
 EcoDB's **GAMR engine** (Graph-Augmented Multimodal Retrieval) is a **10-stage scoring pipeline**:
@@ -170,6 +141,35 @@ Vector search finds what's **similar**. The graph finds what's **related**. A de
 [GLiNER](https://github.com/urchade/GLiNER) extracts entities from every memory and document chunk at ingestion time and links them to the graph automatically. But automatic extraction alone generates noise. EcoDB combines GLiNER with an **entity dictionary**, a curated list of allowed entities with canonical names and aliases. Dictionary matches take priority over raw NER predictions. Entities that don't match the dictionary are flagged as candidates for human review.
 
 Automatic linking feeds the graph. It never substitutes a healthy, curated graph. The system detects and suggests; the human decides.
+
+## Metacognition
+
+Most memory systems are passive: they store what you give them and retrieve it on demand. EcoDB also **reflects on its own memory** — on a schedule, without prompting. Background workers ("cells") read the accumulated memories of each agent and write back higher-order knowledge: consolidated narratives, predicted events, distilled skills, and identity tensions.
+
+<p align="center">
+  <img src="docs/images/metacognition.png" alt="EcoDB metacognition — cell workers turn raw memories into consolidated knowledge" width="100%">
+</p>
+
+Each cell is a cron-scheduled job over one agent's memory:
+
+| Cell | What it does | Produces |
+|------|--------------|----------|
+| **Consolidation** | Clusters related memories across time horizons (weekly → monthly → quarterly → yearly) and narrates each cluster | Telescopic memory: a zoomable summary of what happened |
+| **Foresight extraction** | Scans recent memories for temporal signals (deadlines, scheduled events) above a confidence threshold | Foresights: events the system expects, urgency-scored |
+| **Skill distillation** | Finds cases that share a task type with a high success rate and abstracts the procedure | Skills: reusable steps, tools, and failure modes |
+| **Identity tension** | Compares how an agent behaves against how it describes itself | Tensions: gaps between observed and declared traits |
+
+The result is a memory that gets **more organized over time, not just bigger**. A year of raw memories collapses into a telescopic narrative; recurring work becomes a named skill; an upcoming deadline surfaces before you ask.
+
+It's all governed and surfaced in the dashboard's **Memory Agent** page:
+
+- **Briefing** — what the system is watching right now: urgency-sorted foresights, open identity tensions, and a telescopic preview.
+- **Configs** — schedule and tune the cells per agent (cron builder, model, prompt template), manage LLM providers (keys stored encrypted, never returned in clear).
+- **Clusters** — browse, search, and approve the consolidated narratives; drill into members and sources.
+- **Foresights** / **Skills** — the full per-agent view of predicted events and distilled procedures.
+- **Telemetry** — cell-run history and health: runs, durations, cost, errors.
+
+Nothing runs without a schedule you set, and every consolidation is reviewable before it's trusted. The system distills and suggests; the human approves.
 
 ## MCP Tools
 
