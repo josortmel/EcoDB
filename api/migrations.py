@@ -32,6 +32,9 @@ MIGRATIONS: list[tuple[str, str]] = [
     ("5.3.0_memory_agent_seed", "sql/seed_memory_agent.sql"),
     # Level-specific higher-consolidation prompts (monthly/quarterly/yearly) + config rewire.
     ("5.3.0_higher_prompts", "sql/seed_higher_prompts.sql"),
+    # v2: per-section word budgets + completeness check (v4-pro undershot
+    # global targets — Eco's quarterly came out at 1/3 of the 2500-word floor).
+    ("5.3.1_higher_prompts_v2", "sql/seed_higher_prompts_v2.sql"),
 ]
 
 _LOCK_KEY = 728_1990

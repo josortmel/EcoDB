@@ -348,6 +348,304 @@ def test_telescopic_unknown_agent_404(client, ma_env):
 
 
 # ---------------------------------------------------------------------------
+# clusters/telescopic/progressive + clusters/zoom (progressive-zoom v1.3.1)
+# ---------------------------------------------------------------------------
+
+PROG = "/api/v1/clusters/telescopic/progressive"
+ZOOM = "/api/v1/clusters/zoom"
+
+TEST_AGENT2 = "pytest-ma-agent2"
+
+
+@pytest.fixture(scope="module")
+def zoom_env(client, ma_env):
+    """Seeds a small fractal for TEST_AGENT (relative dates, ephemeral):
+
+      monthly  m_old  [today-75 .. today-50]  sources=[w_old1, w_old2]
+      weekly   w_old1 [today-70 .. today-64]  members=[mem1]   (absorbed)
+      weekly   w_old2 [today-63 .. today-57]  members=[mem2]   (absorbed)
+      weekly   w_rec  [today-10 .. today-4]   members=[mem_w]  (loose week)
+      memory   mem_loose  created today        (loose day)
+
+    Plus one cluster for TEST_AGENT2 (cross-agent 404 check).
+    Cleans memories before ma_env deletes the agent (FK has no cascade).
+    """
+    from datetime import date, datetime, time, timedelta, timezone as tz
+
+    today = date.today()
+    aid = ma_env["agent_id"]
+
+    def _ts(d: date) -> datetime:
+        return datetime.combine(d, time(10, 0), tzinfo=tz.utc)
+
+    async def _setup():
+        conn = await _aconn()
+        try:
+            ws = await conn.fetchval("SELECT id FROM workspaces ORDER BY id LIMIT 1")
+            pj = await conn.fetchval("SELECT id FROM projects ORDER BY id LIMIT 1")
+
+            async def _mem(content, created):
+                return await conn.fetchval(
+                    "INSERT INTO memories (agent_id, workspace_id, project_id, "
+                    "type, content, created_at) "
+                    "VALUES ($1, $2, $3, 'tecnico', $4, $5) RETURNING id",
+                    aid, ws, pj, content, created)
+
+            mem1 = await _mem("pytest-ma zoom mem old week 1", _ts(today - timedelta(days=67)))
+            mem2 = await _mem("pytest-ma zoom mem old week 2", _ts(today - timedelta(days=60)))
+            mem_w = await _mem("pytest-ma zoom mem recent week", _ts(today - timedelta(days=7)))
+            mem_loose = await _mem("pytest-ma zoom mem loose day", _ts(today))
+
+            async def _cluster(agent, level, p_start, p_end, members, sources=None):
+                return await conn.fetchval(
+                    "INSERT INTO memory_clusters (agent_id, workspace_id, level, "
+                    "label, member_ids, source_ids, period_start, period_end, status) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active') RETURNING id",
+                    agent, ws, level, f"pytest-ma-{level}", members, sources,
+                    p_start, p_end)
+
+            w_old1 = await _cluster(aid, "weekly", today - timedelta(days=70),
+                                    today - timedelta(days=64), [mem1])
+            w_old2 = await _cluster(aid, "weekly", today - timedelta(days=63),
+                                    today - timedelta(days=57), [mem2])
+            w_rec = await _cluster(aid, "weekly", today - timedelta(days=10),
+                                   today - timedelta(days=4), [mem_w])
+            m_old = await _cluster(aid, "monthly", today - timedelta(days=75),
+                                   today - timedelta(days=50), [mem1, mem2],
+                                   [w_old1, w_old2])
+
+            ag2 = await conn.fetchrow(
+                "INSERT INTO agents (identifier, user_id, active) VALUES ($1, 1, true) "
+                "ON CONFLICT (identifier) DO UPDATE SET active=true RETURNING id",
+                TEST_AGENT2)
+            mem_a2 = await _mem("pytest-ma zoom mem other agent", _ts(today))
+            await conn.execute(
+                "UPDATE memories SET agent_id = $1 WHERE id = $2", ag2["id"], mem_a2)
+            c_other = await _cluster(ag2["id"], "weekly", today - timedelta(days=10),
+                                     today - timedelta(days=4), [mem_a2])
+            return {"w_old1": w_old1, "w_old2": w_old2, "w_rec": w_rec,
+                    "m_old": m_old, "c_other": c_other,
+                    "mem1": mem1, "mem_w": mem_w, "mem_loose": mem_loose}
+        finally:
+            await conn.close()
+
+    async def _cleanup():
+        conn = await _aconn()
+        try:
+            await conn.execute(
+                "DELETE FROM memories WHERE content LIKE 'pytest-ma zoom mem%'")
+            await conn.execute(
+                "DELETE FROM agents WHERE identifier = $1", TEST_AGENT2)
+        finally:
+            await conn.close()
+
+    ids = _run(_setup())
+    yield ids
+    _run(_cleanup())
+
+
+def test_progressive_structure(client, ma_env, zoom_env):
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}", headers=_h(ma_env["super"]))
+    assert r.status_code == 200, r.text
+    data = r.json()
+    for k in ("yearly", "quarterly", "monthly", "weekly", "recent_days"):
+        assert k in data and isinstance(data[k], list)
+
+
+def test_progressive_absorption(client, ma_env, zoom_env):
+    """Closed periods are not re-read: weeklies covered by the monthly are
+    hidden; only the loose week and the monthly itself appear."""
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}", headers=_h(ma_env["super"]))
+    assert r.status_code == 200, r.text
+    data = r.json()
+    weekly_ids = {c["id"] for c in data["weekly"]}
+    assert str(zoom_env["w_rec"]) in weekly_ids
+    assert str(zoom_env["w_old1"]) not in weekly_ids
+    assert str(zoom_env["w_old2"]) not in weekly_ids
+    monthly_ids = {c["id"] for c in data["monthly"]}
+    assert str(zoom_env["m_old"]) in monthly_ids
+
+
+def test_progressive_recent_days_after_last_weekly(client, ma_env, zoom_env):
+    """recent_days only carries memories newer than the last consolidated week."""
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}", headers=_h(ma_env["super"]))
+    assert r.status_code == 200, r.text
+    recent_ids = {m["id"] for m in r.json()["recent_days"]}
+    assert str(zoom_env["mem_loose"]) in recent_ids
+    assert str(zoom_env["mem_w"]) not in recent_ids  # inside w_rec period
+
+
+def test_progressive_recent_days_hides_closed_week_outliers(client, ma_env, zoom_env):
+    """A memory inside a consolidated week's period but NOT woven into any
+    cluster (outlier) must still be hidden — closed weeks are never re-read."""
+    from datetime import date, datetime, time, timedelta, timezone as tz
+    today = date.today()
+    created = datetime.combine(today - timedelta(days=6), time(12, 0), tzinfo=tz.utc)
+
+    async def _ins():
+        conn = await _aconn()
+        try:
+            ws = await conn.fetchval("SELECT id FROM workspaces ORDER BY id LIMIT 1")
+            pj = await conn.fetchval("SELECT id FROM projects ORDER BY id LIMIT 1")
+            return await conn.fetchval(
+                "INSERT INTO memories (agent_id, workspace_id, project_id, type, "
+                "content, created_at) VALUES ($1,$2,$3,'tecnico',"
+                "'pytest-ma zoom mem outlier in closed week',$4) RETURNING id",
+                ma_env["agent_id"], ws, pj, created)
+        finally:
+            await conn.close()
+
+    outlier_id = _run(_ins())
+    try:
+        r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}", headers=_h(ma_env["super"]))
+        assert r.status_code == 200, r.text
+        assert str(outlier_id) not in {m["id"] for m in r.json()["recent_days"]}
+    finally:
+        async def _del():
+            conn = await _aconn()
+            try:
+                await conn.execute("DELETE FROM memories WHERE id=$1", outlier_id)
+            finally:
+                await conn.close()
+        _run(_del())
+
+
+def test_progressive_unknown_agent_404(client, ma_env):
+    r = client.get(f"{PROG}?agent_identifier=pytest-ma-nope", headers=_h(ma_env["super"]))
+    assert r.status_code == 404
+
+
+def test_progressive_sections_filter(client, ma_env, zoom_env):
+    """sections=monthly computes only that layer; the rest come back empty."""
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}&sections=monthly",
+                   headers=_h(ma_env["super"]))
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert str(zoom_env["m_old"]) in {c["id"] for c in data["monthly"]}
+    assert data["weekly"] == [] and data["recent_days"] == []
+
+
+def test_progressive_sections_invalid_422(client, ma_env):
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}&sections=bogus",
+                   headers=_h(ma_env["super"]))
+    assert r.status_code == 422
+
+
+def test_zoom_entry_highest_level(client, ma_env, zoom_env):
+    """Entry without cluster_id starts at the highest abstraction (monthly here)."""
+    r = client.post(ZOOM, headers=_h(ma_env["super"]),
+                    json={"agent_identifier": TEST_AGENT})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["parent"] is None
+    assert data["child_type"] == "clusters"
+    assert {c["level"] for c in data["clusters"]} == {"monthly"}
+    assert str(zoom_env["m_old"]) in {c["id"] for c in data["clusters"]}
+
+
+def test_zoom_explicit_level(client, ma_env, zoom_env):
+    """Lineage-absorbed clusters (sources of an active parent) are hidden at
+    entry — w_old1/w_old2 are read by zooming their monthly, not raw."""
+    r = client.post(ZOOM, headers=_h(ma_env["super"]),
+                    json={"agent_identifier": TEST_AGENT, "level": "weekly"})
+    assert r.status_code == 200, r.text
+    ids = {c["id"] for c in r.json()["clusters"]}
+    assert str(zoom_env["w_rec"]) in ids
+    assert str(zoom_env["w_old1"]) not in ids
+    assert str(zoom_env["w_old2"]) not in ids
+
+
+def test_week_rollup_absorbs_thematic_in_views(client, ma_env, zoom_env):
+    """A week rollup (weekly cluster with source_ids) hides its thematic
+    sources in progressive + zoom entry; zooming the rollup reveals them."""
+    from datetime import date, timedelta
+
+    today = date.today()
+
+    async def _mk_rollup():
+        conn = await _aconn()
+        try:
+            ws = await conn.fetchval("SELECT id FROM workspaces ORDER BY id LIMIT 1")
+            return await conn.fetchval(
+                "INSERT INTO memory_clusters (agent_id, workspace_id, level, "
+                "label, narrative, member_ids, source_ids, period_start, "
+                "period_end, status) VALUES ($1,$2,'weekly','pytest-ma-rollup',"
+                "'la semana tejida', $3, $4, $5, $6, 'active') RETURNING id",
+                ma_env["agent_id"], ws,
+                [zoom_env["mem_w"]], [zoom_env["w_rec"]],
+                today - timedelta(days=10), today - timedelta(days=4))
+        finally:
+            await conn.close()
+
+    rollup_id = _run(_mk_rollup())
+    try:
+        # progressive: rollup visible, thematic source hidden
+        r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}",
+                       headers=_h(ma_env["super"]))
+        weekly_ids = {c["id"] for c in r.json()["weekly"]}
+        assert str(rollup_id) in weekly_ids
+        assert str(zoom_env["w_rec"]) not in weekly_ids
+        # zoom entry weekly: same
+        z = client.post(ZOOM, headers=_h(ma_env["super"]),
+                        json={"agent_identifier": TEST_AGENT, "level": "weekly"})
+        entry_ids = {c["id"] for c in z.json()["clusters"]}
+        assert str(rollup_id) in entry_ids
+        assert str(zoom_env["w_rec"]) not in entry_ids
+        # zoom INTO the rollup: thematic source revealed
+        z2 = client.post(ZOOM, headers=_h(ma_env["super"]),
+                         json={"agent_identifier": TEST_AGENT,
+                               "cluster_id": str(rollup_id)})
+        assert z2.json()["child_type"] == "clusters"
+        assert {c["id"] for c in z2.json()["clusters"]} == {str(zoom_env["w_rec"])}
+    finally:
+        async def _del():
+            conn = await _aconn()
+            try:
+                await conn.execute(
+                    "DELETE FROM memory_clusters WHERE id=$1", rollup_id)
+            finally:
+                await conn.close()
+        _run(_del())
+
+
+def test_zoom_into_monthly_returns_source_weeklies(client, ma_env, zoom_env):
+    r = client.post(ZOOM, headers=_h(ma_env["super"]),
+                    json={"agent_identifier": TEST_AGENT,
+                          "cluster_id": str(zoom_env["m_old"])})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["parent"]["id"] == str(zoom_env["m_old"])
+    assert data["child_type"] == "clusters"
+    assert {c["id"] for c in data["clusters"]} == {
+        str(zoom_env["w_old1"]), str(zoom_env["w_old2"])}
+
+
+def test_zoom_into_weekly_returns_memories(client, ma_env, zoom_env):
+    r = client.post(ZOOM, headers=_h(ma_env["super"]),
+                    json={"agent_identifier": TEST_AGENT,
+                          "cluster_id": str(zoom_env["w_old1"])})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["child_type"] == "memories"
+    assert {m["memory_id"] for m in data["memories"]} == {str(zoom_env["mem1"])}
+
+
+def test_zoom_cross_agent_404(client, ma_env, zoom_env):
+    """A cluster of another agent must 404 even for super when the
+    agent_identifier doesn't match (anti cross-agent traversal)."""
+    r = client.post(ZOOM, headers=_h(ma_env["super"]),
+                    json={"agent_identifier": TEST_AGENT,
+                          "cluster_id": str(zoom_env["c_other"])})
+    assert r.status_code == 404
+
+
+def test_zoom_short_query_422(client, ma_env):
+    r = client.post(ZOOM, headers=_h(ma_env["super"]),
+                    json={"agent_identifier": TEST_AGENT, "query_text": "ab"})
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # search cluster_mode (root /search)
 # ---------------------------------------------------------------------------
 

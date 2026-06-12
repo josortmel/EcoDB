@@ -4,15 +4,15 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 
 ## Versiones actuales
 
-- API: `0.24.0` (imagen Docker) / API_VERSION `0.9.0`
+- API: `0.25.0` (imagen Docker) / API_VERSION `0.9.0`
 - Schema: `5.3.0`
-- MCP: `1.7.0` (38 tools: 32 base + 6 clusters)
+- MCP: `1.8.0` (40 tools: 32 base + 8 clusters/navegación)
 - Embeddings: `0.2.5`
 - NER: `1.0.0`
 - Postgres: `1.0.0` (PG16 + pgvector + AGE 1.5.0)
 - Cell Worker: `0.2.0` (profile `with-metacognition`, config desde DB + cron croniter)
-- ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 38 via MCP parity)
-- Release pública: `v1.3.0` (Memory Agent)
+- ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
+- Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
 ## Arquitectura — 6 servicios Docker
 
@@ -360,6 +360,18 @@ The runner uses `pg_advisory_lock` (session-level) to serialize concurrent start
   - **Telescopic oldest-first**: `GET /clusters/telescopic` devuelve cada nivel de más antiguo a más reciente (period_end ASC de los N más recientes). Orden de boot: yearly→quarterly→monthly→weekly→`recent_days` (últimos 3 días raw de memorias). Para cargar memoria fractal en el arranque del agente.
   - **Equipo**: workflow-construccion v5. Hilo (arquitectónico: T1/T5/T7/T8/T10/T11 + rewire P1 + 3 prompts), code (mecánico: T2/T3/T4/T6/T9/T12/T13 + clase BH), Lienzo (dashboard + README), code+adv-code+adv-seg+verificador (5 loops adversariales). Clase de bug BH1/BH2 cazada exhaustivamente: 3 grant mismatches (narrative/visibility/cell_runs prompt_version+model) que rompían consolidation programada + custom cells en silencio; routing-vs-recording (model/prompt_version); idempotency inestable. Fresh install path verificado APPROVE. D1 tests 20/20 in-container.
   - **Deuda v1.3 pendiente**: CASE_STRUCTURE wiring, template versioning, RLS provider keys (riesgo aceptado single-tenant), last_run por-level (IC1, aceptado), cell_generated marker advisory (no enforced — trigger BEFORE recomendado pero diferido), _fail_run swallows error string a "" (BH-class observación), deepseek-reasoner no consumible via cell path (response format difiere).
+
+- **v1.3.1 Progressive zoom** ✓ completada (dia 102): la visión de Pepe del día 101 sobre el telescopic.
+  - **Week rollups**: la célula teje los clusters temáticos de cada semana cerrada en UNA narrativa semanal (`_ensure_week_rollup` en cell_worker, template editable "CellAgent Week Rollup", 400-600 palabras). Rollup = weekly cluster con `source_ids` = temáticos (los temáticos tienen source_ids NULL — ese es el discriminador). Las vistas filtran por linaje (cluster que es source de un cluster activo → oculto, se lee por su padre). El mensual come rollups, no temáticos absorbidos. Backfill: re-disparar una semana ya consolidada crea el rollup que falte (path de idempotencia). El fallo del rollup NUNCA hunde la consolidación temática.
+  - **Cadena fractal completa**: memorias crudas → temáticos → rollup semanal → mensual → trimestral → anual. fractal_search la navega entera por zoom.
+  - **recent_days = solo borde abierto**: memoria oculta si su fecha cae dentro de cualquier periodo weekly activo O está tejida (semanas cerradas no se re-leen, outliers incluidos). Feedback de Eco día 102.
+  - **MCP size annotation**: las tools de boot declaran `_meta["anthropic/maxResultSizeChars"]` (400K progressive/telescopic, 200K fractal_search) — Claude Code respeta el tamaño sin que el cliente toque MAX_MCP_OUTPUT_TOKENS. Soportado por mcp SDK >= 1.27 (`@mcp.tool(meta=...)`). Param `sections` para clientes capados.
+  - **Boot de agentes**: una sola llamada `get_progressive_view(agent_identifier)`. Orden de lectura = orden de respuesta. Los CLAUDE.md de los 4 agentes migrados al boot fractal (día 102, Eco).
+  - `GET /clusters/telescopic/progressive` — cada capa temporal comprime la anterior; lo cerrado (period-covered por un cluster activo de nivel superior) no se re-lee. `recent_days` = memorias NO tejidas en ningún weekly activo (membresía en `member_ids` es la señal autoritativa, no los bounds de periodo — la célula consolida semanas parciales). Caps por PERIODOS distintos, no por clusters (weekly son temáticos, 10+ por semana). Misma shape que `/telescopic` — el boot puede cambiar de endpoint sin tocar nada.
+  - `POST /clusters/zoom` — drill-down fractal: entry al nivel más alto disponible → hijos por `cluster_id` (source clusters para higher, member memories para weekly) → memorias crudas. `query_text` opcional rankea por coseno dentro del scope. Scoping: agente resuelto, cross-agent 404, visibility check en memorias.
+  - MCP 38→40: `get_progressive_view`, `fractal_search`.
+  - Fixes: foresight programado crasheaba SIEMPRE con señales (`$4::text` + float → asyncpg DataError; ahora `::float8`); ecodb-cell heredaba healthcheck HTTP de la imagen api → "unhealthy" permanente (deshabilitado; el worker es PID 1).
+  - Lección: los healthchecks heredados de imagen base que no aplican al entrypoint convierten el estado en ruido — un container siempre-rojo esconde los fallos reales (clase BH).
 
 ## Memory types
 

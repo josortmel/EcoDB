@@ -101,7 +101,7 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
-    image: ecodb-api:0.24.0
+    image: ecodb-api:0.25.0
     container_name: ecodb-api
     environment:
       ENVIRONMENT: ${ECODB_ENV:-development}
@@ -168,7 +168,7 @@ services:
     build:
       context: ./mcp
       dockerfile: Dockerfile
-    image: ecodb-mcp:1.6.0
+    image: ecodb-mcp:1.8.0
     container_name: ecodb-mcp
     environment:
       MCP_TRANSPORT: sse
@@ -214,7 +214,7 @@ services:
       - ecodb-net
 
   worker:
-    image: ecodb-api:0.24.0
+    image: ecodb-api:0.25.0
     container_name: ecodb-worker
     entrypoint: ["gosu", "apiuser", "python", "worker.py"]
     environment:
@@ -280,9 +280,15 @@ services:
       - ecodb-net
 
   ecodb-cell:
-    image: ecodb-api:0.24.0
+    image: ecodb-api:0.25.0
     container_name: ecodb-cell
     entrypoint: ["gosu", "apiuser", "python", "cell_worker.py"]
+    # The api image ships an HTTP healthcheck (curl :8080/health) but the cell
+    # worker serves no HTTP — inherited check made this container permanently
+    # "unhealthy", masking real failures. The worker is PID 1: if it dies the
+    # container exits, so process state IS the liveness signal.
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgresql://ecodb_cell:${CELL_DB_PASSWORD:-ecodb_cell_dev_only}@postgres:5432/ecodb
       CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}

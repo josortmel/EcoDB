@@ -235,7 +235,9 @@ SELECT a.id, ct.cell_type, 'deepseek-v4-pro', 'deepseek',
        ct.schedule_cron, ct.level, ct.config::jsonb
 FROM agents a
 CROSS JOIN (VALUES
-    ('consolidation', '0 3 * * 0',        'weekly',    'CellAgent v3 Weekly',            '{"threshold": 0.45}'),
+    -- Monday 3am: consolidates the Mon..Sun week that just completed.
+    -- (Sunday firing + last-complete-week period = permanently one week late.)
+    ('consolidation', '0 3 * * 1',        'weekly',    'CellAgent v3 Weekly',            '{"threshold": 0.45}'),
     ('consolidation', '0 5 1 * *',        'monthly',   'CellAgent Higher Consolidation', '{}'),
     ('consolidation', '0 6 1 1,4,7,10 *', 'quarterly', 'CellAgent Higher Consolidation', '{}'),
     ('consolidation', '0 7 1 1 *',        'yearly',    'CellAgent Higher Consolidation', '{}')

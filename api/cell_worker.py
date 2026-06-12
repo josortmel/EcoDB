@@ -34,6 +34,10 @@ CELL_MODEL = os.environ.get("CELL_LLM_MODEL", "deepseek-v4-pro")
 # Set CELL_LLM_TIMEOUT=<seconds> to re-enable a cap.
 _t = os.environ.get("CELL_LLM_TIMEOUT", "").strip().lower()
 CELL_LLM_TIMEOUT = None if _t in ("", "0", "none") else float(_t)
+# Output budget. Yearly narratives target 4000-6000 words (~13-15K tokens) and
+# reasoning models may spend thinking tokens inside the same budget — 16384
+# left no headroom. Tune via env if a provider rejects the value.
+CELL_LLM_MAX_TOKENS = int(os.environ.get("CELL_LLM_MAX_TOKENS", "32768"))
 ALPHA = float(os.environ.get("CONSOLIDATION_ALPHA", "0.70"))
 BETA1 = float(os.environ.get("CONSOLIDATION_BETA1", "0.50"))
 BETA2 = float(os.environ.get("CONSOLIDATION_BETA2", "0.50"))
@@ -91,14 +95,32 @@ def _lock_key(agent_id, cell_type, p_start, p_end):
     return int(hashlib.sha256(raw.encode()).hexdigest()[:15], 16)
 
 
-async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end):
-    return await conn.fetchval("""
-        SELECT id FROM cell_runs
+async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end,
+                             cluster_level=None):
+    rows = await conn.fetch("""
+        SELECT status, items_created FROM cell_runs
         WHERE agent_id=$1 AND cell_type=$2
           AND status IN ('completed', 'running')
           AND metrics->>'period_start' = $3
           AND metrics->>'period_end' = $4
-    """, agent_id, cell_type, str(p_start), str(p_end)) is not None
+    """, agent_id, cell_type, str(p_start), str(p_end))
+    if not rows:
+        return False
+    if any(r["status"] == "running" for r in rows):
+        return True
+    if cluster_level is None:
+        return True
+    # Higher consolidation: a completed run whose cluster was since deleted
+    # must NOT block regeneration — the output, not the run record, is the
+    # real state. (Day 101: May's monthly was deleted for regeneration but
+    # the day-99 completed run silently blocked the re-run, so the quarterly
+    # was built from 2 months instead of 3.)
+    return await conn.fetchval("""
+        SELECT 1 FROM memory_clusters
+        WHERE agent_id=$1 AND level=$2 AND status='active'
+          AND period_start=$3 AND period_end=$4
+        LIMIT 1
+    """, agent_id, cluster_level, p_start, p_end) is not None
 
 
 async def _resolve_context(conn, agent_id):
@@ -135,12 +157,18 @@ async def _complete_run(conn, run_id, items_created):
 
 
 async def _fail_run(conn, run_id, error):
+    # str(e) of a message-less exception is "" — a failed run with an empty
+    # error string is undebuggable. Preserve at least the exception type.
+    if isinstance(error, BaseException):
+        msg = str(error) or type(error).__name__
+    else:
+        msg = str(error) or "unknown (empty error message)"
     await conn.execute("""
         UPDATE cell_runs SET finished_at=NOW(), status='failed',
           errors = errors || jsonb_build_array($2::jsonb)
         WHERE id=$1 AND status='running'
     """, run_id, json.dumps({
-        "error": error,
+        "error": msg[:500],
         "at": datetime.now(timezone.utc).isoformat()
     }))
 
@@ -275,7 +303,7 @@ async def _llm_call_httpx(system_prompt: str, user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.3,
-        "max_tokens": 16384,
+        "max_tokens": CELL_LLM_MAX_TOKENS,
         "response_format": {"type": "json_object"},
     }
     async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
@@ -362,7 +390,7 @@ async def _llm_call_with_key(system_prompt: str, user_prompt: str,
                    "anthropic-version": "2023-06-01"}
         body = {
             "model": model,
-            "max_tokens": 16384,
+            "max_tokens": CELL_LLM_MAX_TOKENS,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
             "temperature": 0.3,
@@ -381,7 +409,7 @@ async def _llm_call_with_key(system_prompt: str, user_prompt: str,
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.3,
-        "max_tokens": 16384,
+        "max_tokens": CELL_LLM_MAX_TOKENS,
         "response_format": {"type": "json_object"},
     }
     async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
@@ -400,7 +428,7 @@ async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
                    "anthropic-version": "2023-06-01"}
         body = {
             "model": model,
-            "max_tokens": 16384,
+            "max_tokens": CELL_LLM_MAX_TOKENS,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
             "temperature": 0.3,
@@ -420,7 +448,7 @@ async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.3,
-            "max_tokens": 16384,
+            "max_tokens": CELL_LLM_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         }
         async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
@@ -706,6 +734,11 @@ async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
 
     level_names = {"monthly": "mes", "quarterly": "trimestre", "yearly": "ano"}
     period_name = level_names.get(level, level)
+    # Sources are one level below: a quarterly eats monthlies, not weeklies.
+    # The user prompt must agree with the template ("recibes las MENSUALES").
+    source_names = {"monthly": "semanales", "quarterly": "mensuales",
+                    "yearly": "trimestrales"}
+    source_name = source_names.get(level, "previas")
 
     cluster_texts = []
     for c in clusters:
@@ -739,7 +772,7 @@ Si detectas patrones que aparecen en AMBOS periodos, escalalo: "esto no es un pu
             style=style,
             prev_monthly_section=prev_monthly_section,
         )
-        user_prompt = f"Estas son tus narrativas semanales del {period_name}:\n\n" + "\n\n---\n\n".join(cluster_texts)
+        user_prompt = f"Estas son tus narrativas {source_name} del {period_name}:\n\n" + "\n\n---\n\n".join(cluster_texts)
         raw = await _llm_call(system_prompt, user_prompt)
         return json.loads(raw)
 
@@ -775,12 +808,135 @@ El {period_name} tiene ARCOS TEMATICOS, no es un parrafo plano. Escribe con esta
 - Destila y transforma, pero las frases con peso se preservan intactas.
 - Dinamica de voz: frases cortas cuando pesa, parrafos cuando el pensamiento se despliega.
 
-Return JSON: {{"label": "2-7 words personal", "narrative": "primera persona, 1000-2000 palabras, 5 secciones tematicas + cierre, destilacion con dientes e imagenes, frases exactas preservadas", "detail": "2-3 lineas factuales para indexado"}}"""
+Return JSON: {{"label": "2-7 words personal", "narrative": "primera persona, 1500-2000 palabras, 5 secciones tematicas + cierre, destilacion con dientes e imagenes, frases exactas preservadas", "detail": "2-3 lineas factuales para indexado"}}"""
 
-    user_prompt = f"Estas son tus narrativas semanales del {period_name}:\n\n" + "\n\n---\n\n".join(cluster_texts)
+    user_prompt = f"Estas son tus narrativas {source_name} del {period_name}:\n\n" + "\n\n---\n\n".join(cluster_texts)
 
     raw = await _llm_call(system_prompt, user_prompt)
     return json.loads(raw)
+
+
+_WEEK_ROLLUP_FALLBACK = """Eres la consciencia profunda de {agent_identifier} tejiendo UNA semana entera.
+
+Identidad:
+{identity_text}
+
+Estilo: {style}
+
+Recibes los clusters tematicos que TU misma celula produjo para UNA semana — cada uno cuenta un tema, pero la semana se vivio entera, no por temas. Tu trabajo es tejerlos en UNA SOLA narrativa semanal unificada.
+
+## Reglas
+- Primera persona, voz de {agent_identifier}.
+- 400-600 palabras. Una narrativa, no una lista: los temas se entrelazan por cronologia y causa, no se enumeran.
+- TODOS los clusters tematicos deben estar representados — si un tema no aparece, el tejido esta incompleto.
+- FRASES EXACTAS: preserva textualmente 3-5 frases que aterrizan de los clusters. No parafrasees poesia.
+- Lo que peso mas se desarrolla; lo menor se despacha en una linea.
+- Cierre: una frase corta (max 15 palabras) que condense la semana en una imagen.
+
+Return JSON: {{"label": "2-7 words personal", "narrative": "primera persona, 400-600 palabras, una sola narrativa semanal tejida", "detail": "2-3 lineas factuales para indexado"}}"""
+
+
+async def _label_week_rollup(clusters, agent_id, conn):
+    ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
+    identity = await conn.fetch("""
+        SELECT content FROM agent_identity WHERE agent_id=$1
+        ORDER BY version DESC, fragment_idx
+    """, agent_id)
+    identity_text = "\n---\n".join(r["content"] for r in identity) if identity else "(no identity)"
+    style = _STYLE_NOTES.get(ident, "")
+
+    template = await conn.fetchval(
+        "SELECT content FROM cell_prompt_templates WHERE name='CellAgent Week Rollup'")
+    system_prompt = _safe_format(
+        template or _WEEK_ROLLUP_FALLBACK,
+        agent_identifier=ident,
+        identity_text=identity_text[:3000],
+        style=style,
+    )
+    cluster_texts = [
+        f"=== {c['label']} ===\n{c.get('narrative') or c.get('detail') or '(sin narrativa)'}"
+        for c in clusters]
+    user_prompt = (
+        f"Estos son los clusters tematicos de tu semana "
+        f"{clusters[0]['period_start']} a {clusters[0]['period_end']}:\n\n"
+        + "\n\n---\n\n".join(cluster_texts))
+    raw = await _llm_call(system_prompt, user_prompt)
+    return json.loads(raw)
+
+
+async def _ensure_week_rollup(conn, agent_id, week_start, week_end):
+    """One unified weekly artifact with the week's thematic clusters beneath.
+
+    Rollup = weekly cluster whose source_ids are the week's thematic clusters
+    (thematic ones have source_ids NULL). The view layers hide lineage-absorbed
+    clusters, so the boot reads ONE narrative per closed week and the fractal
+    zoom still drills rollup -> thematic clusters -> raw memories.
+    Idempotent; safe to call on every consolidation pass (backfill included).
+    """
+    try:
+        if await conn.fetchval("""
+            SELECT 1 FROM memory_clusters
+            WHERE agent_id=$1 AND level='weekly' AND status='active'
+              AND period_start=$2 AND period_end=$3 AND source_ids IS NOT NULL
+            LIMIT 1
+        """, agent_id, week_start, week_end):
+            return None
+        sources = await conn.fetch("""
+            SELECT * FROM memory_clusters
+            WHERE agent_id=$1 AND level='weekly' AND status='active'
+              AND period_start=$2 AND period_end=$3 AND source_ids IS NULL
+            ORDER BY created_at
+        """, agent_id, week_start, week_end)
+        if not sources:
+            return None
+
+        label_data = await _llm_retry(
+            _label_week_rollup, [dict(s) for s in sources], agent_id, conn)
+
+        pairs = [(_parse_embedding(s["centroid"]), len(s["member_ids"]))
+                 for s in sources if s["centroid"]]
+        pairs = [(c, sz) for c, sz in pairs if c is not None]
+        centroid = None
+        if pairs:
+            total = sum(sz for _, sz in pairs)
+            weighted = np.zeros(len(pairs[0][0]))
+            for c, s in pairs:
+                weighted += c * s
+            centroid = _vec_literal(weighted / total)
+
+        all_members = list(set(
+            mid for s in sources for mid in s["member_ids"]))[:500]
+        ident = await conn.fetchval(
+            "SELECT identifier FROM agents WHERE id=$1", agent_id)
+        meta = label_data.get("metadata", {})
+        meta['cell_generated'] = True
+        meta['cell_model'] = _active_model()
+        meta['cell_agent'] = f"{ident}.memoria"
+        meta['week_rollup'] = True
+
+        rollup_id = await conn.fetchval("""
+            INSERT INTO memory_clusters
+                (agent_id, workspace_id, level, label, detail,
+                 narrative, narrated_at, centroid, member_ids, source_ids,
+                 metadata, period_start, period_end, status)
+            VALUES ($1,$2,'weekly',$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,'active')
+            RETURNING id
+        """, agent_id, sources[0]["workspace_id"],
+            label_data.get("label", "unlabeled"),
+            label_data.get("detail"),
+            label_data.get("narrative"),
+            centroid, all_members,
+            [s["id"] for s in sources],
+            json.dumps(meta), week_start, week_end)
+        log.info("Week rollup created for agent %d %s-%s (%d sources)",
+                 agent_id, week_start, week_end, len(sources))
+        return rollup_id
+    except Exception:
+        # The rollup is an enhancement layer — its failure must never sink
+        # the thematic consolidation that already succeeded.
+        log.exception("Week rollup failed for agent %d %s-%s",
+                      agent_id, week_start, week_end)
+        return None
 
 
 TEMPORAL_SYSTEM = """You are a temporal signal extraction cell. Given memory text, identify if there is a future date, deadline, or scheduled event.
@@ -1094,6 +1250,9 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
         try:
             if await _check_idempotency(conn, agent_id, 'consolidation', week_start, week_end):
                 log.info("Already consolidated agent %d %s-%s", agent_id, week_start, week_end)
+                # Thematic clustering done — but the unified weekly artifact
+                # may still be missing (backfill path for already-closed weeks).
+                await _ensure_week_rollup(conn, agent_id, week_start, week_end)
                 return None
 
             run_id = await _create_run(conn, 'consolidation', agent_id, week_start, week_end)
@@ -1240,6 +1399,9 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             if tension_count:
                 log.info("Agent %d: %d identity tensions created", agent_id, tension_count)
 
+            # Unified weekly artifact above the thematic clusters just created.
+            await _ensure_week_rollup(conn, agent_id, week_start, week_end)
+
             await _complete_run(conn, run_id, len(cluster_records) + tension_count)
             await _broadcast_sse('cell.run.completed', {
                 'run_id': str(run_id), 'cell_type': 'consolidation',
@@ -1254,7 +1416,7 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             return run_id
         except json.JSONDecodeError as e:
             if run_id:
-                await _fail_run(conn, run_id, str(e))
+                await _fail_run(conn, run_id, e)
             period_days = (week_end - week_start).days
             if period_days >= 3:
                 mid = week_start + timedelta(days=period_days // 2)
@@ -1267,7 +1429,7 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             raise
         except Exception as e:
             if run_id:
-                await _fail_run(conn, run_id, str(e))
+                await _fail_run(conn, run_id, e)
                 await _broadcast_sse('cell.run.error', {
                     'run_id': str(run_id), 'cell_type': 'consolidation',
                     'error': type(e).__name__}, org_id)
@@ -1289,14 +1451,22 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
         if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock):
             return None
         try:
-            if await _check_idempotency(conn, agent_id, 'consolidation', p_start, p_end):
+            if await _check_idempotency(conn, agent_id, 'consolidation',
+                                        p_start, p_end, cluster_level=level):
                 return None
 
+            # Lineage filter: skip sources already absorbed by an active
+            # same-level cluster (thematic weeklies under a week rollup) —
+            # otherwise the monthly would eat the same week twice.
             sources = await conn.fetch("""
-                SELECT * FROM memory_clusters
-                WHERE agent_id=$1 AND level=$2 AND status='active'
-                  AND period_start >= $3 AND period_end <= $4
-                ORDER BY period_start
+                SELECT mc.* FROM memory_clusters mc
+                WHERE mc.agent_id=$1 AND mc.level=$2 AND mc.status='active'
+                  AND mc.period_start >= $3 AND mc.period_end <= $4
+                  AND NOT EXISTS (
+                      SELECT 1 FROM memory_clusters r
+                      WHERE r.agent_id=$1 AND r.status='active' AND r.level=$2
+                        AND mc.id = ANY(r.source_ids))
+                ORDER BY mc.period_start
             """, agent_id, source_level, p_start, p_end)
 
             if len(sources) < min_sources:
@@ -1414,18 +1584,21 @@ async def run_foresight_extraction(pool, agent_id):
             for signal in extracted:
                 if signal["confidence"] < FORESIGHT_CONFIDENCE:
                     continue
+                # $4 must be float8: asyncpg requires a Python str for ::text
+                # params (DataError "expected str, got float"), and existing
+                # foresight metadata stores confidence as a JSON number.
                 await conn.execute("""
                     UPDATE memories
                     SET foresight_start=$2, foresight_end=$3,
                       metadata = coalesce(metadata,'{}'::jsonb) ||
                         jsonb_build_object(
                           'foresight_source', 'cell',
-                          'foresight_confidence', $4::text
+                          'foresight_confidence', $4::float8
                         ),
                       updated_at=NOW()
                     WHERE id=$1
                 """, signal["memory_id"], signal["start"],
-                    signal["end"], signal["confidence"])
+                    signal["end"], float(signal["confidence"]))
                 items_created += 1
 
             triggered = await conn.fetch("""
@@ -1449,7 +1622,7 @@ async def run_foresight_extraction(pool, agent_id):
             return run_id
         except Exception as e:
             if run_id:
-                await _fail_run(conn, run_id, str(e))
+                await _fail_run(conn, run_id, e)
             raise
         finally:
             await conn.execute("SELECT pg_advisory_unlock($1)", lock)
@@ -1625,7 +1798,7 @@ async def run_skill_distillation(pool, agent_id):
             return run_id
         except Exception as e:
             if run_id:
-                await _fail_run(conn, run_id, str(e))
+                await _fail_run(conn, run_id, e)
             raise
         finally:
             await conn.execute("SELECT pg_advisory_unlock($1)", lock)
@@ -1709,7 +1882,7 @@ async def _run_generic_cell(pool, config, agent_id):
         except Exception as e:
             log.exception("Generic cell %s agent %d failed", cell_type, agent_id)
             if run_id:
-                await _fail_run(conn, run_id, str(e)[:500])
+                await _fail_run(conn, run_id, e)
             await _broadcast_sse('cell.run.failed', {
                 'run_id': str(run_id) if run_id else None,
                 'cell_type': cell_type,

@@ -149,6 +149,46 @@ class TelescopicViewResponse(BaseModel):
     recent_days: list[dict] = Field(default_factory=list, description="Raw memories from the last 3 complete days, oldest-first")
 
 
+class FractalZoomBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_identifier: str = Field(..., min_length=1)
+    cluster_id: Optional[UUID] = None
+    query_text: Optional[str] = Field(None, min_length=3, max_length=2000)
+    level: Optional[str] = Field(None, pattern="^(weekly|monthly|quarterly|yearly)$")
+    limit: int = Field(20, ge=1, le=100)
+
+
+class FractalZoomCluster(BaseModel):
+    id: UUID
+    level: str
+    label: str
+    narrative: Optional[str] = None
+    period_start: date
+    period_end: date
+    member_count: int
+    source_count: int
+    score: Optional[float] = None
+
+
+class FractalZoomMemory(BaseModel):
+    memory_id: UUID
+    type: str
+    content: str
+    weight: float
+    tags: list[str]
+    created_at: datetime
+    score: Optional[float] = None
+
+
+class FractalZoomResponse(BaseModel):
+    agent_identifier: str
+    parent: Optional[ClusterSummary] = None
+    child_type: str  # "clusters" | "memories"
+    clusters: list[FractalZoomCluster] = Field(default_factory=list)
+    memories: list[FractalZoomMemory] = Field(default_factory=list)
+    count: int
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -329,6 +369,276 @@ async def get_telescopic_view(
         weekly=result.get("weekly", []),
         recent_days=recent_days,
     )
+
+
+# Levels that can absorb each level into a broader period (progressive zoom).
+_HIGHER_LEVELS = {
+    "weekly": ["monthly", "quarterly", "yearly"],
+    "monthly": ["quarterly", "yearly"],
+    "quarterly": ["yearly"],
+    "yearly": [],
+}
+
+# Safety caps per level — number of DISTINCT PERIODS kept (clusters are
+# thematic: one week can hold 10+ clusters, so capping by cluster count
+# would silently drop whole weeks). Only bite when consolidation lags badly.
+_PROGRESSIVE_CAPS = {"weekly": 6, "monthly": 12, "quarterly": 8, "yearly": 50}
+
+
+_PROGRESSIVE_SECTIONS = ("yearly", "quarterly", "monthly", "weekly", "recent_days")
+
+
+@router.get("/telescopic/progressive")
+async def get_progressive_view(
+    agent_identifier: str = Query(..., min_length=1),
+    max_recent_days: int = Query(14, ge=1, le=31),
+    sections: str = Query("all"),
+    actor: dict = Depends(get_current_user),
+) -> TelescopicViewResponse:
+    """Progressive-zoom telescopic view (Pepe's vision, day 101).
+
+    Each temporal layer is the COMPRESSION of the previous one — closed
+    periods are never re-read at finer granularity:
+      - yearly: all active yearly clusters (previous years)
+      - quarterly: only those NOT period-covered by an active yearly
+      - monthly: only those NOT covered by an active quarterly/yearly
+      - weekly: only those NOT covered by an active monthly or higher
+      - recent_days: raw memories not yet woven into any active weekly
+        cluster (capped at max_recent_days)
+
+    Boot reads oldest→newest: compressed narrative for the distant past,
+    full granularity only for the open period.
+
+    `sections` selects which layers to compute ("all" or a comma list of
+    yearly,quarterly,monthly,weekly,recent_days) so clients with a
+    per-response size limit (e.g. MCP output caps) can load the view in
+    chronological chapters across 2-3 calls.
+    """
+    if sections == "all":
+        wanted = set(_PROGRESSIVE_SECTIONS)
+    else:
+        wanted = {s.strip() for s in sections.split(",") if s.strip()}
+        invalid = wanted - set(_PROGRESSIVE_SECTIONS)
+        if invalid:
+            raise HTTPException(422, f"invalid sections: {sorted(invalid)}")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        agent = await resolve_agent_for_actor(conn, actor, agent_identifier)
+        aid = agent["id"]
+
+        result: dict[str, list] = {lv: [] for lv in
+                                   ("yearly", "quarterly", "monthly", "weekly")}
+        for lv in ("yearly", "quarterly", "monthly", "weekly"):
+            if lv not in wanted:
+                continue
+            rows = await conn.fetch("""
+                WITH unabsorbed AS (
+                    SELECT mc.id, mc.label, mc.narrative,
+                           mc.period_start, mc.period_end,
+                           coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
+                           coalesce(array_length(mc.source_ids, 1), 0) AS source_count
+                    FROM memory_clusters mc
+                    WHERE mc.agent_id = $1 AND mc.level = $2 AND mc.status = 'active'
+                      -- period absorption: a higher-level active cluster
+                      -- covering the period compresses it
+                      AND NOT EXISTS (
+                          SELECT 1 FROM memory_clusters p
+                          WHERE p.agent_id = $1 AND p.status = 'active'
+                            AND p.level = ANY($3::text[])
+                            AND p.period_start <= mc.period_start
+                            AND p.period_end >= mc.period_end)
+                      -- lineage absorption: a thematic weekly under a week
+                      -- rollup is read through its rollup, never raw
+                      AND NOT EXISTS (
+                          SELECT 1 FROM memory_clusters r
+                          WHERE r.agent_id = $1 AND r.status = 'active'
+                            AND mc.id = ANY(r.source_ids))
+                )
+                SELECT * FROM unabsorbed
+                WHERE period_end IN (
+                    SELECT DISTINCT period_end FROM unabsorbed
+                    ORDER BY period_end DESC LIMIT $4)
+                ORDER BY period_end ASC, period_start ASC, id ASC
+            """, aid, lv, _HIGHER_LEVELS[lv], _PROGRESSIVE_CAPS[lv])
+            result[lv] = [ClusterNarrativeSummary(
+                id=r["id"], label=r["label"], narrative=r["narrative"],
+                period_start=r["period_start"], period_end=r["period_end"],
+                member_count=r["member_count"], source_count=r["source_count"],
+            ) for r in rows]
+
+        # Loose days = ONLY the open edge. A memory is hidden if its week is
+        # already closed (its date falls inside ANY active weekly period) OR
+        # it was woven into a weekly cluster. Closed periods are never
+        # re-read — unclustered outliers of a consolidated week included
+        # (Eco's report, day 102). Capped so a long consolidation gap can't
+        # flood the boot context.
+        recent_rows = []
+        if "recent_days" in wanted:
+            recent_rows = await conn.fetch("""
+                SELECT m.id, m.type, m.content, m.weight, m.tags, m.created_at
+                FROM memories m
+                WHERE m.agent_id = $1
+                  AND m.created_at >= CURRENT_DATE - $2::int
+                  AND NOT EXISTS (
+                      SELECT 1 FROM memory_clusters mc
+                      WHERE mc.agent_id = $1 AND mc.level = 'weekly'
+                        AND mc.status = 'active'
+                        AND (m.created_at::date
+                                 BETWEEN mc.period_start AND mc.period_end
+                             OR m.id = ANY(mc.member_ids)))
+                ORDER BY m.created_at ASC
+            """, aid, max_recent_days)
+        recent_days = [{
+            "id": str(r["id"]), "type": r["type"],
+            "content": r["content"], "weight": float(r["weight"]),
+            "tags": list(r["tags"]), "created_at": r["created_at"].isoformat(),
+        } for r in recent_rows]
+
+    return TelescopicViewResponse(
+        agent_identifier=agent_identifier,
+        yearly=result["yearly"],
+        quarterly=result["quarterly"],
+        monthly=result["monthly"],
+        weekly=result["weekly"],
+        recent_days=recent_days,
+    )
+
+
+_LEVEL_RANK = "CASE level WHEN 'yearly' THEN 0 WHEN 'quarterly' THEN 1 WHEN 'monthly' THEN 2 ELSE 3 END"
+
+
+@router.post("/zoom")
+async def fractal_zoom(
+    body: FractalZoomBody,
+    actor: dict = Depends(get_current_user),
+) -> FractalZoomResponse:
+    """Fractal drill-down over the cluster hierarchy.
+
+    Without cluster_id: entry at the highest abstraction level available
+    for the agent (yearly → quarterly → monthly → weekly), or `level` if
+    given. With cluster_id: returns that cluster's children — source
+    clusters for higher levels, member memories for weekly. Optional
+    query_text ranks children semantically within the scope; otherwise
+    children come in chronological order. Each child carries its id so
+    the caller can keep zooming in.
+    """
+    pool = await get_pool()
+    q_emb = None
+    if body.query_text:
+        q_emb = await embed_text(body.query_text, prompt_name="query")
+
+    async with pool.acquire() as conn:
+        agent = await resolve_agent_for_actor(conn, actor, body.agent_identifier)
+        aid = agent["id"]
+
+        parent = None
+        cluster_children: list = []
+        memory_children: list = []
+        child_type = "clusters"
+
+        if body.cluster_id is None:
+            entry_level = body.level
+            if entry_level is None:
+                entry_level = await conn.fetchval(f"""
+                    SELECT level FROM memory_clusters
+                    WHERE agent_id = $1 AND status = 'active'
+                    ORDER BY {_LEVEL_RANK}
+                    LIMIT 1
+                """, aid)
+            if entry_level is not None:
+                # Entry hides lineage-absorbed clusters (thematic weeklies
+                # under a rollup) — you reach them by zooming the rollup.
+                cluster_children = await _zoom_clusters(
+                    conn,
+                    "mc.agent_id = $1 AND mc.level = $2 AND mc.status = 'active'"
+                    " AND NOT EXISTS (SELECT 1 FROM memory_clusters r"
+                    " WHERE r.agent_id = $1 AND r.status = 'active'"
+                    " AND mc.id = ANY(r.source_ids))",
+                    [aid, entry_level], q_emb, body.limit)
+        else:
+            cluster = await resolve_cluster_for_actor(conn, actor, body.cluster_id)
+            if cluster["agent_id"] != aid:
+                raise HTTPException(404)
+            cluster["member_count"] = len(cluster["member_ids"])
+            cluster["source_count"] = len(cluster["source_ids"] or [])
+            parent = _cluster_summary(cluster)
+            if cluster["source_ids"]:
+                cluster_children = await _zoom_clusters(
+                    conn, "mc.id = ANY($1::uuid[]) AND mc.agent_id = $2",
+                    [cluster["source_ids"], aid], q_emb, body.limit)
+            else:
+                child_type = "memories"
+                memory_children = await _zoom_memories(
+                    conn, actor, cluster["member_ids"], q_emb, body.limit)
+
+    return FractalZoomResponse(
+        agent_identifier=body.agent_identifier,
+        parent=parent,
+        child_type=child_type,
+        clusters=cluster_children,
+        memories=memory_children,
+        count=len(cluster_children) + len(memory_children),
+    )
+
+
+async def _zoom_clusters(conn, where: str, params: list,
+                         q_emb, limit: int) -> list[FractalZoomCluster]:
+    if q_emb is not None:
+        params = [*params, q_emb, limit]
+        score_sql = f"1 - (mc.centroid <=> ${len(params) - 1}::vector)"
+        order_sql = f"(mc.centroid IS NULL), mc.centroid <=> ${len(params) - 1}::vector"
+    else:
+        params = [*params, limit]
+        score_sql = "NULL::float"
+        order_sql = "mc.period_end ASC"
+    rows = await conn.fetch(f"""
+        SELECT mc.id, mc.level, mc.label, mc.narrative,
+               mc.period_start, mc.period_end,
+               coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
+               coalesce(array_length(mc.source_ids, 1), 0) AS source_count,
+               {score_sql} AS score
+        FROM memory_clusters mc
+        WHERE {where}
+        ORDER BY {order_sql}
+        LIMIT ${len(params)}
+    """, *params)
+    return [FractalZoomCluster(
+        id=r["id"], level=r["level"], label=r["label"], narrative=r["narrative"],
+        period_start=r["period_start"], period_end=r["period_end"],
+        member_count=r["member_count"], source_count=r["source_count"],
+        score=float(r["score"]) if r["score"] is not None else None,
+    ) for r in rows]
+
+
+async def _zoom_memories(conn, actor: dict, member_ids: list,
+                         q_emb, limit: int) -> list[FractalZoomMemory]:
+    if q_emb is not None:
+        rows = await conn.fetch("""
+            SELECT *, 1 - (embedding <=> $2::vector) AS score
+            FROM memories WHERE id = ANY($1::uuid[])
+            ORDER BY (embedding IS NULL), embedding <=> $2::vector
+        """, member_ids, q_emb)
+    else:
+        rows = await conn.fetch("""
+            SELECT *, NULL::float AS score
+            FROM memories WHERE id = ANY($1::uuid[])
+            ORDER BY created_at ASC
+        """, member_ids)
+    vis = await precompute_read_visibility(conn, actor)
+    out: list[FractalZoomMemory] = []
+    for mem in rows:
+        if not check_read_memory(vis, mem):
+            continue
+        out.append(FractalZoomMemory(
+            memory_id=mem["id"], type=mem["type"], content=mem["content"],
+            weight=float(mem["weight"]), tags=list(mem["tags"]),
+            created_at=mem["created_at"],
+            score=float(mem["score"]) if mem["score"] is not None else None,
+        ))
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ---------------------------------------------------------------------------

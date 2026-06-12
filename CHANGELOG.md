@@ -2,6 +2,47 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.1] — 2026-06-12
+
+### Added — Progressive zoom & fractal navigation
+
+v1.3 made the fractal memory reachable; v1.3.1 makes it **economical**. The telescopic view loaded everything (one agent booted 157 weekly + 2 monthly + 1 quarterly clusters); now each temporal layer is the compression of the previous one and closed periods are never re-read at finer granularity.
+
+- **`GET /api/v1/clusters/telescopic/progressive`** — progressive-zoom boot view:
+  - yearly: all active yearly clusters (previous years)
+  - quarterly: only those not period-covered by an active yearly
+  - monthly: only those not covered by an active quarterly/yearly
+  - weekly: only the loose weeks of the open period
+  - `recent_days`: raw memories not yet woven into any active weekly cluster (membership is the authoritative signal — period bounds lie when a partial week gets consolidated), capped at `max_recent_days` (default 14)
+  - Per-level safety caps count **distinct periods**, not clusters (weekly clusters are thematic — one week can hold 10+ — so a cluster-count cap would silently drop whole weeks).
+  - Same response shape as `/clusters/telescopic`: boot consumers can switch endpoints without changes. Real-data effect: that same agent now boots 1 quarterly + the open month's weeklies + unwoven raw memories.
+- **`POST /api/v1/clusters/zoom`** — fractal drill-down over the cluster hierarchy. Without `cluster_id`, entry at the highest abstraction available (yearly → quarterly → monthly → weekly), or an explicit `level`. With `cluster_id`, returns that cluster's children — source clusters for higher levels, member memories for weekly. Optional `query_text` ranks children semantically (cosine over centroids / memory embeddings) **within the scope**; without it, chronological. Each child carries its id, so the caller keeps zooming until raw memories. Ownership-scoped end to end (agent resolution, cross-agent 404, member visibility checks).
+- **2 new MCP tools** (38 → 40): `get_progressive_view`, `fractal_search`. Both declare `anthropic/maxResultSizeChars` (400K/200K) so a full boot arrives in ONE call without client-side `MAX_MCP_OUTPUT_TOKENS` configuration; `sections` parameter available for size-capped clients.
+- **Week rollups** — the weekly layer now has a unified artifact. The consolidation cell weaves each closed week's thematic clusters into ONE weekly narrative (400-600 words, editable `CellAgent Week Rollup` template), with the thematic clusters preserved beneath it as `source_ids`. Views read by lineage: the boot shows one narrative per closed week; `fractal_search` zooms rollup → thematic clusters → raw memories. Monthly consolidation consumes rollups (lineage filter prevents eating the same week twice; weeks without a rollup fall back to their thematic clusters). Backfill is automatic: re-triggering an already-consolidated week creates the missing rollup, and the rollup's failure never sinks a successful thematic consolidation.
+- **`recent_days` = the open edge only**: a memory is excluded if its date falls inside ANY active weekly period (closed weeks are never re-read, unclustered outliers included) or if it is woven into a weekly cluster.
+
+### Changed — higher-consolidation prompts v2 (length calibration)
+
+Real-data calibration: a quarterly generated against a 2500-4000-word target came out at 1250 words. Three compounding causes, all fixed:
+
+- **Reading protocol**: each prompt now mandates a full pass over every source narrative before writing — every source week/month/quarter must be represented or the result is invalid. Forces real grounding instead of skimming.
+- **Per-section word budgets** replacing the single global target (which reasoning models consistently undershoot by 10-60% in JSON output). Budgets sum above the floor to absorb the model's natural undershoot.
+- **Hard absolute minimums** framed as execution failure (monthly ≥1600, quarterly ≥2800 aiming 3200-3800, yearly ≥4500 aiming 5000-6000), with explicit instruction to return to the sources for more material rather than pad.
+- Measured effect (same agent, same sources): monthly 1413/1200/1510 → 1656/1949/1582 words; quarterly 1250 → 3189.
+- `CELL_LLM_MAX_TOKENS` env (default 32768) replaces the hardcoded 16384 — yearly narratives plus reasoning tokens left no headroom.
+
+### Fixed
+
+- **Scheduled foresight extraction always failed when signals were found**: the metadata write cast confidence with `$4::text`, but asyncpg requires a Python `str` for text params and the cell passes a float → `DataError: invalid input for query argument $4`. Now `$4::float8`, consistent with existing metadata (confidence stored as JSON number). Verified against the live `ecodb_cell` role with the exact crashing value.
+- **Deleted clusters silently blocked regeneration**: `_check_idempotency` only looked at `cell_runs`, so a completed run whose cluster had since been deleted still blocked the period forever. This is how an agent's quarterly got built from 2 months instead of 3 — the missing month's regeneration was skipped without a trace. For higher consolidation, idempotency now also requires the active cluster to exist.
+- **Overlapping weekly clusters**: the manual-trigger default period was a rolling `(today-6, today)` window anchored to the invocation day, while cron used calendar weeks — three different paths cut weeks three different ways, producing overlapping weekly clusters with memories counted twice. `_default_period` now anchors to the last complete Mon..Sun week (same convention as month/quarter/year), and the weekly cron moved Sunday → Monday so the just-completed week is consolidated on time.
+- **`ecodb-cell` reported permanently "unhealthy"**: the container inherits the api image's HTTP healthcheck (`curl :8080/health`) but the cell worker serves no HTTP. Healthcheck disabled for the cell service — the worker is PID 1, so container exit IS the liveness signal. A permanently-red healthcheck masks real failures.
+- **Empty error strings on failed cell runs**: `str(e)` of a message-less exception is `""`, leaving failed runs undebuggable. `_fail_run` now records the exception type name when the message is empty.
+
+### Changed
+
+- Image tags: `ecodb-api` 0.24.0 → 0.25.0, `ecodb-mcp` 1.6.0 → 1.8.0 (compose tag was stale at 1.6.0 while CLAUDE.md claimed 1.7.0; realigned).
+
 ## [1.3.0] — 2026-06-11
 
 ### Added — Memory Agent

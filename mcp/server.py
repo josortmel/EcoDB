@@ -11,7 +11,8 @@ Core tools (agent workflow — save, search, read, graph):
 - save_triple       → POST /graph/triples
 - neighbors         → GET  /graph/neighbors/{node}
 
-Full 32-tool set covers all GAMR phases (memory, graph, documents, identity).
+Full 40-tool set covers all GAMR phases (memory, graph, documents, identity,
+metacognition clusters + progressive/fractal navigation).
 
 Auth:
 - ECODB_API_KEY en env (formato `ecodb_<32-bytes-base64url>`).
@@ -1640,7 +1641,7 @@ def get_briefing(agent_identifier: str) -> dict:
         return _err(e)
 
 
-@mcp.tool()
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 400000})
 def get_telescopic_view(agent_identifier: str,
                         levels: str = "weekly,monthly,quarterly,yearly") -> dict:
     """Cargar la cadena de memoria fractal del agente para el protocolo de boot.
@@ -1652,6 +1653,76 @@ def get_telescopic_view(agent_identifier: str,
     try:
         data = _api_call("GET", "/api/v1/clusters/telescopic",
                          params={"agent_identifier": agent_identifier, "levels": levels})
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+# anthropic/maxResultSizeChars: a full fractal (quarterly narratives 3-4K
+# words + a month of weeklies + loose raw memories) exceeds Claude Code's
+# default 25K-token MCP output cap. Annotating the size server-side lets the
+# boot arrive in ONE call without any client-side env configuration.
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 400000})
+def get_progressive_view(agent_identifier: str, max_recent_days: int = 14,
+                         sections: str = "all") -> dict:
+    """Vista telescópica progresiva — cada capa temporal comprime la anterior.
+
+    Lo cerrado no se re-lee: yearly de años anteriores → quarterly no
+    absorbidos por un yearly → monthly no absorbidos por un quarterly →
+    weekly sueltos del mes abierto → días sueltos (memorias crudas no
+    tejidas en ninguna semana). Cada cluster llega como unidad individual
+    y el orden de lectura es exacto: yearly → quarterly → monthly →
+    weekly → recent_days, de más antiguo a más reciente dentro de cada
+    nivel. UNA llamada carga el boot completo.
+
+    Args:
+      agent_identifier: nombre del agente (obligatorio).
+      max_recent_days: cap de días crudos al final, 1-31 (default 14).
+      sections: "all" (default) o lista separada por comas de
+        yearly,quarterly,monthly,weekly,recent_days para cargar la vista
+        por capítulos si un cliente tiene límite de respuesta.
+    """
+    try:
+        data = _api_call("GET", "/api/v1/clusters/telescopic/progressive",
+                         params={"agent_identifier": agent_identifier,
+                                 "max_recent_days": max_recent_days,
+                                 "sections": sections})
+        return _ok(data)
+    except RuntimeError as e:
+        return _err(e)
+
+
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 200000})
+def fractal_search(agent_identifier: str, cluster_id: Optional[str] = None,
+                   query_text: Optional[str] = None,
+                   level: Optional[str] = None, limit: int = 20) -> dict:
+    """Búsqueda fractal: navegar la memoria desde la máxima abstracción hacia abajo.
+
+    Sin cluster_id entra por el nivel más alto que exista (yearly →
+    quarterly → monthly → weekly). Con cluster_id devuelve sus hijos:
+    clusters fuente si es un nivel alto, memorias concretas si es weekly.
+    Cada hijo trae su id — para bajar otro nivel, repite la llamada con
+    ese id como cluster_id. query_text opcional rankea los hijos por
+    similitud semántica dentro del scope; sin query, orden cronológico.
+
+    Args:
+      agent_identifier: nombre del agente (obligatorio).
+      cluster_id: UUID del cluster en el que hacer zoom (opcional).
+      query_text: texto para rankear semánticamente, 3-2000 chars (opcional).
+      level: nivel de entrada explícito weekly|monthly|quarterly|yearly (opcional).
+      limit: máximo de hijos, 1-100 (default 20).
+    """
+    if cluster_id is not None and not _UUID_RE.match(cluster_id):
+        return _err(RuntimeError("cluster_id must be a valid UUID"))
+    body: dict = {"agent_identifier": agent_identifier, "limit": limit}
+    if cluster_id is not None:
+        body["cluster_id"] = cluster_id
+    if query_text is not None:
+        body["query_text"] = query_text
+    if level is not None:
+        body["level"] = level
+    try:
+        data = _api_call("POST", "/api/v1/clusters/zoom", json=body)
         return _ok(data)
     except RuntimeError as e:
         return _err(e)

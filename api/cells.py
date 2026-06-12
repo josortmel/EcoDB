@@ -148,7 +148,13 @@ def _get_trigger_sem() -> asyncio.Semaphore:
 
 def _default_period(level: str, today: date) -> tuple[date, date]:
     if level == "weekly":
-        end = today
+        # Last COMPLETE calendar week (Mon..Sun), matching the convention of
+        # the other levels (previous complete month/quarter/year). The old
+        # rolling (today-6, today) window shifted with the invocation day, so
+        # trigger/cron/catch-up produced OVERLAPPING weekly clusters
+        # (e.g. 06-02..06-08 vs 06-06..06-12) with memories counted twice.
+        days_since_sunday = (today.weekday() + 1) % 7 or 7
+        end = today - timedelta(days=days_since_sunday)
         start = end - timedelta(days=6)
     elif level == "monthly":
         first_of_month = today.replace(day=1)

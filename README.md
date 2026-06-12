@@ -6,7 +6,7 @@
   <a href="https://github.com/josortmel/EcoDB/releases/latest"><img src="https://img.shields.io/github/v/release/josortmel/EcoDB?color=0d9488&label=release" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776ab" alt="Python">
-  <img src="https://img.shields.io/badge/MCP-38%20tools-0d9488" alt="MCP Tools">
+  <img src="https://img.shields.io/badge/MCP-40%20tools-0d9488" alt="MCP Tools">
   <img src="https://img.shields.io/badge/LangChain-integration-1c3c3c" alt="LangChain">
   <img src="https://img.shields.io/badge/dashboard-Electron-0d9488" alt="Dashboard">
   <img src="https://img.shields.io/badge/docker-compose-2496ed" alt="Docker">
@@ -154,7 +154,7 @@ Each cell is a cron-scheduled job over one agent's memory:
 
 | Cell | What it does | Produces |
 |------|--------------|----------|
-| **Consolidation** | Clusters related memories across time horizons (weekly → monthly → quarterly → yearly) and narrates each cluster | Telescopic memory: a zoomable summary of what happened |
+| **Consolidation** | Clusters related memories across time horizons (weekly → monthly → quarterly → yearly) and narrates each cluster. Each closed week's thematic clusters are woven into one unified weekly narrative (week rollup), with the themes preserved beneath it for drill-down | Telescopic memory: a zoomable summary of what happened |
 | **Foresight extraction** | Scans recent memories for temporal signals (deadlines, scheduled events) above a confidence threshold | Foresights: events the system expects, urgency-scored |
 | **Skill distillation** | Finds cases that share a task type with a high success rate and abstracts the procedure | Skills: reusable steps, tools, and failure modes |
 | **Identity tension** | Compares how an agent behaves against how it describes itself | Tensions: gaps between observed and declared traits |
@@ -245,6 +245,8 @@ Connect any MCP-compatible client (Claude Code, Claude Desktop, Cursor, Windsurf
 | `list_clusters` | List an agent's clusters by level / status |
 | `read_cluster` | Read a cluster's narrative (+ optional members / sources) |
 | `get_telescopic_view` | Load an agent's full fractal memory chain (yearly → weekly + last 3 days) |
+| `get_progressive_view` | Progressive-zoom boot: each layer compresses the previous, closed periods are never re-read. One call loads an agent's whole memory (size-annotated for MCP hosts) |
+| `fractal_search` | Drill-down navigation: enter at the highest abstraction, zoom by id (quarter → month → week → themes → raw memories), optional semantic ranking per scope |
 | `get_briefing` | Agent briefing: foresights + tensions + telescopic summary |
 | `narrate_cluster` | Write / update a cluster narrative (owner-only) |
 
@@ -258,7 +260,7 @@ Standard search returns K results from a pool of K candidates. UltraSearch multi
 
 ## LangChain Integration
 
-EcoDB ships a first-class LangChain integration. Use it as a **Retriever**, a durable cross-session **Memory**, or a full **agentic toolset** (13 native tools, or 38 via MCP parity) — all backed by the GAMR retrieval engine.
+EcoDB ships a first-class LangChain integration. Use it as a **Retriever**, a durable cross-session **Memory**, or a full **agentic toolset** (13 native tools, or 40 via MCP parity) — all backed by the GAMR retrieval engine.
 
 The package lives in the repo at [`ecodb-langchain/`](ecodb-langchain/) and installs from source (not yet on PyPI):
 
@@ -266,7 +268,7 @@ The package lives in the repo at [`ecodb-langchain/`](ecodb-langchain/) and inst
 pip install -e ./ecodb-langchain
 
 # optional extras
-pip install -e "./ecodb-langchain[mcp]"      # full 38-tool MCP parity (langchain-mcp-adapters)
+pip install -e "./ecodb-langchain[mcp]"      # full 40-tool MCP parity (langchain-mcp-adapters)
 pip install -e "./ecodb-langchain[openai]"   # langchain-openai for the agent LLM
 ```
 
@@ -291,7 +293,7 @@ tools = make_ecodb_tools(client)
 | `EcoDBMemory` | Durable cross-session LangChain memory |
 | `make_ecodb_tools(client)` | 13 native tools: search, recent, save, graph nav, clusters, telescopic, briefing |
 | `build_ecodb_agent()` | Prebuilt LangGraph ReAct agent, model-agnostic |
-| `load_ecodb_mcp_tools()` / `build_ecodb_agent_from_mcp()` | Full 38-tool parity via `langchain-mcp-adapters` |
+| `load_ecodb_mcp_tools()` / `build_ecodb_agent_from_mcp()` | Full 40-tool parity via `langchain-mcp-adapters` |
 
 **Requirements:** Python ≥ 3.10, `langchain-core` ≥ 0.3, `httpx` ≥ 0.27. Extras: `[mcp]` needs `langchain-mcp-adapters` ≥ 0.1, `[openai]` needs `langchain-openai` ≥ 0.3.
 
@@ -304,7 +306,7 @@ tools = make_ecodb_tools(client)
 **Two interfaces, same data:**
 
 - **REST API**: 30+ endpoints with JWT auth, full CRUD, interactive docs at `/docs`
-- **MCP Server**: 38 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
+- **MCP Server**: 40 tools via Model Context Protocol. Works with any MCP host (Claude Code, Cursor, Windsurf, custom clients). SSE or stdio transport.
 
 **Six Docker services:**
 
