@@ -2,6 +2,15 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.2] — 2026-07-01
+
+### Changed — NER image optimization
+
+- **CPU-only torch pin on NER service**: `ner/Dockerfile` now installs `torch==2.12.1+cpu` via `--extra-index-url https://download.pytorch.org/whl/cpu`. Eliminates the full CUDA stack (~5.3GB of nvidia-cublas, nvidia-cuda-runtime, triton, etc.) that was pulled as a transitive dependency of GLiNER despite the NER service running CPU-only inference.
+- **Image size**: `ecodb-ner` 8.36 GB → 1.77 GB (**−79%**, −6.59 GB).
+- **Zero functional impact**: GLiNER entity extraction verified end-to-end (save_memory + entity extraction + semantic search + graph traversal). Full regression: 7/7 containers healthy, 5 MCP tools verified, 0 regressions.
+- Revert anchor: `sha256:7504899c22d3ecad6ab281ab1e7350cd0862ce1bb6c252bee0dd9c830702a868` (pre-pin image).
+
 ## [1.3.1] — 2026-06-12
 
 ### Added — Progressive zoom & fractal navigation
