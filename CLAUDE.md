@@ -38,9 +38,9 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - **embeddings** — Jina v4 512-dim, INT8 GPU. Solo accesible internamente (sin puerto host). HF cache bind-mount `:ro`.
 - **mcp** — Proxy MCP→API. SSE transport. Puerto `8091`. Sin lógica de negocio.
 - **ner** — GLiNER NER para extracción de entidades. CPU-only. Puerto host `8092`, interno `8091`.
-- **llm** (opcional, profile `with-llm`) — llama.cpp + Qwen 2.5 3B. Para clasificación, HyDE.
-- **worker** (opcional, profile `with-ingestion`) — Ingesta de documentos (PDF/DOCX/audio).
-- **ecodb-cell** (opcional, profile `with-metacognition`, desactivado por defecto) — Cell worker: consolidation (weekly clustering), foresight extraction (daily), skill distillation (weekly). Conecta directamente a postgres con role `ecodb_cell` (least-privilege). LLM: LangChain si ecodb-langchain instalado, httpx directo a DeepSeek como fallback. EcoDB NO requiere ecodb-langchain para funcionar.
+- **llm** (profile `with-llm`, **OFF por defecto** — `with-llm` NO está en `COMPOSE_PROFILES`; además parado a propósito el 2026-08-24: la API usa DeepSeek y HyDE local está desactivado) — llama.cpp + Qwen 2.5 3B. Para clasificación, HyDE.
+- **worker** (profile `with-ingestion`, **ON por defecto** vía `COMPOSE_PROFILES` en `.env`) — Ingesta de documentos (PDF/DOCX/audio).
+- **ecodb-cell** (profile `with-metacognition`, **ON por defecto** vía `COMPOSE_PROFILES` en `.env` desde 2026-08-24) — Cell worker: consolidation (weekly clustering), foresight extraction (daily), skill distillation (weekly). **Es el ÚNICO que corre el scheduler de consolidación programada** (croniter sobre `cell_task_configs`); el trigger de la API es solo MANUAL/bajo demanda, no tiene calendario. Apagar cell congela la memoria telescópica (el boot de los agentes). Conecta directamente a postgres con role `ecodb_cell` (least-privilege). LLM: LangChain si ecodb-langchain instalado, httpx directo a DeepSeek como fallback. EcoDB NO requiere ecodb-langchain para funcionar. Detalle del mecanismo (scheduler DB-config, catch-up, células): `api/cell_worker.md`.
 
 ## Estructura del repo
 
@@ -203,6 +203,10 @@ docker compose logs -f api mcp
 ```bash
 git clone https://github.com/josortmel/ecodb && cd ecodb
 ./scripts/setup.sh                    # genera .env con secretos random
+# IMPORTANTE: .env debe incluir esta línea (worker + cell always-on):
+#   COMPOSE_PROFILES=with-ingestion,with-metacognition
+# Sin ella, `docker compose up -d` levanta solo 5/8 servicios (sin worker ni cell)
+# y la consolidación de memoria programada NO corre → la vista telescópica se congela.
 docker compose up --build -d          # construye imágenes + descarga modelos (~35 GB)
 docker compose logs -f embeddings ner # esperar "model loaded"
 docker exec ecodb-api python bootstrap_first_apikey.py
@@ -226,6 +230,9 @@ docker compose restart mcp
 - **Media dir permissions**: el volumen Docker se crea como root. El contenedor API corre como `apiuser`. Post-deploy: `docker exec -u root ecodb-api sh -c "mkdir -p /app/media && chown apiuser:apiuser /app/media"`.
 - **Alias candidates vacíos**: si `GET /admin/alias-candidates?status=pending` devuelve 0 resultados con muchos nodos activos, el pipeline de memoria probablemente no está llamando a `detect_alias_candidates()`. Verificar que `link_entities_from_content()` recibe `pool`. Ejecutar `POST /admin/alias-candidates/scan` para poblar retroactivamente.
 - **Alias threshold muy alto**: `_ALIAS_SIM_THRESHOLD` en `gliner_service.py`. Si no se generan candidatos, bajar a 0.55-0.60. Si hay demasiado ruido (fechas, números), subir a 0.70-0.75. El valor 0.65 está calibrado para nombres de entidad.
+- **`POST /memories` → 503 / `save_memory` ReadTimeout con todo "Up"** (7-sep-2026, dos veces): `ecodb-embeddings` pasa a `unhealthy` (healthcheck 10 s vencido) con el encoder colgado («Encoding texts… 0/1» apilado), 400-600 % de CPU y 3-4 GB de GPU retenidos, sin ninguna línea de error en su log. Causa en el HOST: la 2080 Ti llena (vmwp/Docker ~6,4 GB + `dwm.exe` 3-4,6 GB en dos instancias al ~50 % del motor 3D; sospechosos NVIDIA App Overlay y escalado 150 %). Diagnóstico: `docker inspect ecodb-embeddings --format '{{json .State.Health.Log}}'`, `nvidia-smi`, y en PowerShell `Get-Counter '\GPU Process Memory(*)\Dedicated Usage'` (memoria de GPU por PID; nvidia-smi no la da en WDDM). Remedio: `docker restart ecodb-embeddings` (sin estado; healthy en 60-80 s). Deuda: el encoder debería fallar rápido o caer a CPU avisando, no colgarse en silencio.
+- **Backup a GitHub corrupto con «PUSH OK»** (7-sep-2026): `ecodb-backup/backup.ps1` hacía `docker exec pg_dump | docker exec -i gzip > fichero`; desde PowerShell 7 el pipeline convierte los bytes gzip en texto UTF-16 con U+FFFD (irrecuperable) y el script lo subió confirmado. Regla: bytes binarios nunca por el pipeline ni la redirección de PowerShell — comprimir DENTRO del contenedor (`sh -c "pg_dump … | gzip -c > /tmp/x.gz && gzip -t /tmp/x.gz"`), `docker cp` fuera, comprobar la firma `1F 8B`, y verificar por contenido (`zcat | tail`, filas de `COPY public.memories`), nunca por tamaño ni exit code. Push sin terminal: `git -c credential.helper='!gh auth git-credential' push`.
+- **DeepSeek 402 Payment Required en `ecodb-cell`**: el saldo se agota sin aviso; `LLM attempt N failed … 402` y `Cell consolidation/weekly agent N failed`. El catch-up del cell worker solo mira UNA ventana hacia atrás (`_catch_up`, ver FARO_ESTADO L47): si el 402 dura más de una cadencia, esa semana/mes no se narra nunca. Comprobar saldo o cambiar `CELL_LLM_PROVIDER`/`CELL_LLM_URL`/`CELL_LLM_MODEL` (env del contenedor) antes del siguiente disparo (`docker logs ecodb-cell | grep "Cron fire"`).
 
 ## Deuda técnica — deep hunt v0.9 (2026-06-01)
 
