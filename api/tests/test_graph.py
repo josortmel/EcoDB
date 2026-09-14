@@ -236,6 +236,16 @@ def test_path_self_returns_zero_length(client, super_jwt):
     assert r.json() == {"source": "pytest-SELF-1", "target": "pytest-SELF-1", "path": ["pytest-SELF-1"], "length": 0}
 
 
+def test_path_nonexistent_source_returns_404(client, super_jwt):
+    """Invariante 'input malo nunca 500' (extiende OBS-2 de neighbors): un extremo que
+    NO existe en el grafo → 404, distinto de test_path_unreachable (ambos existen sin
+    camino) — es otra rama del endpoint ('source node not found'). Consulta pura, no
+    crea nodos. Verificado a mano el 14-sep (caza de bugs #46, ticket #48)."""
+    r = client.get("/graph/path?source=pytest-NOEXISTE-src-xyz&target=pytest-NOEXISTE-tgt-xyz",
+                   headers=auth(super_jwt))
+    assert r.status_code == 404, r.text
+
+
 # ---------------------------------------------------------------------------
 # DELETE /graph/triples/{id}
 # ---------------------------------------------------------------------------
