@@ -843,14 +843,19 @@ async def get_cluster_sources(
 # C23 (#221): an owner rewrite is no longer the cell's text, so the cluster must stop
 # claiming the cell's model: cell_model is removed (readers report model=None, i.e. "no
 # measurement"), kept once as cell_model_before_owner, and narrated_by="owner" is set.
+# C23b: same for the authorship marker — cell_generated moves to cell_generated_before_owner
+# (only writers of cell_generated exist; no reader treats its absence as an error).
 _OWNER_NARRATE_SQL = """
     UPDATE memory_clusters
     SET narrative = $1,
         narrated_at = NOW(),
-        metadata = (coalesce(metadata, '{}'::jsonb) - 'cell_model')
+        metadata = (coalesce(metadata, '{}'::jsonb) - 'cell_model' - 'cell_generated')
                    || jsonb_build_object('narrated_by', 'owner')
                    || CASE WHEN metadata ? 'cell_model'
                            THEN jsonb_build_object('cell_model_before_owner', metadata->'cell_model')
+                           ELSE '{}'::jsonb END
+                   || CASE WHEN metadata ? 'cell_generated'
+                           THEN jsonb_build_object('cell_generated_before_owner', metadata->'cell_generated')
                            ELSE '{}'::jsonb END
     WHERE id = $2
 """

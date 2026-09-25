@@ -62,6 +62,8 @@ def test_owner_narrate_drops_cell_model_claim(monkeypatch):
     assert "- 'cell_model'" in sql
     assert "'narrated_by', 'owner'" in sql
     assert "cell_model_before_owner" in sql
+    assert "- 'cell_generated'" in sql                   # C23b: authorship claim moves too
+    assert "cell_generated_before_owner" in sql
     assert args[0] == "mi versión"
 
 
