@@ -1306,7 +1306,10 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 WHERE agent_id=$1 AND level='weekly' AND status='active' AND source_ids IS NULL
                   AND NOT (period_start=$2 AND period_end=$3)
             """, agent_id, week_start, week_end)}
-            memories = [m for m in memories if m['id'] not in _woven]
+            # code-2 review: members are the week's own memories only; the margin memories were
+            # first-come (whichever week ran first kept them, across month boundaries too).
+            memories = [m for m in memories if m['id'] not in _woven
+                        and week_start <= m['created_at'].date() <= week_end]
 
             if len(memories) < MIN_CLUSTER_SIZE:
                 await _complete_run(conn, run_id, 0)
