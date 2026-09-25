@@ -1152,12 +1152,22 @@ async def unarchive_memory(
         if not actor.get("is_super"):
             if mem["user_id"] != int(actor["sub"]):
                 raise HTTPException(403, "no access to this memory")
-        result = await conn.execute(
-            "UPDATE memories SET staleness = 'active', updated_at = now() WHERE id = $1 AND staleness = 'archived'",
-            memory_id,
-        )
-        if result == "UPDATE 0":
-            raise HTTPException(404, "Memory not archived")
+        async with conn.transaction():
+            result = await conn.execute(
+                "UPDATE memories SET staleness = 'active', updated_at = now() WHERE id = $1 AND staleness = 'archived'",
+                memory_id,
+            )
+            if result == "UPDATE 0":
+                raise HTTPException(404, "Memory not archived")
+            # C29: same audit shape as PUT /{id}/staleness, so the manual staleness history
+            # (read by search.flush_accessed_buffer) sees this explicit return to 'active'.
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'update_staleness', 'memory', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(memory_id),
+                json.dumps({"staleness": "active"}),
+                actor.get("organization_id"),
+            )
     return {"status": "ok", "memory_id": str(memory_id), "staleness": "active"}
 
 
