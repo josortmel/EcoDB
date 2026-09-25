@@ -241,6 +241,28 @@ async def detect_contradictions(
     return contradictions
 
 
+def agent_name_warning(query_text, requested_agent, identifiers, results) -> Optional[str]:
+    """C21 (#365): the query names exactly one of the actor's agents, no agent filter was
+    passed, and some memory results belong to someone else. Label it; never re-rank."""
+    if requested_agent is not None or not query_text:
+        return None
+    named = {i for i in identifiers
+             if i != "SIN_AUTOR" and re.search(rf"(?<!\w){re.escape(i)}(?!\w)", query_text, re.IGNORECASE)}
+    if len(named) != 1:
+        return None
+    (agent,) = named
+
+    def _get(r, key, default=None):
+        return r.get(key, default) if isinstance(r, dict) else getattr(r, key, default)
+
+    memories = [r for r in results if _get(r, "source_type", "memory") != "document_chunk"]
+    others = [r for r in memories if (_get(r, "agent_identifier") or "").lower() != agent.lower()]
+    if not others:
+        return None
+    return (f"query names agent '{agent}' but results include other agents' memories "
+            f"({len(others)} of {len(memories)}); pass agent_identifier=\"{agent}\" to restrict")
+
+
 def date_window_warnings(fecha_desde, fecha_hasta, result_count: int) -> list[str]:
     """#340: label the zero that a date filter produces, so it can't pass for "nothing there".
 
@@ -1576,6 +1598,13 @@ async def search_memories(
                     agent_identifier=body.agent_identifier, warnings=_search_warnings)
 
     _search_warnings.extend(date_window_warnings(body.fecha_desde, body.fecha_hasta, len(results)))
+    if body.agent_identifier is None and body.query_text and results:
+        async with pool.acquire() as _an_conn:
+            _own_agents = [r["identifier"] for r in await _an_conn.fetch(
+                "SELECT identifier FROM agents WHERE user_id = $1", int(actor["sub"]))]
+        _an_warning = agent_name_warning(body.query_text, body.agent_identifier, _own_agents, results)
+        if _an_warning:
+            _search_warnings.append(_an_warning)
     if _dormant_hidden:
         _search_warnings.append(
             f"{_dormant_hidden} dormant/archived memories match these filters and were excluded; "
