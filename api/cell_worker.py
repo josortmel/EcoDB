@@ -1270,6 +1270,16 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 conn, agent_id, ws_id,
                 week_start - timedelta(days=3),
                 week_end + timedelta(days=3))
+            # #362: the +-3 day margin let boundary memories be clustered in two adjacent weeks,
+            # giving twin clusters (same members, same centroid, two narratives; 34 active pairs
+            # measured 2026-09-25). A memory is woven once: drop the ones already in another
+            # week's active thematic cluster.
+            _woven = {r['id'] for r in await conn.fetch("""
+                SELECT DISTINCT unnest(member_ids) AS id FROM memory_clusters
+                WHERE agent_id=$1 AND level='weekly' AND status='active' AND source_ids IS NULL
+                  AND NOT (period_start=$2 AND period_end=$3)
+            """, agent_id, week_start, week_end)}
+            memories = [m for m in memories if m['id'] not in _woven]
 
             if len(memories) < MIN_CLUSTER_SIZE:
                 await _complete_run(conn, run_id, 0)
