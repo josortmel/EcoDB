@@ -936,8 +936,13 @@ async def flush_accessed_buffer(pool) -> None:
     if not ids:
         return
     async with pool.acquire() as conn:
+        # #365: a memory that was found and returned is alive again. Without this, a dormant
+        # memory (excluded from search by default) could never be accessed, so it could never
+        # wake up. 'archived' is an explicit decision and stays archived.
         await conn.execute(
-            "UPDATE memories SET last_accessed = now() WHERE id = ANY($1::uuid[])",
+            """UPDATE memories SET last_accessed = now(),
+                   staleness = CASE WHEN staleness IN ('stale', 'dormant') THEN 'active' ELSE staleness END
+               WHERE id = ANY($1::uuid[])""",
             [uuid.UUID(i) for i in ids],
         )
     logging.getLogger("ecodb.perf").info("Flushed %d accessed memory IDs", len(ids))
@@ -1176,6 +1181,21 @@ async def search_memories(
             LIMIT ${limit_idx}
         """
         rows = await conn.fetch(sql, *params)
+
+        # #365: dormant/archived memories are excluded by default and MCP callers could not
+        # see that happen — the map image had the tag and never came back. When a narrow
+        # filter (tags or dates) is on, say how many matches the dormancy filter hid.
+        _dormant_hidden = 0
+        if not body.include_dormant and (body.tags or body.fecha_desde is not None or body.fecha_hasta is not None):
+            _dormant_clause = "(m.staleness IS NULL OR m.staleness NOT IN ('dormant', 'archived'))"
+            _dw = [w for w in where_parts if w != _dormant_clause]
+            _dw.append("m.staleness IN ('dormant', 'archived')")
+            # $1/$2 are referenced so the parameter list stays positionally identical.
+            _dormant_hidden = await conn.fetchval(f"""
+                SELECT count(*) FROM memories m
+                WHERE $1::vector IS NOT NULL AND ($2::text IS NULL OR TRUE)
+                  AND {" AND ".join(_dw)}
+            """, *params[:-1]) or 0
 
         # B.4: HyDE — use pre-computed hyde_vec (generated outside conn block).
         # score here is raw cosine similarity (1 - distance), NOT GAMR composite.
@@ -1519,6 +1539,10 @@ async def search_memories(
                     agent_identifier=body.agent_identifier)
 
     _search_warnings.extend(date_window_warnings(body.fecha_desde, body.fecha_hasta, len(results)))
+    if _dormant_hidden:
+        _search_warnings.append(
+            f"{_dormant_hidden} dormant/archived memories match these filters and were excluded; "
+            f"pass include_dormant=true to include them")
 
     # #365: same rule for the document chunks that ride in graph_context.
     if modality_value in ("image", "audio"):
