@@ -443,61 +443,34 @@ def search(
     tags: Optional[list[str]] = None,
     deep_factor: int = 2,
     cluster_mode: str = "none",
+    include_dormant: bool = False,
 ) -> list:
-    """Busqueda semantica multimodal con motor GAMR (8 etapas).
-
-    Motor de busqueda inteligente que combina similitud semantica, expansion
-    por grafo de conocimiento, coherencia temporal y deteccion de
-    contradicciones. Resultados ordenados por score compuesto GAMR.
+    """Busqueda semantica multimodal GAMR, ordenada por score compuesto.
 
     Args:
-      query_text: texto de busqueda (>=3, <=2000 chars). Uno de query_text o
-        query_image es obligatorio.
-      query_image: imagen en base64 (PNG/JPEG/WebP) para busqueda visual.
-        Cross-modal: texto encuentra imagenes y viceversa.
-      query_type: tipo de consulta — afecta pesos del score compuesto:
-        - "factual": prioriza frescura (0.30) y semantica (0.35). Para
-          preguntas de hechos actuales: "que es X", "donde esta Y".
-        - "historical": no penaliza antiguedad (freshness 0.10), prioriza
-          peso de memoria (0.30). Para linea temporal: "cuando paso X".
-        - "analytical": maximiza grafo (0.30) y semantica (0.30). Para
-          analisis: "por que X", "diferencia entre X e Y".
-        - "contextual": equilibrado. Default si no se especifica.
-        Si no se proporciona, se clasifica automaticamente por heuristicas.
-      modality_filter: filtrar por modalidad. "all" (default), "text",
-        "image", "audio".
+      query_text: texto (3-2000 chars). Obligatorio query_text o query_image.
+      query_image: imagen base64 (PNG/JPEG/WebP). Cross-modal texto<->imagen.
+      query_type: factual|historical|analytical|contextual (pesos del score; auto si se omite).
+      modality_filter: all (default)|text|image|audio.
       limit: max resultados (1-100, default 20).
-      max_images: max imagenes inline (default 3). 0 = sin imagenes.
-      workspace_id: filtrar a un workspace.
-      project_id: filtrar a un project.
-      type: filtrar por tipo de memoria (momento/decision/acuerdo/tecnico/
-        descubrimiento/observacion/referencia).
-      user_id: filtrar por creador.
-      agent_identifier: filter by agent identifier.
-      fecha_desde: ISO 8601, memorias creadas desde esta fecha.
-      fecha_hasta: ISO 8601, memorias creadas hasta esta fecha.
-      expand_scope: override visibilidad por jerarquia estricta.
-      graph_discovery: si true, GAMR añade memorias descubiertas via grafo
-        de conocimiento que no aparecieron en busqueda semantica. Util cuando
-        el grafo es denso. Las memorias descubiertas tienen semantic_score=0.0
-        y matched_modality="graph". Default false.
-      tags: filtrar por tags (AND logico — memoria debe tener TODOS). Ej: ["ancla-visual", "landing"].
-      cluster_mode: enriquecer con clusters de memoria. "none" (default, sin
-        cambios), "include" (related_clusters con narrative_preview), "mixed"
-        (merged_results con memorias y clusters intercalados por score).
+      max_images: max imagenes inline (default 3; 0 = ninguna).
+      workspace_id, project_id: filtrar a un workspace / project.
+      type: tipo de memoria (momento/decision/acuerdo/tecnico/descubrimiento/observacion/referencia/caso/skill).
+      user_id: filtrar por creador (id numerico).
+      agent_identifier: filtrar por agente (ej. "Eco").
+      fecha_desde, fecha_hasta: ISO 8601, INSTANTES inclusivos; fecha sin hora = 00:00:00. Dia D entero: desde="D", hasta="DT23:59:59.999999".
+      tags: AND logico (la memoria debe tener TODOS). Ej: ["ancla-visual"].
+      include_dormant: incluye memorias dormant/archived (default false: quedan FUERA).
+      expand_scope: override de visibilidad por jerarquia estricta (audit log).
+      graph_discovery: añade memorias halladas solo via grafo (semantic_score=0). Default false.
+      include_documents: añade chunks de documentos (default true).
+      max_document_results: max chunks de documentos (0-20, default 3).
+      deep_factor: pool interno fetch_k = limit*deep_factor (1-10, default 2).
+      cluster_mode: none (default)|include (related_clusters)|mixed (merged_results: memorias+clusters por score).
 
-    Respuesta incluye por cada resultado:
-      - score: score compuesto GAMR (lo que ordena los resultados)
-      - semantic_score: similitud coseno pura
-      - graph_score: proximidad en grafo de conocimiento
-      - freshness_score: frescura temporal (1.0 = reciente, 0.0 = >1 año)
-      - score_breakdown: desglose del score por componente
-
-    Respuesta incluye metadata:
-      - query_type: tipo clasificado (auto o manual)
-      - graph_context: entidades del grafo activadas
-      - contradictions: pares de memorias potencialmente contradictorias
-        (similitud >0.85, >1 dia de diferencia, mismo tipo)
+    Respuesta: results[] (score, semantic/graph/freshness_score, score_breakdown, trust_warnings);
+    graph_context; contradictions (pares de alta similitud, NO verificadas); related_clusters/merged_results
+    segun cluster_mode; warnings (leelos si hay 0 resultados).
     """
     from mcp.types import TextContent, ImageContent
     import base64 as _b64
@@ -543,6 +516,8 @@ def search(
         payload["deep_factor"] = deep_factor
     if cluster_mode != "none":
         payload["cluster_mode"] = cluster_mode
+    if include_dormant:
+        payload["include_dormant"] = True
     try:
         data = _api_call("POST", "/search", json=payload)
     except RuntimeError as e:
