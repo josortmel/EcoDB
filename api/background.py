@@ -49,20 +49,20 @@ async def mark_stale_memories(pool) -> None:
     async with pool.acquire() as conn:
         # active → stale
         # Access was never recorded by /search before 2026-09-25 (flush ran in the wrong
-        # process), so a NULL last_accessed means "unknown", not "never read". Unmeasured
-        # memories are aged from ACCESS_TRACKING_SINCE, never from before it.
+        # process), so ANY last_accessed older than that is incomplete (NULL, or only the odd
+        # GET /memories read). Age every memory from ACCESS_TRACKING_SINCE at the earliest.
         staled = await conn.execute("""
             UPDATE memories SET staleness = 'stale', updated_at = now()
             WHERE staleness = 'active'
               AND type NOT IN ('decision', 'acuerdo')
-              AND COALESCE(last_accessed, GREATEST(created_at, $1::timestamptz)) < now() - INTERVAL '60 days'
+              AND GREATEST(COALESCE(last_accessed, created_at), $1::timestamptz) < now() - INTERVAL '60 days'
               AND created_at < now() - INTERVAL '60 days'
         """, ACCESS_TRACKING_SINCE)
         # stale → dormant
         dormanted = await conn.execute("""
             UPDATE memories SET staleness = 'dormant', updated_at = now()
             WHERE staleness = 'stale'
-              AND COALESCE(last_accessed, GREATEST(created_at, $1::timestamptz)) < now() - INTERVAL '90 days'
+              AND GREATEST(COALESCE(last_accessed, created_at), $1::timestamptz) < now() - INTERVAL '90 days'
         """, ACCESS_TRACKING_SINCE)
         log.info("Stale marking: %s→stale, %s→dormant", staled, dormanted)
 
