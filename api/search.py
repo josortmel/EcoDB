@@ -1011,6 +1011,29 @@ class SearchResponse(BaseModel):
 # Endpoint
 # ---------------------------------------------------------------------------
 
+# #365: a memory that was found and returned is alive again. Without this, a dormant
+# memory (excluded from search by default) could never be accessed, so it could never
+# wake up. 'archived' is an explicit decision and stays archived.
+# C28: a manual mark is an explicit decision too — a memory whose LAST manual staleness
+# action (PUT /memories/{id}/staleness -> audit_log 'update_staleness') set it to
+# stale/dormant is not woken; only decay-set dormancy is. last_accessed is updated anyway.
+_FLUSH_ACCESSED_SQL = """
+    UPDATE memories m SET last_accessed = now(),
+        staleness = CASE
+            WHEN m.staleness IN ('stale', 'dormant') AND m.id::text NOT IN (
+                SELECT last.resource_id FROM (
+                    SELECT DISTINCT ON (resource_id) resource_id, details->>'staleness' AS marked
+                    FROM audit_log
+                    WHERE action = 'update_staleness' AND resource = 'memory'
+                      AND resource_id = ANY($2::text[])
+                    ORDER BY resource_id, created_at DESC, id DESC
+                ) last
+                WHERE last.marked IN ('stale', 'dormant'))
+            THEN 'active' ELSE m.staleness END
+    WHERE m.id = ANY($1::uuid[])
+"""
+
+
 async def flush_accessed_buffer(pool) -> None:
     """Flush buffered last_accessed updates to DB. Called by governance cycle and 5-min loop."""
     async with _accessed_lock:
@@ -1019,15 +1042,7 @@ async def flush_accessed_buffer(pool) -> None:
     if not ids:
         return
     async with pool.acquire() as conn:
-        # #365: a memory that was found and returned is alive again. Without this, a dormant
-        # memory (excluded from search by default) could never be accessed, so it could never
-        # wake up. 'archived' is an explicit decision and stays archived.
-        await conn.execute(
-            """UPDATE memories SET last_accessed = now(),
-                   staleness = CASE WHEN staleness IN ('stale', 'dormant') THEN 'active' ELSE staleness END
-               WHERE id = ANY($1::uuid[])""",
-            [uuid.UUID(i) for i in ids],
-        )
+        await conn.execute(_FLUSH_ACCESSED_SQL, [uuid.UUID(i) for i in ids], ids)
     logging.getLogger("ecodb.perf").info("Flushed %d accessed memory IDs", len(ids))
 
 
