@@ -36,7 +36,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from auth import get_current_user
+from auth import get_current_user, require_super
 from db import get_pool
 from permissions import no_null_bytes as _no_null_bytes
 
@@ -135,6 +135,11 @@ class GraphStats(BaseModel):
     nodes: int
     triples: int
     distinct_predicates: int
+    # #337: SQL `triples` is the history; AGE holds its canonical projection. Drift != 0 means
+    # neighbors/path/search-graph are reading a graph that differs from what SQL says.
+    age_edges: Optional[int] = None
+    age_edges_expected: Optional[int] = None
+    age_drift: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +188,11 @@ async def _ensure_node(conn, name: str) -> int:
         if existing is None:
             raise RuntimeError(f"node {name!r} disappeared during concurrent operation")
         sql_id = existing["id"]
+        # #337: a name that was merged away means its canonical entity. Linking new memories
+        # (or triples) to the merged node split the graph and resurrected its AGE vertex.
+        sql_id = await _resolve_canonical(conn, sql_id)
+        if await conn.fetchval("SELECT status FROM nodes WHERE id = $1", sql_id) not in (None, "active"):
+            return sql_id  # inactive canonical (e.g. deleted): never recreate its vertex
         # Check if AGE node exists with this sql_id, create if missing
         params_check = json.dumps({"sql_id": sql_id})
         age_exists = await conn.fetchrow(
@@ -336,19 +346,158 @@ async def update_cooccurrence_triples(conn, entity_node_ids: list[int]) -> int:
     return created
 
 
-async def _create_age_edge(conn, subject_sql_id: int, predicate: str, object_sql_id: int) -> None:
-    """Crea la arista en AGE entre los nodos identificados por sql_id."""
+class GraphSyncError(RuntimeError):
+    """AGE write that did not happen. Raised so the caller's transaction rolls back SQL too (#337)."""
+
+
+# #337 — the AGE graph is the CANONICAL PROJECTION of SQL `triples`: every endpoint resolved
+# through merged_into to its active node, self-loops dropped, (s, p, o) deduplicated.
+# SQL keeps the history (triples of merged nodes stay as written, undo_merge needs them).
+# Measured 2026-09-25: all 581 SQL triples missing from AGE touched a merged node — merge
+# DETACH-DELETEs the source vertex (trigger) and nothing re-projected its edges; and
+# _create_age_edge was a silent no-op when a vertex was missing.
+
+async def _canonical_map(conn) -> tuple[dict[int, int], set[int]]:
+    """node id -> canonical active id (chains followed), and the set of active ids."""
+    rows = await conn.fetch("SELECT id, status, merged_into FROM nodes")
+    parent = {r["id"]: r["merged_into"] for r in rows}
+    active = {r["id"] for r in rows if r["status"] in (None, "active")}
+    canon: dict[int, int] = {}
+    for nid in parent:
+        cur, seen = nid, 0
+        while parent.get(cur) is not None and seen < _MAX_MERGE_CHAIN_DEPTH:
+            cur = parent[cur]
+            seen += 1
+        canon[nid] = cur
+    return canon, active
+
+
+async def _age_merge_edge(conn, subject_sql_id: int, predicate: str, object_sql_id: int) -> None:
+    """Idempotent AGE edge between two ACTIVE vertices. Raises GraphSyncError if a vertex is missing."""
     params = json.dumps({"sid": subject_sql_id, "oid": object_sql_id, "pred": predicate})
-    await conn.execute(
+    row = await conn.fetchrow(
         f"""
         SELECT * FROM cypher('{GRAPH_NAME}', $$
             MATCH (s:Entity {{sql_id: $sid}}), (o:Entity {{sql_id: $oid}})
-            CREATE (s)-[r:RELATES_TO {{predicate: $pred}}]->(o)
+            MERGE (s)-[r:RELATES_TO {{predicate: $pred}}]->(o)
             RETURN id(r)
         $$, $1::agtype) AS (edge_id agtype)
         """,
         params,
     )
+    if row is None:
+        raise GraphSyncError(
+            f"AGE edge not written: vertex missing for sql_id {subject_sql_id} or {object_sql_id} ({predicate!r})")
+
+
+async def _create_age_edge(conn, subject_sql_id: int, predicate: str, object_sql_id: int) -> None:
+    """Project one SQL triple into AGE (canonical endpoints). Fails loud instead of a silent no-op."""
+    s = await _resolve_canonical(conn, subject_sql_id)
+    o = await _resolve_canonical(conn, object_sql_id)
+    if s == o:
+        return  # both endpoints merged into the same entity: nothing to draw
+    await _age_merge_edge(conn, s, predicate, o)
+
+
+async def reconcile_age(conn, node_ids: Optional[set[int]] = None, dry_run: bool = False) -> dict:
+    """Make AGE equal to the canonical projection of SQL triples (#337).
+
+    node_ids=None reconciles the whole graph; otherwise only edges touching those canonical
+    nodes. Vertices: drops vertices of non-active nodes and duplicate vertices of one sql_id,
+    creates missing vertices of active nodes. Edges: creates missing, deletes extra/duplicate.
+    Must run inside the caller's transaction.
+    """
+    canon, active = await _canonical_map(conn)
+    names = {r["id"]: r["name"] for r in await conn.fetch(
+        "SELECT id, name FROM nodes WHERE status IS NULL OR status = 'active'")}
+    scope = None if node_ids is None else {canon.get(n, n) for n in node_ids}
+
+    # --- expected edges (projection)
+    expected: set[tuple[int, str, int]] = set()
+    for t in await conn.fetch("SELECT subject_id, predicate, object_id FROM triples"):
+        s, o = canon.get(t["subject_id"], t["subject_id"]), canon.get(t["object_id"], t["object_id"])
+        if s == o or s not in active or o not in active:
+            continue
+        if scope is not None and s not in scope and o not in scope:
+            continue
+        expected.add((s, t["predicate"], o))
+
+    # --- current AGE vertices
+    vrows = await conn.fetch(f"""
+        SELECT * FROM cypher('{GRAPH_NAME}', $$ MATCH (n:Entity) RETURN id(n), n.sql_id $$)
+        AS (vid agtype, sid agtype)""")
+    by_sid: dict[int, list[str]] = {}
+    for r in vrows:
+        by_sid.setdefault(int(str(r["sid"])), []).append(str(r["vid"]))
+    stale_vertices = [sid for sid in by_sid if sid not in active
+                      and (scope is None or sid in scope or canon.get(sid) in scope)]
+    dup_vertices = [sid for sid, v in by_sid.items() if len(v) > 1 and sid in active
+                    and (scope is None or sid in scope)]
+    missing_vertices = [sid for sid in active if sid not in by_sid and (scope is None or sid in scope)]
+
+    # --- current AGE edges
+    erows = await conn.fetch(f"""
+        SELECT * FROM cypher('{GRAPH_NAME}', $$
+            MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) RETURN a.sql_id, r.predicate, b.sql_id
+        $$) AS (s agtype, p agtype, o agtype)""")
+    current: dict[tuple[int, str, int], int] = {}
+    for r in erows:
+        key = (int(str(r["s"])), json.loads(str(r["p"])), int(str(r["o"])))
+        if scope is not None and key[0] not in scope and key[2] not in scope:
+            continue
+        current[key] = current.get(key, 0) + 1
+    extra_edges = [k for k in current if k not in expected]
+    dup_edges = [k for k, c in current.items() if c > 1 and k in expected]
+    missing_edges = [k for k in expected if k not in current]
+
+    report = {
+        "scope": "all" if scope is None else sorted(scope),
+        "expected_edges": len(expected),
+        "stale_vertices_removed": len(stale_vertices),
+        "duplicate_vertices_fixed": len(dup_vertices),
+        "missing_vertices_created": len(missing_vertices),
+        "extra_edges_removed": len(extra_edges),
+        "duplicate_edges_collapsed": len(dup_edges),
+        "missing_edges_created": len(missing_edges),
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        return report
+
+    for sid in stale_vertices + dup_vertices:
+        await conn.execute(f"""
+            SELECT * FROM cypher('{GRAPH_NAME}', $$ MATCH (n:Entity {{sql_id: $sid}}) DETACH DELETE n $$,
+            $1::agtype) AS (d agtype)""", json.dumps({"sid": sid}))
+    for sid in dup_vertices + missing_vertices:
+        await conn.execute(f"""
+            SELECT * FROM cypher('{GRAPH_NAME}', $$ CREATE (n:Entity {{name: $name, sql_id: $sid}}) RETURN id(n) $$,
+            $1::agtype) AS (v agtype)""", json.dumps({"sid": sid, "name": names.get(sid, f"entity_{sid}")}))
+    for (s, p, o) in extra_edges + dup_edges:
+        await conn.execute(f"""
+            SELECT * FROM cypher('{GRAPH_NAME}', $$
+                MATCH (a:Entity {{sql_id: $s}})-[r:RELATES_TO {{predicate: $p}}]->(b:Entity {{sql_id: $o}}) DELETE r
+            $$, $1::agtype) AS (d agtype)""", json.dumps({"s": s, "p": p, "o": o}))
+    # re-create: missing edges, duplicates (deleted above, one copy back), and every expected edge
+    # of a vertex that was just recreated (DETACH DELETE took them).
+    recreated = set(dup_vertices)
+    todo = set(missing_edges) | set(dup_edges) | {k for k in expected if k[0] in recreated or k[2] in recreated}
+    for (s, p, o) in sorted(todo):
+        await _age_merge_edge(conn, s, p, o)
+    return report
+
+
+async def age_drift(conn) -> dict:
+    """Numbers to watch the projection without rebuilding it: expected vs actual AGE edges."""
+    canon, active = await _canonical_map(conn)
+    expected = set()
+    for t in await conn.fetch("SELECT subject_id, predicate, object_id FROM triples"):
+        s, o = canon.get(t["subject_id"], t["subject_id"]), canon.get(t["object_id"], t["object_id"])
+        if s != o and s in active and o in active:
+            expected.add((s, t["predicate"], o))
+    age_edges = await conn.fetchval(f"""
+        SELECT count(*) FROM cypher('{GRAPH_NAME}', $$ MATCH ()-[r:RELATES_TO]->() RETURN id(r) $$) AS (e agtype)""")
+    return {"age_edges": int(age_edges), "age_edges_expected": len(expected),
+            "age_drift": int(age_edges) - len(expected)}
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +751,34 @@ async def delete_triple(triple_id: int, actor: dict = Depends(get_current_user))
             )
 
 
+@router.post("/reconcile")
+async def reconcile_graph(
+    dry_run: bool = Query(True, description="true = only report what would change (default)"),
+    actor: dict = Depends(require_super),
+) -> dict:
+    """#337: make AGE equal to the canonical projection of SQL triples. Super-only.
+
+    Takes SHARE ROW EXCLUSIVE on nodes and triples for the duration, so no triple/node write
+    can interleave with the reconciliation (the "daemon paused" condition, enforced by the DB).
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("LOCK TABLE nodes, triples IN SHARE ROW EXCLUSIVE MODE")
+            before = await age_drift(conn)
+            report = await reconcile_age(conn, None, dry_run=dry_run)
+            after = await age_drift(conn) if not dry_run else before
+            if not dry_run and after["age_drift"] != 0:
+                raise GraphSyncError(f"reconcile finished with drift {after['age_drift']} — rolled back")
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
+                VALUES ($1, 'graph_reconcile', 'graph', $2, $3::jsonb, $4)""",
+                int(actor["sub"]), str(uuid.uuid4()),
+                json.dumps({"before": before, "after": after, "report": report}), actor.get("organization_id"),
+            )
+    return {"before": before, "after": after, "report": report}
+
+
 @router.get("/stats", response_model=GraphStats)
 async def graph_stats(actor: dict = Depends(get_current_user)) -> GraphStats:
     pool = await get_pool()
@@ -609,10 +786,16 @@ async def graph_stats(actor: dict = Depends(get_current_user)) -> GraphStats:
         nodes_count = await conn.fetchval("SELECT count(*) FROM nodes")
         triples_count = await conn.fetchval("SELECT count(*) FROM triples")
         preds_count = await conn.fetchval("SELECT count(DISTINCT predicate) FROM triples")
+        try:
+            drift = await age_drift(conn)
+        except Exception as _drift_err:
+            logging.getLogger("ecodb.graph").warning("graph_stats: age_drift failed: %r", _drift_err)
+            drift = {}
     return GraphStats(
         nodes=nodes_count,
         triples=triples_count,
         distinct_predicates=preds_count,
+        **drift,
     )
 
 
@@ -977,6 +1160,8 @@ async def merge_entities(
                 canonical_id, source_id,
             )
             await conn.execute("DELETE FROM graph_clusters WHERE node_id = $1", source_id)
+            # #337: the trigger DETACH-DELETEd the source vertex; project its triples onto the canonical.
+            await reconcile_age(conn, {canonical_id, source_id})
             log_row = await conn.fetchrow(
                 """
                 INSERT INTO entity_merge_log
@@ -1025,6 +1210,11 @@ async def undo_merge(source_node_id: int, pool) -> dict:
                 "UPDATE entity_merge_log SET undone_at = now() WHERE id = $1",
                 log_row["id"],
             )
+            # #337: the reactivation trigger recreated a bare vertex; give the source its edges back
+            # and take off the canonical the edges that were only projected from the source.
+            _canon_before = await conn.fetchval(
+                "SELECT target_node_id FROM entity_merge_log WHERE id = $1", log_row["id"])
+            await reconcile_age(conn, {source_node_id, log_row["target_original_id"], _canon_before})
     return {
         "merge_log_id": log_row["id"],
         "source_node_id": source_node_id,
