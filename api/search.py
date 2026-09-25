@@ -654,6 +654,21 @@ async def get_bm25_query(query_text: str) -> str:
     return query_text
 
 
+def _bm25_tsvector(col: str) -> str:
+    """#243: tsvector for BM25 that also indexes the parts of dotted/slashed tokens.
+
+    Postgres' parser turns `RunResult.structured` or `api/search.py` into ONE
+    host/file lexeme, so a query for `RunResult` never matched. We append a
+    second tsvector built ONLY from those tokens split on '.' and '/', so plain
+    words are not double-counted (ts_rank thresholds stay where they were).
+    """
+    split_parts = (
+        "(SELECT coalesce(string_agg(regexp_replace(m[1], '[./]', ' ', 'g'), ' '), '') "
+        f"FROM regexp_matches({col}, '(\\w+(?:[./]\\w+)+)', 'g') AS m)"
+    )
+    return f"(to_tsvector('spanish', {col}) || to_tsvector('spanish', {split_parts}))"
+
+
 def _graph_context_for_response(graph_context: list[dict], include_docs: bool) -> list[dict]:
     """Drop graph_context document chunks when the document channel is excluded."""
     if include_docs:
@@ -668,8 +683,8 @@ async def compute_bm25_scores(pool, query_text: str, candidate_ids: list[UUID], 
     gliner_query = await get_bm25_query(query_text)
     expanded = await expand_query_bm25(pool, gliner_query, query_embedding) if query_embedding is not None else gliner_query
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, ts_rank(to_tsvector('spanish', content), plainto_tsquery('spanish', $1)) AS bm25
+        rows = await conn.fetch(f"""
+            SELECT id, ts_rank({_bm25_tsvector("content")}, plainto_tsquery('spanish', $1)) AS bm25
             FROM memories
             WHERE id = ANY($2::uuid[])
         """, expanded, candidate_ids)
@@ -886,16 +901,17 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
         agent_clause = f"AND (a.identifier = ${len(params)} OR a.identifier = 'SIN_AUTOR')"
     elif not actor.get("is_super"):
         agent_clause = "AND a.identifier = 'SIN_AUTOR'"
+    _label_tsv = _bm25_tsvector("mc.label")
     try:
         rows = await conn.fetch(f"""
             SELECT mc.id, mc.level, mc.label, a.identifier AS agent_identifier,
                    1 - (mc.centroid <=> $1::vector) AS vector_score,
-                   ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4)) AS bm25_score
+                   ts_rank({_label_tsv}, plainto_tsquery('spanish', $4)) AS bm25_score
             FROM memory_clusters mc
             JOIN agents a ON a.id = mc.agent_id
             WHERE mc.status = 'active'
               AND (1 - (mc.centroid <=> $1::vector) > 0.5
-                   OR ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4)) > 0.1)
+                   OR ts_rank({_label_tsv}, plainto_tsquery('spanish', $4)) > 0.1)
               AND a.user_id = $2
               {agent_clause}
               AND mc.member_ids && (
@@ -904,7 +920,7 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
                   WHERE m.project_id = ANY($3::int[])
               )
             ORDER BY (1 - (mc.centroid <=> $1::vector)
-                      + ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4))) DESC
+                      + ts_rank({_label_tsv}, plainto_tsquery('spanish', $4))) DESC
             LIMIT $5
         """, *params)
         return [dict(r) for r in rows]
@@ -1449,7 +1465,7 @@ async def search_memories(
                 doc_idx += 1
             doc_bm25_col = "0.0::real AS bm25_score"
             if ENABLE_BM25 and body.query_text:
-                doc_bm25_col = f"ts_rank(to_tsvector('spanish', dc.content), plainto_tsquery('spanish', ${doc_idx})) AS bm25_score"
+                doc_bm25_col = f"ts_rank({_bm25_tsvector('dc.content')}, plainto_tsquery('spanish', ${doc_idx})) AS bm25_score"
                 doc_params.append(body.query_text)
                 doc_idx += 1
             doc_where_str = " AND ".join(doc_where)
