@@ -71,6 +71,8 @@ QUERY_TYPES = Literal["factual", "historical", "analytical", "contextual", "cros
 MAX_EXPANDED_ENTITIES = 200
 MAX_SEED_ENTITIES = 500
 MAX_DOCUMENT_EXPANSION = 5
+# Single source for the default dormancy filter: the #365 hidden-count query removes it by identity.
+DORMANT_EXCLUSION_CLAUSE = "(m.staleness IS NULL OR m.staleness NOT IN ('dormant', 'archived'))"
 # #359: graph_context document chunks below this cosine to the query are dropped.
 # Calibrated against the live corpus on 2026-09-25 (see .faro/reportes_evolucion).
 DOC_EXPANSION_MIN_SIMILARITY = float(os.environ.get("DOC_EXPANSION_MIN_SIMILARITY", "0.25"))
@@ -730,7 +732,7 @@ class SearchRequest(BaseModel):
     workspace_id: Optional[int] = Field(None, description="Filtrar a un workspace concreto")
     project_id: Optional[int] = Field(None, description="Filtrar a un project concreto")
     type: Optional[Literal["momento", "decision", "acuerdo", "tecnico",
-                           "descubrimiento", "observacion", "referencia"]] = None
+                           "descubrimiento", "observacion", "referencia", "caso", "skill"]] = None
 
     expand_scope: bool = Field(
         False,
@@ -784,6 +786,12 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode="after")
     def _v_dates(self):
+        # A date-only or naive value is read as UTC, so "2026-09-16" can be compared with
+        # "2026-09-16T10:00:00Z" (mixed naive/aware used to raise TypeError -> 500).
+        if self.fecha_desde is not None and self.fecha_desde.tzinfo is None:
+            self.fecha_desde = self.fecha_desde.replace(tzinfo=timezone.utc)
+        if self.fecha_hasta is not None and self.fecha_hasta.tzinfo is None:
+            self.fecha_hasta = self.fecha_hasta.replace(tzinfo=timezone.utc)
         if self.fecha_desde is not None and self.fecha_hasta is not None:
             if self.fecha_desde > self.fecha_hasta:
                 raise ValueError("fecha_desde cannot be after fecha_hasta")
@@ -850,7 +858,8 @@ class SearchInDocumentRequest(BaseModel):
         return _no_null_bytes(v, "query_text")
 
 
-async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=3, agent_identifier=None):
+async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=3, agent_identifier=None,
+                                warnings: Optional[list] = None):
     """Clusters related to the query by centroid + label BM25.
 
     #370: same "mesa" rule as POST /clusters/search (CLAUDE.md invariant 29):
@@ -895,6 +904,8 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
     except Exception as _rc_err:
         import logging as _rc_log
         _rc_log.getLogger("ecodb.search").warning("related_clusters query failed: %r", _rc_err)
+        if warnings is not None:
+            warnings.append(f"related_clusters failed: {type(_rc_err).__name__}; the empty list is an error, not 'no clusters'")
         return []
 
 
@@ -1124,7 +1135,7 @@ async def search_memories(
             params.append(body.tags)
             idx += 1
         if not body.include_dormant:
-            where_parts.append("(m.staleness IS NULL OR m.staleness NOT IN ('dormant', 'archived'))")
+            where_parts.append(DORMANT_EXCLUSION_CLAUSE)
 
         # check_visibility: visibility filter unificado con expand_scope opt-in.
         # Reemplaza el filter Python-built de .
@@ -1187,15 +1198,15 @@ async def search_memories(
         # filter (tags or dates) is on, say how many matches the dormancy filter hid.
         _dormant_hidden = 0
         if not body.include_dormant and (body.tags or body.fecha_desde is not None or body.fecha_hasta is not None):
-            _dormant_clause = "(m.staleness IS NULL OR m.staleness NOT IN ('dormant', 'archived'))"
-            _dw = [w for w in where_parts if w != _dormant_clause]
+            _dw = [w for w in where_parts if w is not DORMANT_EXCLUSION_CLAUSE]
             _dw.append("m.staleness IN ('dormant', 'archived')")
             # $1/$2 are referenced so the parameter list stays positionally identical.
-            _dormant_hidden = await conn.fetchval(f"""
-                SELECT count(*) FROM memories m
-                WHERE $1::vector IS NOT NULL AND ($2::text IS NULL OR TRUE)
-                  AND {" AND ".join(_dw)}
-            """, *params[:-1]) or 0
+            if len(_dw) == len(where_parts):  # exactly one clause swapped, else don't guess
+                _dormant_hidden = await conn.fetchval(f"""
+                    SELECT count(*) FROM memories m
+                    WHERE $1::vector IS NOT NULL AND ($2::text IS NULL OR TRUE)
+                      AND {" AND ".join(_dw)}
+                """, *params[:-1]) or 0
 
         # B.4: HyDE — use pre-computed hyde_vec (generated outside conn block).
         # score here is raw cosine similarity (1 - distance), NOT GAMR composite.
@@ -1518,11 +1529,11 @@ async def search_memories(
             if _cluster_mode == "include":
                 _related = await _get_related_clusters(
                     _rc_conn, query_vec, body.query_text, actor, limit=10,
-                    agent_identifier=body.agent_identifier)
+                    agent_identifier=body.agent_identifier, warnings=_search_warnings)
             elif _cluster_mode == "mixed":
                 _related = await _get_related_clusters(
                     _rc_conn, query_vec, body.query_text, actor, limit=10,
-                    agent_identifier=body.agent_identifier)
+                    agent_identifier=body.agent_identifier, warnings=_search_warnings)
                 _merged = []
                 for r in results:
                     _merged.append(MergedResultItem(
@@ -1536,7 +1547,7 @@ async def search_memories(
             else:
                 _related = await _get_related_clusters(
                     _rc_conn, query_vec, body.query_text, actor,
-                    agent_identifier=body.agent_identifier)
+                    agent_identifier=body.agent_identifier, warnings=_search_warnings)
 
     _search_warnings.extend(date_window_warnings(body.fecha_desde, body.fecha_hasta, len(results)))
     if _dormant_hidden:
