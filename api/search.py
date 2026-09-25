@@ -71,6 +71,9 @@ QUERY_TYPES = Literal["factual", "historical", "analytical", "contextual", "cros
 MAX_EXPANDED_ENTITIES = 200
 MAX_SEED_ENTITIES = 500
 MAX_DOCUMENT_EXPANSION = 5
+# #359: graph_context document chunks below this cosine to the query are dropped.
+# Calibrated against the live corpus on 2026-09-25 (see .faro/reportes_evolucion).
+DOC_EXPANSION_MIN_SIMILARITY = float(os.environ.get("DOC_EXPANSION_MIN_SIMILARITY", "0.25"))
 DOCUMENT_DECAY_DAYS = 14
 MAX_CONTRADICTION_PAIRS = 10
 _GRAPH_ENTITY_NORM = 3.0
@@ -233,6 +236,27 @@ async def detect_contradictions(
     return contradictions
 
 
+def date_window_warnings(fecha_desde, fecha_hasta, result_count: int) -> list[str]:
+    """#340: label the zero that a date filter produces, so it can't pass for "nothing there".
+
+    Bounds are instants and the interval is closed. A date-only fecha_hasta is 00:00:00,
+    the START of that day — right as a lower bound, silently wrong as an upper one.
+    """
+    out: list[str] = []
+    if fecha_desde is not None and fecha_hasta is not None and fecha_desde == fecha_hasta:
+        out.append(
+            f"zero-width date window: fecha_desde == fecha_hasta ({fecha_hasta.isoformat()}) is a single "
+            f"instant; to cover that whole day use fecha_hasta=\"{fecha_hasta.date().isoformat()}T23:59:59.999999\""
+        )
+    elif (fecha_hasta is not None and result_count == 0
+          and (fecha_hasta.hour, fecha_hasta.minute, fecha_hasta.second, fecha_hasta.microsecond) == (0, 0, 0, 0)):
+        out.append(
+            f"fecha_hasta={fecha_hasta.isoformat()} is the START of {fecha_hasta.date().isoformat()} and the "
+            f"result is empty; if you meant the whole day use fecha_hasta=\"{fecha_hasta.date().isoformat()}T23:59:59.999999\""
+        )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # — Coherencia temporal (Etapa 6 GAMR)
 # ---------------------------------------------------------------------------
@@ -261,46 +285,65 @@ def compute_freshness_score(created_at: datetime, query_type: str) -> float:
 # — Expansión por grafo (Etapa 4 GAMR)
 # ---------------------------------------------------------------------------
 
-async def _fetch_doc_expansion(conn, entity_ids: list, project_ids=None, limit: int = MAX_DOCUMENT_EXPANSION):
-    """Fetch document chunks linked to entity_ids. Optionally filter by project_ids."""
+async def _fetch_doc_expansion(conn, entity_ids: list, project_ids=None, limit: int = MAX_DOCUMENT_EXPANSION,
+                               query_vec=None):
+    """Fetch document chunks linked to entity_ids, ranked by relevance to the query (#359).
+
+    One row per chunk (dedup by chunk_id: a chunk linked through several matched
+    entities used to come out once per entity). Order: cosine similarity of the
+    chunk to the query embedding when there is one, then how many of the matched
+    entities the chunk carries, then a stable tie-break. Max 2 chunks per document.
+    Chunks under DOC_EXPANSION_MIN_SIMILARITY are dropped: an empty list is
+    visible, a plausible-but-fixed list is not.
+    """
+    params: list = [entity_ids]
+    project_clause = ""
     if project_ids is not None:
-        return await conn.fetch("""
-            WITH ranked AS (
-                SELECT del.document_id, del.chunk_id, del.entity_node_id,
-                       d.base_weight, d.trust_tier, d.status, dc.content, dc.chunk_index, dc.section_path,
-                       ROW_NUMBER() OVER (PARTITION BY del.document_id ORDER BY del.entity_node_id) AS rn
-                FROM document_entity_links del
-                JOIN documents d ON d.id = del.document_id
-                JOIN document_chunks dc ON dc.id = del.chunk_id
-                WHERE del.entity_node_id = ANY($1::int[])
-                  AND d.status != 'deleted'
-                  AND d.project_id = ANY($2::int[])
-                ORDER BY d.base_weight DESC
-            )
-            SELECT * FROM ranked WHERE rn <= 2
-            LIMIT $3
-        """, entity_ids, project_ids, limit)
+        params.append(project_ids)
+        project_clause = f"AND d.project_id = ANY(${len(params)}::int[])"
+    if query_vec is not None:
+        params.append(query_vec)
+        sim_expr = f"1 - (dc.embedding <=> ${len(params)}::vector)"
     else:
-        return await conn.fetch("""
-            WITH ranked AS (
-                SELECT del.document_id, del.chunk_id, del.entity_node_id,
-                       d.base_weight, d.trust_tier, d.status, dc.content, dc.chunk_index, dc.section_path,
-                       ROW_NUMBER() OVER (PARTITION BY del.document_id ORDER BY del.entity_node_id) AS rn
-                FROM document_entity_links del
-                JOIN documents d ON d.id = del.document_id
-                JOIN document_chunks dc ON dc.id = del.chunk_id
-                WHERE del.entity_node_id = ANY($1::int[])
-                  AND d.status != 'deleted'
-                ORDER BY d.base_weight DESC
-            )
-            SELECT * FROM ranked WHERE rn <= 2
-            LIMIT $2
-        """, entity_ids, limit)
+        sim_expr = "NULL::float8"
+    params.append(DOC_EXPANSION_MIN_SIMILARITY)
+    min_sim_idx = len(params)
+    params.append(limit)
+    limit_idx = len(params)
+    return await conn.fetch(f"""
+        WITH links AS (
+            SELECT del.chunk_id, del.document_id,
+                   count(DISTINCT del.entity_node_id) AS matched_entities
+            FROM document_entity_links del
+            JOIN documents d ON d.id = del.document_id
+            WHERE del.entity_node_id = ANY($1::int[])
+              AND d.status != 'deleted'
+              {project_clause}
+            GROUP BY del.chunk_id, del.document_id
+        ), scored AS (
+            SELECT l.document_id, l.chunk_id, l.matched_entities,
+                   d.base_weight, d.trust_tier, d.status, dc.content, dc.chunk_index, dc.section_path,
+                   CASE WHEN dc.embedding IS NULL THEN NULL ELSE {sim_expr} END AS query_similarity
+            FROM links l
+            JOIN documents d ON d.id = l.document_id
+            JOIN document_chunks dc ON dc.id = l.chunk_id
+        ), ranked AS (
+            SELECT *, ROW_NUMBER() OVER (
+                       PARTITION BY document_id
+                       ORDER BY query_similarity DESC NULLS LAST, matched_entities DESC, chunk_id) AS rn
+            FROM scored
+            WHERE query_similarity IS NULL OR query_similarity >= ${min_sim_idx}
+        )
+        SELECT * FROM ranked WHERE rn <= 2
+        ORDER BY query_similarity DESC NULLS LAST, matched_entities DESC, base_weight DESC, chunk_id
+        LIMIT ${limit_idx}
+    """, *params)
 
 
 async def expand_by_graph(
     pool, candidate_memory_ids: list[str],
     visible_project_ids: Optional[list[int]] = None,
+    query_vec=None,
 ) -> tuple[dict[str, float], list[dict]]:
     """Etapa 4 GAMR — expansión por grafo dual AGE+SQL.
 
@@ -461,7 +504,8 @@ async def expand_by_graph(
 
         # Paso 3b — Document expansion via document_entity_links (Task 4.8)
         doc_graph_context: list[dict] = []
-        doc_chunk_rows = await _fetch_doc_expansion(conn, all_relevant_entities, visible_project_ids)
+        doc_chunk_rows = await _fetch_doc_expansion(conn, all_relevant_entities, visible_project_ids,
+                                                    query_vec=query_vec)
         for r in doc_chunk_rows:
             tier = (r["trust_tier"] or 1) if ENABLE_TRUST_TIERS else 1
             effective_weight = float(r["base_weight"]) * _TIER_MULTIPLIER.get(tier, 1.0)
@@ -472,6 +516,11 @@ async def expand_by_graph(
                 "section_path": r["section_path"],
                 "content": r["content"][:500],
                 "base_weight": effective_weight,
+                # #359: say how this chunk was chosen, so a reader can tell it from the entity channel.
+                "ranked_by": "query_similarity" if r["query_similarity"] is not None else "entity_overlap",
+                "query_similarity": (round(float(r["query_similarity"]), 4)
+                                     if r["query_similarity"] is not None else None),
+                "matched_entities": r["matched_entities"],
             })
 
         # graph_context para metadata de respuesta
@@ -696,8 +745,12 @@ class SearchRequest(BaseModel):
         None, min_length=1, max_length=128,
         description="Filter memories by agent identifier.",
     )
-    fecha_desde: Optional[datetime] = Field(None, description="Memorias creadas >= esta fecha.")
-    fecha_hasta: Optional[datetime] = Field(None, description="Memorias creadas <= esta fecha.")
+    fecha_desde: Optional[datetime] = Field(None, description=(
+        "Memorias creadas >= este INSTANTE (ISO 8601). Una fecha sin hora = 00:00:00 de ese dia. "
+        "Intervalo cerrado por los dos lados."))
+    fecha_hasta: Optional[datetime] = Field(None, description=(
+        "Memorias creadas <= este INSTANTE (ISO 8601). OJO: una fecha sin hora = 00:00:00, el PRINCIPIO "
+        "del dia, no el final. Para cubrir el dia D entero: fecha_desde=\"D\", fecha_hasta=\"DT23:59:59.999999\"."))
     graph_discovery: bool = Field(False, description="Si true, GAMR añade memorias descubiertas via grafo que no aparecieron en busqueda semantica. Requiere grafo denso para ser util.")
     include_documents: bool = Field(True, description="Si true, añade resultados de chunks de documentos junto a memorias. Default true.")
     max_document_results: int = Field(3, ge=0, le=20, description="Max chunks de documentos a incluir (0-20). Solo aplica si include_documents=true.")
@@ -797,14 +850,29 @@ class SearchInDocumentRequest(BaseModel):
         return _no_null_bytes(v, "query_text")
 
 
-async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=3):
+async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=3, agent_identifier=None):
+    """Clusters related to the query by centroid + label BM25.
+
+    #370: same "mesa" rule as POST /clusters/search (CLAUDE.md invariant 29):
+      with agent_identifier -> that agent's clusters + SIN_AUTOR
+      without, non-super     -> only SIN_AUTOR
+      without, super         -> all of the actor's agents
+    Every cluster carries its agent_identifier, so a foreign one can always be told apart.
+    """
     actor_id = int(actor["sub"])
     vis_pids = await visible_project_ids(conn, actor)
     if not vis_pids:
         return []
+    params: list = [query_embedding, actor_id, list(vis_pids), query_text, limit]
+    agent_clause = ""
+    if agent_identifier:
+        params.append(agent_identifier)
+        agent_clause = f"AND (a.identifier = ${len(params)} OR a.identifier = 'SIN_AUTOR')"
+    elif not actor.get("is_super"):
+        agent_clause = "AND a.identifier = 'SIN_AUTOR'"
     try:
-        rows = await conn.fetch("""
-            SELECT mc.id, mc.level, mc.label,
+        rows = await conn.fetch(f"""
+            SELECT mc.id, mc.level, mc.label, a.identifier AS agent_identifier,
                    1 - (mc.centroid <=> $1::vector) AS vector_score,
                    ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4)) AS bm25_score
             FROM memory_clusters mc
@@ -813,6 +881,7 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
               AND (1 - (mc.centroid <=> $1::vector) > 0.5
                    OR ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4)) > 0.1)
               AND a.user_id = $2
+              {agent_clause}
               AND mc.member_ids && (
                   SELECT coalesce(array_agg(m.id), ARRAY[]::uuid[])
                   FROM memories m
@@ -821,7 +890,7 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
             ORDER BY (1 - (mc.centroid <=> $1::vector)
                       + ts_rank(to_tsvector('spanish', mc.label), plainto_tsquery('spanish', $4))) DESC
             LIMIT $5
-        """, query_embedding, actor_id, list(vis_pids), query_text, limit)
+        """, *params)
         return [dict(r) for r in rows]
     except Exception as _rc_err:
         import logging as _rc_log
@@ -851,7 +920,7 @@ class SearchResponse(BaseModel):
     merged_results: Optional[list[MergedResultItem]] = Field(None, description="Interleaved memories+clusters when cluster_mode=mixed")
     audit_id: Optional[str] = Field(
         None,
-        description="UUID del audit_log row si expand_scope=true (.",
+        description="UUID del audit_log row si expand_scope=true (null si no hubo expand_scope).",
     )
 
 
@@ -959,7 +1028,7 @@ async def search_memories(
                     duration_ms=round((time.time() - t0) * 1000, 2),
                     graph_context=[],
                     contradictions=[],
-                    warnings=[],
+                    warnings=date_window_warnings(body.fecha_desde, body.fecha_hasta, 0),
                     audit_id=audit_uuid_early,
                 )
 
@@ -1175,7 +1244,8 @@ async def search_memories(
 
     # Etapa 4 — Expansión por grafo (
     _vp_list = list(visible_projects) if visible_projects else None
-    graph_scores, graph_context = await expand_by_graph(pool, candidate_ids, visible_project_ids=_vp_list)
+    graph_scores, graph_context = await expand_by_graph(pool, candidate_ids, visible_project_ids=_vp_list,
+                                                        query_vec=query_vec)
 
     # Etapa 3b — BM25 scoring (
     bm25_scores: dict[str, float] = {}
@@ -1312,6 +1382,10 @@ async def search_memories(
     if body.user_id is not None and _include_docs:
         _include_docs = False
         _search_warnings.append("user_id filter active: document chunks excluded (documents have no individual author)")
+    # #365: document chunks are text-only; an image/audio modality filter must not let them in.
+    if modality_value in ("image", "audio") and _include_docs:
+        _include_docs = False
+        _search_warnings.append(f"modality_filter={modality_value}: document chunks excluded (documents are text-only)")
 
     # Task 4.10 — Document chunk search (opt-in)
     if _include_docs and body.max_document_results > 0:
@@ -1423,10 +1497,12 @@ async def search_memories(
         async with pool.acquire() as _rc_conn:
             if _cluster_mode == "include":
                 _related = await _get_related_clusters(
-                    _rc_conn, query_vec, body.query_text, actor, limit=10)
+                    _rc_conn, query_vec, body.query_text, actor, limit=10,
+                    agent_identifier=body.agent_identifier)
             elif _cluster_mode == "mixed":
                 _related = await _get_related_clusters(
-                    _rc_conn, query_vec, body.query_text, actor, limit=10)
+                    _rc_conn, query_vec, body.query_text, actor, limit=10,
+                    agent_identifier=body.agent_identifier)
                 _merged = []
                 for r in results:
                     _merged.append(MergedResultItem(
@@ -1439,7 +1515,14 @@ async def search_memories(
                 _merged.sort(key=lambda x: x.score, reverse=True)
             else:
                 _related = await _get_related_clusters(
-                    _rc_conn, query_vec, body.query_text, actor)
+                    _rc_conn, query_vec, body.query_text, actor,
+                    agent_identifier=body.agent_identifier)
+
+    _search_warnings.extend(date_window_warnings(body.fecha_desde, body.fecha_hasta, len(results)))
+
+    # #365: same rule for the document chunks that ride in graph_context.
+    if modality_value in ("image", "audio"):
+        graph_context = [g for g in graph_context if g.get("source_type") != "document_chunk"]
 
     return SearchResponse(
         query=body.query_text or "(image query)",
