@@ -81,6 +81,15 @@ async def _scenario():
             except graph.GraphSyncError:
                 res["fail_loud"] = "raised"
 
+            # an orphan: merged, but its target is gone (merged_into NULL) — 11 of these live on 25-sep.
+            orphan = await conn.fetchval(
+                "INSERT INTO nodes (name, status) VALUES ($1, 'merged') RETURNING id", f"{TAG}-orphan")
+            async with conn.transaction():
+                res["orphan_ensure"] = await graph._ensure_node(conn, f"{TAG}-orphan")
+                await graph._create_age_edge(conn, a, "rel", orphan)  # must NOT raise: not in projection
+            res["orphan_vertices"] = await _vertices(conn, orphan)
+            res["orphan"] = orphan
+
             # reconcile repairs the missing vertex and a manually deleted edge
             await conn.execute("""SELECT * FROM cypher('ecodb_graph', $$
                 MATCH (x:Entity {sql_id: $s})-[r:RELATES_TO]->(y:Entity {sql_id: $o}) DELETE r $$, $1::agtype) AS (d agtype)""",
@@ -93,7 +102,7 @@ async def _scenario():
             res["ids"] = (a, b, c)
 
             # cleanup
-            ids = [a, b, c, ghost]
+            ids = [a, b, c, ghost, orphan]
             await conn.execute("DELETE FROM entity_merge_log WHERE reason = $1", TAG)
             await conn.execute("DELETE FROM triples WHERE author = $1", TAG)
             for sid in ids:
@@ -143,3 +152,8 @@ def test_reconcile_repairs(res):
     assert res["dry"]["missing_edges_created"] == 1 and res["dry"]["missing_vertices_created"] == 1
     assert res["after_reconcile"] == sorted([(a, "rel", b), (b, "rel", c)])
     assert res["ghost_vertices"] == 1
+
+
+def test_inactive_canonical_is_skipped_not_raised(res):
+    assert res["orphan_ensure"] == res["orphan"]
+    assert res["orphan_vertices"] == 0

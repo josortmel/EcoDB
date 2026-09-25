@@ -190,9 +190,9 @@ async def _ensure_node(conn, name: str) -> int:
         sql_id = existing["id"]
         # #337: a name that was merged away means its canonical entity. Linking new memories
         # (or triples) to the merged node split the graph and resurrected its AGE vertex.
-        sql_id = await _resolve_canonical(conn, sql_id)
-        if await conn.fetchval("SELECT status FROM nodes WHERE id = $1", sql_id) not in (None, "active"):
-            return sql_id  # inactive canonical (e.g. deleted): never recreate its vertex
+        sql_id, _active = await _canonical_of(conn, sql_id)
+        if not _active:
+            return sql_id  # inactive canonical (e.g. merged into a node that no longer exists): no vertex
         # Check if AGE node exists with this sql_id, create if missing
         params_check = json.dumps({"sql_id": sql_id})
         age_exists = await conn.fetchrow(
@@ -372,6 +372,20 @@ async def _canonical_map(conn) -> tuple[dict[int, int], set[int]]:
     return canon, active
 
 
+async def _canonical_of(conn, node_id: int) -> tuple[int, bool]:
+    """Read-only merged_into resolution: (canonical id, is it active). No path compression, so
+    the read path never writes (unlike _resolve_canonical, used by merge)."""
+    cur = node_id
+    for _ in range(_MAX_MERGE_CHAIN_DEPTH):
+        row = await conn.fetchrow("SELECT status, merged_into FROM nodes WHERE id = $1", cur)
+        if row is None:
+            return cur, False
+        if row["merged_into"] is None:
+            return cur, row["status"] in (None, "active")
+        cur = row["merged_into"]
+    raise RuntimeError(f"Merge chain depth exceeded {_MAX_MERGE_CHAIN_DEPTH} for node {node_id}")
+
+
 async def _age_merge_edge(conn, subject_sql_id: int, predicate: str, object_sql_id: int) -> None:
     """Idempotent AGE edge between two ACTIVE vertices. Raises GraphSyncError if a vertex is missing."""
     params = json.dumps({"sid": subject_sql_id, "oid": object_sql_id, "pred": predicate})
@@ -391,11 +405,16 @@ async def _age_merge_edge(conn, subject_sql_id: int, predicate: str, object_sql_
 
 
 async def _create_age_edge(conn, subject_sql_id: int, predicate: str, object_sql_id: int) -> None:
-    """Project one SQL triple into AGE (canonical endpoints). Fails loud instead of a silent no-op."""
-    s = await _resolve_canonical(conn, subject_sql_id)
-    o = await _resolve_canonical(conn, object_sql_id)
-    if s == o:
-        return  # both endpoints merged into the same entity: nothing to draw
+    """Project one SQL triple into AGE (canonical endpoints). Fails loud instead of a silent no-op.
+
+    Same rule as reconcile_age: an edge whose canonical endpoint is not active is not part of
+    the projection (it stays SQL-only, as history). Raises only when both endpoints are active
+    and a vertex is missing — that is drift, and the caller's transaction must roll back.
+    """
+    s, s_active = await _canonical_of(conn, subject_sql_id)
+    o, o_active = await _canonical_of(conn, object_sql_id)
+    if s == o or not (s_active and o_active):
+        return
     await _age_merge_edge(conn, s, predicate, o)
 
 
