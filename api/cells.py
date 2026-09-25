@@ -44,6 +44,8 @@ class CellHealthResponse(BaseModel):
     last_run_by_type: dict[str, Optional[datetime]]
     errors_24h: int
     total_cost_30d: Optional[float] = None
+    # #236: closed weeks (last 8) with memories but no active weekly cluster.
+    consolidation_gaps: list[dict] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +119,17 @@ async def cell_health(actor: dict = Depends(get_current_user)) -> CellHealthResp
             WHERE cr.started_at > NOW()-INTERVAL '30 days' {agent_filter}
         """, *params)
 
+        from cell_worker import consolidation_gaps
+        gaps = await consolidation_gaps(conn)
+        if not is_super:
+            own = {r["identifier"] for r in await conn.fetch(
+                "SELECT identifier FROM agents WHERE user_id = $1", int(actor["sub"]))}
+            gaps = [g for g in gaps if g["agent_identifier"] in own]
+
     return {"last_run_by_type": last_by_type, "errors_24h": errors_24h,
-            "total_cost_30d": float(cost_30d) if cost_30d else None}
+            "total_cost_30d": float(cost_30d) if cost_30d else None,
+            "consolidation_gaps": [{**g, "week_start": g["week_start"].isoformat(),
+                                    "week_end": g["week_end"].isoformat()} for g in gaps]}
 
 
 # ---------------------------------------------------------------------------

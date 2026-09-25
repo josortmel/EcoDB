@@ -95,6 +95,33 @@ def _lock_key(agent_id, cell_type, p_start, p_end):
     return int(hashlib.sha256(raw.encode()).hexdigest()[:15], 16)
 
 
+RETRY_WINDOW_HOURS = int(os.environ.get("CELL_RETRY_WINDOW_HOURS", "48"))
+
+
+async def consolidation_gaps(conn, weeks: int = 8) -> list[dict]:
+    """#236: closed weeks (within the last `weeks`) where an agent wrote memories but has no
+    active weekly cluster covering them — the hole the boot would silently skip."""
+    rows = await conn.fetch("""
+        WITH wk AS (
+            SELECT m.agent_id, date_trunc('week', m.created_at)::date AS week_start, count(*) AS n
+            FROM memories m
+            WHERE m.agent_id IS NOT NULL
+              AND m.created_at >= date_trunc('week', now()) - make_interval(weeks => $1)
+              AND m.created_at <  date_trunc('week', now())
+            GROUP BY 1, 2)
+        SELECT a.identifier AS agent_identifier, wk.week_start, (wk.week_start + 6) AS week_end, wk.n AS memories
+        FROM wk JOIN agents a ON a.id = wk.agent_id
+        WHERE wk.n >= 2
+          AND EXISTS (SELECT 1 FROM cell_task_configs c WHERE c.agent_id = wk.agent_id
+                      AND c.cell_type = 'consolidation' AND c.level = 'weekly' AND c.enabled)
+          AND NOT EXISTS (SELECT 1 FROM memory_clusters mc
+                          WHERE mc.agent_id = wk.agent_id AND mc.level = 'weekly' AND mc.status = 'active'
+                            AND mc.period_start <= wk.week_start + 6 AND mc.period_end >= wk.week_start)
+        ORDER BY 1, 2
+    """, weeks)
+    return [dict(r) for r in rows]
+
+
 async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end,
                              cluster_level=None):
     rows = await conn.fetch("""
@@ -2018,10 +2045,41 @@ async def main():
 
     asyncio.create_task(_catch_up())
 
+    # #236 (Pepe, 12-sep: "the system can't be that rigid"): a fire that failed (e.g. DeepSeek 402)
+    # or never ran is retried every hour for RETRY_WINDOW_HOURS after its cron time. The run
+    # functions are idempotent on their own period, so a sweep over a finished period is a no-op.
+    async def _retry_sweep():
+        now = datetime.now(timezone.utc)
+        async with pool.acquire() as conn:
+            configs = await conn.fetch("""
+                SELECT ctc.*, a.identifier FROM cell_task_configs ctc
+                JOIN agents a ON a.id = ctc.agent_id
+                WHERE ctc.enabled = true AND ctc.schedule_cron IS NOT NULL
+            """)
+        for cfg in configs:
+            try:
+                prev_fire = croniter(cfg["schedule_cron"], now).get_prev(datetime)
+                age = now - prev_fire
+                if timedelta(hours=1) <= age <= timedelta(hours=RETRY_WINDOW_HOURS):
+                    await _run_from_config(pool, dict(cfg))
+            except Exception:
+                log.exception("Retry sweep failed: %s/%s agent=%s", cfg["cell_type"], cfg.get("level"), cfg["identifier"])
+        try:
+            async with pool.acquire() as conn:
+                for g in await consolidation_gaps(conn):
+                    log.warning("Consolidation gap: agent=%s week %s..%s has %d memories and no active weekly cluster",
+                                g["agent_identifier"], g["week_start"], g["week_end"], g["memories"])
+        except Exception:
+            log.exception("Gap check failed")
+
     # --- Main loop: cron-based from DB configs ---
     _last_fired: dict[int, datetime] = {}
+    _last_sweep = datetime.now(timezone.utc)
     while True:
         now = datetime.now(timezone.utc)
+        if now - _last_sweep >= timedelta(hours=1):
+            _last_sweep = now
+            asyncio.create_task(_retry_sweep())
         async with pool.acquire() as conn:
             configs = await conn.fetch("""
                 SELECT ctc.*, a.identifier FROM cell_task_configs ctc
