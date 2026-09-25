@@ -74,11 +74,16 @@ MAX_DOCUMENT_EXPANSION = 5
 # Single source for the default dormancy filter: the #365 hidden-count query removes it by identity.
 DORMANT_EXCLUSION_CLAUSE = "(m.staleness IS NULL OR m.staleness NOT IN ('dormant', 'archived'))"
 # #359: graph_context document chunks below this cosine to the query are dropped.
-# Measured live 2026-09-25, top-5 chunk cosine per query over all live chunks:
-#   related   — LittleMe manifiesto 0.639-0.642, YouTube 2018 0.635-0.674, entrevista R24 0.559-0.577
-#   unrelated — NVIDIA 0.480-0.519, molinillo 0.518-0.546, Musashi-clavo 0.550-0.563
-# 0.57 drops every unrelated chunk and keeps the related ones (R24 marginal: its top-2 pass).
-DOC_EXPANSION_MIN_SIMILARITY = float(os.environ.get("DOC_EXPANSION_MIN_SIMILARITY", "0.57"))
+# Default 0.0 = floor effectively OFF (only anti-related, negative-cosine chunks drop);
+# chunks are still ranked by query cosine and labelled. No absolute floor separates
+# related from unrelated on this corpus — two live measurements, 2026-09-25:
+#   Hilo, top-5 chunk cosine per query over all live chunks:
+#     related   — LittleMe manifiesto 0.639-0.642, YouTube 2018 0.635-0.674, entrevista R24 0.559-0.577
+#     unrelated — NVIDIA 0.480-0.519, molinillo 0.518-0.546, Musashi-clavo 0.550-0.563
+#     -> 0.57 looked like a separator (R24 marginal).
+#   code-2 (refutation): unrelated Spanish queries reach 0.58-0.63, above that cut.
+# Recalibrate post-deploy through the real entity-gated endpoint; env override stays.
+DOC_EXPANSION_MIN_SIMILARITY = float(os.environ.get("DOC_EXPANSION_MIN_SIMILARITY", "0.0"))
 DOCUMENT_DECAY_DAYS = 14
 MAX_CONTRADICTION_PAIRS = 10
 _GRAPH_ENTITY_NORM = 3.0
