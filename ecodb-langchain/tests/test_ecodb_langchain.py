@@ -92,6 +92,7 @@ def test_toolset_parity():
         "ecodb_search", "ecodb_search_recent", "ecodb_save_memory", "ecodb_read_memory",
         "ecodb_graph_neighbors", "ecodb_graph_path", "ecodb_search_nodes",
         "ecodb_graph_status", "ecodb_save_triple",
+        "ecodb_search_clusters", "ecodb_telescopic_view", "ecodb_briefing", "ecodb_read_cluster",
     }
 
 

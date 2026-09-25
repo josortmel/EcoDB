@@ -70,3 +70,9 @@ def test_langchain_search_recent_params_are_read_by_api():
     sent = sent_param_names(path, func)
     assert "tag" in sent, f"SDK search_recent does not send the tag filter: {sent}"
     assert sent <= api_query_names(), f"SDK sends params the API ignores: {sent - api_query_names()}"
+
+
+def test_mcp_search_recent_exposes_type_filter():
+    """Parity with the SDK: the MCP tool can filter /memories/recent by type."""
+    path, func = CLIENT_FILES["mcp"]
+    assert "type" in sent_param_names(path, func)

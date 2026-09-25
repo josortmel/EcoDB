@@ -595,6 +595,7 @@ def search_recent(
     fecha_desde: Optional[str] = None,
     fecha_hasta: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    type: Optional[str] = None,
     expand_scope: bool = False,
 ) -> list:
     """Listar memorias recientes filtradas por permisos del actor.
@@ -613,6 +614,8 @@ def search_recent(
         fecha_desde="D", fecha_hasta="DT23:59:59.999999". "Del 16 al 16" con
         fechas sin hora es anchura cero y devuelve 0.
       tags: opcional, lista de tags — AND lógico (memoria debe tener TODOS). Ejemplo: ["landing", "status:approved"].
+      type: opcional, tipo de memoria (momento/decision/acuerdo/tecnico/descubrimiento/
+        observacion/referencia/caso/skill). Filtra en el servidor, antes del limit.
       expand_scope: opcional, override visibility por jerarquía estricta. Audit
         log obligatorio. Default false.
 
@@ -638,6 +641,8 @@ def search_recent(
         params["fecha_hasta"] = fecha_hasta
     if tags is not None:
         params["tag"] = tags  # API query param is `tag` (#369)
+    if type is not None:
+        params["type"] = type
     try:
         data = _api_call("GET", "/memories/recent", params=params)
     except RuntimeError as e:
