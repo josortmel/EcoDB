@@ -14,6 +14,7 @@ from db import get_pool
 from embeddings_client import embed_text
 from events import broadcast_event
 from pagination import paginate
+from search import _bm25_tsvector
 from permissions import (
     precompute_read_visibility,
     check_read_memory,
@@ -281,6 +282,7 @@ async def search_clusters(
 
         params.append(body.limit)
         where = " AND ".join(conditions)
+        _label_tsv = _bm25_tsvector("mc.label")  # #243: also index dotted/slashed identifier parts
 
         rows = await conn.fetch(f"""
             SELECT mc.id, mc.level, mc.label, mc.narrative,
@@ -288,14 +290,14 @@ async def search_clusters(
                    mc.period_start, mc.period_end,
                    coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
                    1 - (mc.centroid <=> $1::vector) AS vector_score,
-                   ts_rank(to_tsvector('spanish', mc.label),
+                   ts_rank({_label_tsv},
                            plainto_tsquery('spanish', $2)) AS bm25_score
             FROM memory_clusters mc
             JOIN agents a ON a.id = mc.agent_id
             WHERE {where}
               AND mc.centroid IS NOT NULL
               AND (1 - (mc.centroid <=> $1::vector) > 0.3
-                   OR ts_rank(to_tsvector('spanish', mc.label),
+                   OR ts_rank({_label_tsv},
                               plainto_tsquery('spanish', $2)) > 0.05)
             ORDER BY (1 - (mc.centroid <=> $1::vector)) DESC
             LIMIT ${len(params)}

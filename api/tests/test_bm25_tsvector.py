@@ -26,3 +26,9 @@ def test_no_bare_single_form_tsvector_left_in_search():
     bare = [m.group(0) for m in re.finditer(r"to_tsvector\('spanish',\s*[\w.]+\)", SEARCH_SRC)]
     # the builder itself contains exactly one literal template
     assert len(bare) == 0, f"single-form tsvector still used: {bare}"
+
+
+def test_no_single_form_tsvector_in_clusters():
+    src = (Path(__file__).parent.parent / "clusters.py").read_text(encoding="utf-8")
+    bare = re.findall(r"to_tsvector\('spanish',\s*[\w.]+\)", src)
+    assert not bare, f"clusters.py still uses single-form tsvector: {bare}"
