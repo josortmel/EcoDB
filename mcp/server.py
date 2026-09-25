@@ -629,10 +629,10 @@ def search_recent(
       max_images: max imagenes devueltas inline (default 3). 0 = sin imagenes inline.
       workspace_id: opcional, filtrar a un workspace concreto.
       project_id: opcional, filtrar a un project concreto.
-      user_id: opcional, filtrar por creador (.
-      agent_identifier: opcional, filtrar por agente (.
-      fecha_desde: opcional ISO 8601 (.
-      fecha_hasta: opcional ISO 8601 (.
+      user_id: opcional, filtrar por creador (id numérico del user autor).
+      agent_identifier: opcional, filtrar por agente (identifier, ej. "Eco"; error si no existe).
+      fecha_desde: opcional ISO 8601 (created_at >= fecha_desde).
+      fecha_hasta: opcional ISO 8601 (created_at <= fecha_hasta).
       tags: opcional, lista de tags — AND lógico (memoria debe tener TODOS). Ejemplo: ["landing", "status:approved"].
       expand_scope: opcional, override visibility por jerarquía estricta. Audit
         log obligatorio. Default false.

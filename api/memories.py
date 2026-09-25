@@ -656,10 +656,10 @@ async def list_recent(
     project_id: Optional[int] = Query(None, description="Filtrar a un project concreto. 403 si sin acceso (anti-IDOR)."),
     user_id_filter: Optional[int] = Query(None, alias="user_id", description="Filtrar por creador."),
     agent_identifier: Optional[str] = Query(None, min_length=1, max_length=128, description="Filtrar por agente."),
-    fecha_desde: Optional[datetime] = Query(None, description="Memorias creadas >= esta fecha (."),
-    fecha_hasta: Optional[datetime] = Query(None, description="Memorias creadas <= esta fecha (."),
+    fecha_desde: Optional[datetime] = Query(None, description="Memorias creadas >= esta fecha (ISO 8601, instante inclusivo)."),
+    fecha_hasta: Optional[datetime] = Query(None, description="Memorias creadas <= esta fecha (ISO 8601, instante inclusivo)."),
     tag: Optional[list[str]] = Query(None, description="Filtrar memorias que contengan TODOS estos tags (AND lógico). Ejemplo: ?tag=landing&tag=status:approved"),
-    expand_scope: bool = Query(False, description=". Audit log obligatorio."),
+    expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
     actor: dict = Depends(get_current_user),
 ) -> MemoryListResponse:
     """Lista memorias recientes del actor con filtros y opt-in expand_scope.
@@ -667,9 +667,9 @@ async def list_recent(
     Filtros: workspace_id, project_id, user_id, agent_identifier, fecha_desde,
     fecha_hasta. workspace_id y project_id validados contra visible_*_ids
     (403 anti-IDOR coherente con /search). fecha_desde > fecha_hasta → 422.
-    Visibility unificada via SQL function check_visibility (.
-    expand_scope=true override jerárquico opt-in con audit log obligatorio
-    . Restricción worker (no super, no CEO, sin lead_ws) +
+    Visibility unificada via SQL function check_visibility (misma que /search).
+    expand_scope=true override jerárquico opt-in con audit log obligatorio.
+    Restricción worker (no super, no CEO, sin lead_ws) +
     expand_scope=true + user_id ajeno → 403 (anti-fingerprinting).
     """
     if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
@@ -840,7 +840,7 @@ async def list_recent(
 @router.get("/{memory_id}", response_model=MemoryResponse)
 async def get_memory(
     memory_id: UUID,
-    expand_scope: bool = Query(False, description=". Audit log obligatorio."),
+    expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
     actor: dict = Depends(get_current_user),
 ) -> MemoryResponse:
     """Lookup por UUID. 

@@ -432,7 +432,7 @@ class ExtractEntitiesRequest(BaseModel):
         None,
         description=f"Etiquetas a extraer. Default: {DEFAULT_LABELS}",
     )
-    threshold: float = Field(0.7, ge=0.0, le=1.0, description="Score minimo (0-1). Default 0.7 (.")
+    threshold: float = Field(0.7, ge=0.0, le=1.0, description="Score minimo GLiNER (0-1). Default 0.7 (= gliner_service.DEFAULT_THRESHOLD).")
 
 
 class ExtractedEntity(BaseModel):
