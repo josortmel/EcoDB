@@ -654,6 +654,13 @@ async def get_bm25_query(query_text: str) -> str:
     return query_text
 
 
+def _graph_context_for_response(graph_context: list[dict], include_docs: bool) -> list[dict]:
+    """Drop graph_context document chunks when the document channel is excluded."""
+    if include_docs:
+        return graph_context
+    return [g for g in graph_context if g.get("source_type") != "document_chunk"]
+
+
 async def compute_bm25_scores(pool, query_text: str, candidate_ids: list[UUID], query_embedding=None) -> dict[str, float]:
     """Compute BM25 scores for candidate memories using fulltext search."""
     if not candidate_ids:
@@ -1555,9 +1562,9 @@ async def search_memories(
             f"{_dormant_hidden} dormant/archived memories match these filters and were excluded; "
             f"pass include_dormant=true to include them")
 
-    # #365: same rule for the document chunks that ride in graph_context.
-    if modality_value in ("image", "audio"):
-        graph_context = [g for g in graph_context if g.get("source_type") != "document_chunk"]
+    # #365 + C8c: same rule for the document chunks that ride in graph_context —
+    # whatever excluded the doc channel (include_documents=False, user_id, image/audio).
+    graph_context = _graph_context_for_response(graph_context, _include_docs)
 
     return SearchResponse(
         query=body.query_text or "(image query)",
