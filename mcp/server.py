@@ -466,7 +466,7 @@ def search(
       include_documents: añade chunks de documentos (default true).
       max_document_results: max chunks de documentos (0-20, default 3).
       deep_factor: pool interno fetch_k = limit*deep_factor (1-10, default 2).
-      cluster_mode: none (default)|include (related_clusters)|mixed (merged_results: memorias+clusters por score).
+      cluster_mode: none (default: aun asi hasta 3 related_clusters)|include (hasta 10 related_clusters)|mixed (merged_results: memorias+clusters por score).
 
     Respuesta: results[] (score, semantic/graph/freshness_score, score_breakdown, trust_warnings);
     graph_context; contradictions (pares de alta similitud, NO verificadas); related_clusters/merged_results
@@ -484,7 +484,8 @@ def search(
         return [TextContent(type="text", text=json.dumps({"error": "deep_factor must be between 1 and 10"}, ensure_ascii=False))]
     if cluster_mode not in ("none", "include", "mixed"):
         return [TextContent(type="text", text=json.dumps({"error": "cluster_mode must be none|include|mixed"}, ensure_ascii=False))]
-    payload: dict = {"limit": limit, "expand_scope": expand_scope, "modality_filter": modality_filter}
+    payload: dict = {"limit": limit, "expand_scope": expand_scope, "modality_filter": modality_filter,
+                     "include_documents": include_documents}  # always: API default is True
     if query_text is not None:
         payload["query_text"] = query_text
     if query_image is not None:
@@ -508,7 +509,6 @@ def search(
     if graph_discovery:
         payload["graph_discovery"] = True
     if include_documents:
-        payload["include_documents"] = True
         payload["max_document_results"] = max_document_results
     if tags:
         payload["tags"] = tags

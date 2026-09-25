@@ -43,3 +43,23 @@ def test_search_exposes_and_forwards_include_dormant():
         and isinstance(node.targets[0].slice, ast.Constant)
     }
     assert "include_dormant" in forwarded
+
+
+def test_search_always_forwards_include_documents():
+    """C8b: API default is True, so False is only honoured if it is always sent."""
+    func = _search_func()
+    top_level_keys = set()
+    for stmt in func.body:  # direct statements, not nested under an `if`
+        if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Subscript) \
+                and getattr(stmt.targets[0].value, "id", None) == "payload":
+            top_level_keys.add(stmt.targets[0].slice.value)
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign)) and isinstance(stmt.value, ast.Dict) \
+                and getattr(stmt.targets[0] if isinstance(stmt, ast.Assign) else stmt.target, "id", None) == "payload":
+            top_level_keys |= {k.value for k in stmt.value.keys if isinstance(k, ast.Constant)}
+    assert "include_documents" in top_level_keys
+
+
+def test_search_docstring_says_none_still_returns_related_clusters():
+    doc = ast.get_docstring(_search_func())
+    line = next(l for l in doc.splitlines() if l.strip().startswith("cluster_mode:"))
+    assert "3" in line and "related_clusters" in line
