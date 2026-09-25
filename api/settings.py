@@ -156,10 +156,15 @@ def _env_bool(key: str, default: bool = False) -> bool:
 # C32 (#243): how the cross-encoder picks top-k membership in search. "replace" = the
 # reranker's own top-k (historic default); "blend" = alpha*norm(composite) +
 # (1-alpha)*norm(reranker); "off" = composite top-k. Final order is composite regardless.
-RERANK_MODE = os.environ.get("RERANK_MODE", "replace").lower()
+# #243 (25-sep): default chosen by the rerank-variant benchmark on the live corpus
+# (Prima/laboratorio/benchmark_v3_run_2026-09-25_rerank_variants): nofilter P@1/P@5/MRR
+# replace 0.43/0.71/0.43 · off 0.50/0.79/0.61 · blend .3 and .5 0.50/0.79/0.57 · blend .7 0.50/0.86/0.61;
+# agent pass identical in all five (0.50/0.86/0.62). Q1 code query hit only when not "replace":
+# the English ms-marco reranker alone cut Spanish targets out of top-k (#374).
+RERANK_MODE = os.environ.get("RERANK_MODE", "blend").lower()
 if RERANK_MODE not in ("replace", "blend", "off"):
     raise ValueError(f"RERANK_MODE must be replace|blend|off, got {RERANK_MODE!r}")
-RERANK_BLEND_ALPHA = float(os.environ.get("RERANK_BLEND_ALPHA", "0.5"))
+RERANK_BLEND_ALPHA = float(os.environ.get("RERANK_BLEND_ALPHA", "0.7"))
 if not 0.0 <= RERANK_BLEND_ALPHA <= 1.0:
     raise ValueError(f"RERANK_BLEND_ALPHA must be in [0, 1], got {RERANK_BLEND_ALPHA}")
 

@@ -1,5 +1,6 @@
 """C32 (#243): rerank_mode decides how the cross-encoder picks top-k MEMBERSHIP.
-  replace (default, today): reranker's top-k.
+  replace (the _apply_rerank function default; the pre-#243 server behaviour): reranker's top-k.
+  Server default (settings) is blend alpha 0.7 since 25-sep, chosen by the rerank-variant benchmark.
   blend: top-k by alpha*norm(composite) + (1-alpha)*norm(reranker), min-max in the pool.
   off: no reranker; composite top-k.
 Final order is composite in every mode (C30). Pure: reranker stubbed.
@@ -48,7 +49,7 @@ def test_replace_is_todays_behaviour(calls):
     assert calls == [5]
 
 
-def test_default_mode_is_replace(calls):
+def test_function_default_mode_is_replace(calls):
     assert _members(search._apply_rerank(_results(), "q", 5, enabled=True)) == {"a", "b", "c", "d", "e"}
 
 
@@ -86,3 +87,13 @@ def test_request_fields_and_settings_default():
     import settings
     assert settings.RERANK_MODE in ("replace", "blend", "off")
     assert 0.0 <= settings.RERANK_BLEND_ALPHA <= 1.0
+
+
+def test_server_default_is_blend_0_7(monkeypatch):
+    """#243: settings default chosen by the benchmark (env unset)."""
+    import importlib, settings as st
+    monkeypatch.delenv("RERANK_MODE", raising=False)
+    monkeypatch.delenv("RERANK_BLEND_ALPHA", raising=False)
+    st = importlib.reload(st)
+    assert st.RERANK_MODE == "blend"
+    assert st.RERANK_BLEND_ALPHA == 0.7
