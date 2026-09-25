@@ -1152,9 +1152,9 @@ def register_document(
 ) -> dict:
     """Registra un documento en EcoDB y lo encola para indexacion.
 
-    Copia el archivo al media store permanente, lo registra en la BD con
-    status='queued', y notifica al worker para procesar el pipeline de
-    ingestion (parse → chunk → GLiNER → embed → graph).
+    Sube los bytes del archivo a la API (POST /documents/upload), que lo guarda
+    en el media store del servidor, lo registra con status='queued' y notifica
+    al worker (parse → chunk → GLiNER → embed → graph).
 
     Args:
       uri: ruta local al archivo (PDF, DOCX, HTML, MD, TXT, audio).
@@ -1165,7 +1165,6 @@ def register_document(
     Returns: {status, document_id, uri, doc_type}
     """
     from pathlib import Path as _Path
-    import uuid as _uuid_mod
 
     # B4-3: reject URL schemes + traversal + denied extensions
     if _URL_SCHEME_RE.match(uri):
@@ -1180,32 +1179,28 @@ def register_document(
     if doc_type is None:
         doc_type = _DOC_EXT_MAP.get(suffix, "txt")
 
-    stored_path: str | None = None
+    # C16: upload the BYTES. Copying into this process' media dir and sending the
+    # path only works when the MCP shares the worker's /app/media volume; a host
+    # (stdio) MCP wrote to the host folder and every ingestion failed "not found".
     try:
-        temp_id = f"doc_{_uuid_mod.uuid4()}"
-        stored_path = _copy_to_media_store(real, temp_id)
-    except (RuntimeError, OSError, IOError) as e:
-        return _err(RuntimeError(f"file copy failed: {e}"))
+        size = os.path.getsize(real)
+        if size > MAX_MEDIA_FILE_SIZE:
+            return _err(RuntimeError(f"file exceeds max size ({size} > {MAX_MEDIA_FILE_SIZE} bytes)"))
+        with open(real, "rb") as fh:
+            content = fh.read()
+    except OSError as e:
+        return _err(RuntimeError(f"file read failed: {e}"))
 
-    filename = _Path(real).name
     try:
-        data = _api_call("POST", "/documents", json={
-            "uri": stored_path,
-            "filename": filename,
-            "doc_type": doc_type,
-            "project_id": project_id,
-            "visibility": visibility,
-        })
+        data = _api_call(
+            "POST", "/documents/upload",
+            params={"project_id": project_id, "visibility": visibility, "doc_type": doc_type},
+            files={"file": (_Path(real).name, content)},
+        )
     except RuntimeError as e:
-        # BC1: cleanup media store copy on API failure
-        if stored_path:
-            try:
-                os.unlink(stored_path)
-            except OSError:
-                pass
         return _err(e)
     return _ok({"status": data.get("status"), "document_id": str(data.get("id")),
-                "uri": stored_path, "doc_type": doc_type})
+                "uri": data.get("uri"), "doc_type": data.get("doc_type")})
 
 
 @mcp.tool()

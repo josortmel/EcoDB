@@ -182,6 +182,9 @@ _DOC_TYPE_MAP = {
     ".mp3": "audio", ".wav": "audio", ".ogg": "audio",
     ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
 }
+# C16: types a caller may force on upload — the inferred ones plus the parser's
+# fast-path names (parsers.py: "txt"/"md" skip docling) that the MCP sends.
+_UPLOAD_DOC_TYPES = frozenset(_DOC_TYPE_MAP.values()) | {"md", "txt"}
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
@@ -189,11 +192,15 @@ async def upload_document(
     file: UploadFile = File(...),
     project_id: int = Query(..., gt=0),
     visibility: Literal["public", "private"] = "public",
+    doc_type: Optional[str] = Query(
+        None, description="Override del tipo inferido por extension. md/txt usan el parser de texto rapido."),
     actor: dict = Depends(get_current_user),
 ) -> DocumentResponse:
-    """Upload a document file via multipart. Dashboard uses this — no host path needed."""
+    """Upload a document file via multipart. Dashboard and MCP use this — no host path needed."""
     if not file.filename:
         raise HTTPException(400, "file has no name")
+    if doc_type is not None and doc_type not in _UPLOAD_DOC_TYPES:
+        raise HTTPException(422, f"doc_type must be one of {sorted(_UPLOAD_DOC_TYPES)}")
 
     os.makedirs(_MEDIA_STORE, exist_ok=True)
     safe_id = str(_uuid.uuid4())
@@ -205,7 +212,8 @@ async def upload_document(
     with open(stored_path, "wb") as f:
         f.write(content)
 
-    doc_type = _DOC_TYPE_MAP.get(ext, "text")
+    if doc_type is None:
+        doc_type = _DOC_TYPE_MAP.get(ext, "text")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
