@@ -197,7 +197,7 @@ class EcoDBClient:
         if fecha_hasta is not None:
             params["fecha_hasta"] = fecha_hasta
         if tags is not None:
-            params["tags"] = tags
+            params["tag"] = tags  # API query param is `tag` (#369)
         return self._call("GET", "/memories/recent", params=params)
 
     def save_memory(
