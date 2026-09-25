@@ -1,7 +1,8 @@
 # EcoDB API — Dockerfile (Tarea 1.4 plan maestro v3, hardening adv-seg Loop 1)
 # Esqueleto minimalista. Crece con cada tarea de Fase 1: auth, CRUD, search, etc.
 
-FROM python:3.12-slim
+# #373: Python patch version pinned to production (3.12.13); the floating 3.12-slim tag drifts.
+FROM python:3.12.13-slim
 
 # El repo apt.debian.org rechaza HTTP plano (Fastly 451) — pasar a HTTPS antes
 # de cualquier apt-get update. python:3.12-slim YA trae ca-certificates.
@@ -23,12 +24,14 @@ ENV HF_HOME=/app/.cache/huggingface
 RUN mkdir -p /app/.cache/huggingface /app/media && chown -R apiuser:apiuser /app/.cache /app/media
 
 # Layer separado para deps — cache friendly: requirements.txt cambia menos que el codigo.
-COPY --chown=apiuser:apiuser api/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --chown=apiuser:apiuser api/requirements.txt api/constraints.txt ./
+# #373: constraints pin every transitive version to what production runs (torch was unpinned:
+# a rebuild silently moved 2.13.0 -> 2.14.0).
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 # ecodb-langchain SDK (used by cell_worker via LangChain)
 COPY --chown=apiuser:apiuser ecodb-langchain /tmp/ecodb-langchain
-RUN pip install --no-cache-dir "/tmp/ecodb-langchain[openai]" && rm -rf /tmp/ecodb-langchain
+RUN pip install --no-cache-dir "/tmp/ecodb-langchain[openai]" -c constraints.txt && rm -rf /tmp/ecodb-langchain
 
 # Copia explicita de modulos del API.
 COPY --chown=apiuser:apiuser api/admin.py api/agents.py api/auth.py api/background.py api/bootstrap_first_apikey.py api/briefing.py api/cases.py api/cell_configs.py api/cell_templates.py api/cell_worker.py api/cells.py api/chunker.py api/classifier.py api/clusters.py api/crypto.py api/db.py api/documents.py api/embeddings_client.py api/entity_normalization.py api/events.py api/foresights.py api/gliner_service.py api/graph.py api/llm_provider.py api/main.py api/migrations.py api/memories.py api/onboarding.py api/pagination.py api/parsers.py api/permissions.py api/projects.py api/providers.py api/rate_limit.py api/reranker.py api/search.py api/settings.py api/shared_models.py api/skills.py api/stats.py api/teams.py api/telemetry.py api/telemetry_api.py api/users.py api/worker.py api/workspaces.py ./
