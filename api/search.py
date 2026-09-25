@@ -247,8 +247,9 @@ async def detect_contradictions(
 
 
 def _apply_rerank(results: list, query_text, limit: int, enabled: bool) -> list:
-    """Etapa 9: cross-encoder order, top `limit`. C26 (#243): each result keeps its
-    reranker_score so a demotion is visible next to the composite score."""
+    """Etapa 9: the cross-encoder picks which `limit` results survive. C26 (#243): each
+    keeps its reranker_score so a demotion is visible next to the composite score.
+    The ORDER it returns is not final — see _final_order (C30)."""
     if not enabled:
         return results[:limit]
     import reranker
@@ -260,6 +261,14 @@ def _apply_rerank(results: list, query_text, limit: int, enabled: bool) -> list:
         r.reranker_score = d.get("reranker_score")
         out.append(r)
     return out
+
+
+def _final_order(results: list, limit: int) -> list:
+    """C30 (F1): one ordering rule for every path. The final order is ALWAYS the composite
+    score (stable sort), then the `limit` cap. The reranker only decides top-k membership:
+    ms-marco degrades Spanish (#374: Q1 top composite -> reranked #13), so its order must
+    not silently win when document chunks happen to be off."""
+    return sorted(results, key=lambda x: x.score, reverse=True)[:limit]
 
 
 def agent_name_warning(query_text, requested_agent, identifiers, results) -> Optional[str]:
@@ -1577,11 +1586,10 @@ async def search_memories(
                     document_id=dr["document_id"],
                     trust_warnings=[],
                 ))
-        results.sort(key=lambda x: x.score, reverse=True)
 
-    # Final cap — memories + graph_discovery + document chunks all compete;
-    # enforce body.limit as the contract regardless of which paths appended.
-    results = results[:body.limit]
+    # Final order + cap — memories + graph_discovery + document chunks all compete;
+    # one rule for every path (C30): composite score, then body.limit.
+    results = _final_order(results, body.limit)
 
     # Buffer last_accessed updates — flushed hourly by governance + every 5 min
     returned_ids = [str(r.id) for r in results if r.source_type == "memory"]

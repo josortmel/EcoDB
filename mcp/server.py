@@ -445,7 +445,8 @@ def search(
     cluster_mode: str = "none",
     include_dormant: bool = False,
 ) -> list:
-    """Busqueda semantica multimodal GAMR, ordenada por score compuesto.
+    """Busqueda semantica multimodal GAMR, SIEMPRE ordenada por score compuesto
+    (el reranker solo decide que resultados entran; su nota va en reranker_score).
 
     Args:
       query_text: texto (3-2000 chars). Obligatorio query_text o query_image.
