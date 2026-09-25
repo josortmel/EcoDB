@@ -181,6 +181,7 @@ class EcoDBClient:
         fecha_desde: Optional[str] = None,
         fecha_hasta: Optional[str] = None,
         tags: Optional[list[str]] = None,
+        type: Optional[str] = None,
         expand_scope: bool = False,
     ) -> dict:
         """Recent memories filtered by actor permissions. GET /memories/recent."""
@@ -198,6 +199,8 @@ class EcoDBClient:
             params["fecha_hasta"] = fecha_hasta
         if tags is not None:
             params["tag"] = tags  # API query param is `tag` (#369)
+        if type is not None:
+            params["type"] = type
         return self._call("GET", "/memories/recent", params=params)
 
     def save_memory(

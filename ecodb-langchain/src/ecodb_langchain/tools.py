@@ -71,10 +71,8 @@ def make_ecodb_tools(client: EcoDBClient) -> list[BaseTool]:
         """List the most recent memories (newest first), filtered by the actor's permissions.
         Use when the user asks 'what have we done lately' or for a time-ordered view rather
         than a semantic query."""
-        data = client.search_recent(limit=limit)
+        data = client.search_recent(limit=limit, type=type)
         items = data.get("items", data.get("results", []))
-        if type:
-            items = [m for m in items if m.get("type") == type]
         trimmed = [
             {"id": m.get("id"), "type": m.get("type"), "content": (m.get("content") or "")[:600],
              "tags": m.get("tags", []), "created_at": m.get("created_at")}

@@ -114,3 +114,23 @@ def test_agent_graph_compiles():
     graph = agent.get_graph()
     node_names = set(graph.nodes.keys())
     assert {"agent", "tools"}.issubset(node_names)
+
+
+@respx.mock
+def test_search_recent_tool_sends_type_to_api():
+    """C13: `type` must reach GET /memories/recent (server-side filter), not be
+    applied after a `limit`-sized fetch (which silently returned ~0 rows)."""
+    respx.post(f"{BASE}/auth/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "jwt123", "expires_in": 3600})
+    )
+    recent = respx.get(f"{BASE}/memories/recent").mock(
+        return_value=httpx.Response(200, json={"items": [
+            {"id": "m1", "type": "decision", "content": "x", "tags": [], "created_at": "now"},
+        ], "total": 1, "limit": 5, "cursor_next": None, "warnings": []})
+    )
+    tools = {t.name: t for t in make_ecodb_tools(_client())}
+    out = json.loads(tools["ecodb_search_recent"].invoke({"limit": 5, "type": "decision"}))
+    sent = recent.calls.last.request.url.params
+    assert sent.get("type") == "decision"
+    assert sent.get("limit") == "5"
+    assert [m["id"] for m in out["items"]] == ["m1"]

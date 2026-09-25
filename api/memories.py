@@ -278,6 +278,14 @@ class MemoryListResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Machine-parseable warnings about query behavior")
 
 
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """C13: a naive/date-only bound is read as UTC (same rule as SearchRequest);
+    mixing naive and aware datetimes used to raise TypeError -> 500."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def _date_window_warnings(
     fecha_desde: Optional[datetime], fecha_hasta: Optional[datetime], result_empty: bool,
 ) -> list[str]:
@@ -681,6 +689,7 @@ async def list_recent(
     fecha_desde: Optional[datetime] = Query(None, description="Memorias con created_at >= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00."),
     fecha_hasta: Optional[datetime] = Query(None, description="Memorias con created_at <= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00 = INICIO de ese día: para cubrir el día D entero usa fecha_desde=D, fecha_hasta=DT23:59:59.999999. Ventanas vacías o de anchura cero avisan en `warnings`."),
     tag: Optional[list[str]] = Query(None, description="Filtrar memorias que contengan TODOS estos tags (AND lógico). Ejemplo: ?tag=landing&tag=status:approved"),
+    memory_type: Optional[MemoryType] = Query(None, alias="type", description="Filtrar por tipo de memoria (momento, decision, tecnico, ...)."),
     expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
     actor: dict = Depends(get_current_user),
 ) -> MemoryListResponse:
@@ -694,6 +703,7 @@ async def list_recent(
     Restricción worker (no super, no CEO, sin lead_ws) +
     expand_scope=true + user_id ajeno → 403 (anti-fingerprinting).
     """
+    fecha_desde, fecha_hasta = _as_utc(fecha_desde), _as_utc(fecha_hasta)
     if fecha_desde is not None and fecha_hasta is not None and fecha_desde > fecha_hasta:
         raise HTTPException(422, "fecha_desde cannot be after fecha_hasta")
 
@@ -746,6 +756,7 @@ async def list_recent(
                             "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
                             "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
                             "tag": tag,
+                            "type": memory_type,
                         },
                         "result_count": 0,
                         "actor_is_super": is_super,
@@ -800,6 +811,10 @@ async def list_recent(
             where_parts.append(f"m.tags @> ${idx}::text[]")
             params.append(tag)
             idx += 1
+        if memory_type is not None:
+            where_parts.append(f"m.type = ${idx}::memory_type")
+            params.append(memory_type)
+            idx += 1
 
         # check_visibility (funcion SQL, misma regla que /search).
         where_parts.append(
@@ -851,6 +866,7 @@ async def list_recent(
                         "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
                         "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
                         "tag": tag,
+                        "type": memory_type,
                     },
                     "result_count": len(rows),
                     "actor_is_super": is_super,
