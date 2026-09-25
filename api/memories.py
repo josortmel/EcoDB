@@ -275,6 +275,27 @@ class MemoryListResponse(BaseModel):
     total: int
     limit: int
     cursor_next: Optional[str]
+    warnings: list[str] = Field(default_factory=list, description="Machine-parseable warnings about query behavior")
+
+
+def _date_window_warnings(
+    fecha_desde: Optional[datetime], fecha_hasta: Optional[datetime], result_empty: bool,
+) -> list[str]:
+    """#340: fecha_desde/fecha_hasta son instantes inclusivos; un cero por
+    ventana mal formada no debe confundirse con "no hay memorias"."""
+    warnings: list[str] = []
+    if fecha_desde is not None and fecha_hasta is not None and fecha_desde == fecha_hasta:
+        warnings.append(
+            "zero-width window: fecha_desde == fecha_hasta (bounds are instants, not days); "
+            "to cover a whole day D use fecha_desde=D, fecha_hasta=DT23:59:59.999999"
+        )
+    if (fecha_hasta is not None and result_empty
+            and (fecha_hasta.hour, fecha_hasta.minute, fecha_hasta.second, fecha_hasta.microsecond) == (0, 0, 0, 0)):
+        warnings.append(
+            "fecha_hasta is midnight = start of that day; did you mean end of day "
+            "(DT23:59:59.999999)?"
+        )
+    return warnings
 
 
 # ---------------------------------------------------------------------------
@@ -656,8 +677,8 @@ async def list_recent(
     project_id: Optional[int] = Query(None, description="Filtrar a un project concreto. 403 si sin acceso (anti-IDOR)."),
     user_id_filter: Optional[int] = Query(None, alias="user_id", description="Filtrar por creador."),
     agent_identifier: Optional[str] = Query(None, min_length=1, max_length=128, description="Filtrar por agente."),
-    fecha_desde: Optional[datetime] = Query(None, description="Memorias creadas >= esta fecha (ISO 8601, instante inclusivo)."),
-    fecha_hasta: Optional[datetime] = Query(None, description="Memorias creadas <= esta fecha (ISO 8601, instante inclusivo)."),
+    fecha_desde: Optional[datetime] = Query(None, description="Memorias con created_at >= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00."),
+    fecha_hasta: Optional[datetime] = Query(None, description="Memorias con created_at <= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00 = INICIO de ese día: para cubrir el día D entero usa fecha_desde=D, fecha_hasta=DT23:59:59.999999. Ventanas vacías o de anchura cero avisan en `warnings`."),
     tag: Optional[list[str]] = Query(None, description="Filtrar memorias que contengan TODOS estos tags (AND lógico). Ejemplo: ?tag=landing&tag=status:approved"),
     expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
     actor: dict = Depends(get_current_user),
@@ -731,7 +752,10 @@ async def list_recent(
                         "no_visible_projects": True,
                     }), actor.get("organization_id"),
                 )
-            return MemoryListResponse(items=[], total=0, limit=limit, cursor_next=None)
+            return MemoryListResponse(
+                items=[], total=0, limit=limit, cursor_next=None,
+                warnings=_date_window_warnings(fecha_desde, fecha_hasta, result_empty=True),
+            )
 
         # Resolver agent_identifier → agent_id si filtro presente.
         target_agent_id: Optional[int] = None
@@ -834,7 +858,10 @@ async def list_recent(
             )
 
     items = [_row_to_response(r) for r in rows]
-    return MemoryListResponse(items=items, total=total_row, limit=limit, cursor_next=None)
+    return MemoryListResponse(
+        items=items, total=total_row, limit=limit, cursor_next=None,
+        warnings=_date_window_warnings(fecha_desde, fecha_hasta, result_empty=not items),
+    )
 
 
 @router.get("/{memory_id}", response_model=MemoryResponse)

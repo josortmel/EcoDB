@@ -229,6 +229,22 @@ def test_recent_respects_limit(client, super_jwt):
     assert len(r.json()["items"]) <= 2
 
 
+def test_recent_zero_width_window_warns(client, super_jwt):
+    """#340: "del 16 al 16" es anchura cero — el cero debe avisar."""
+    r = client.get("/memories/recent?fecha_desde=2026-09-16&fecha_hasta=2026-09-16",
+                   headers=auth(super_jwt))
+    assert r.status_code == 200
+    body = r.json()
+    assert any("zero-width" in w for w in body["warnings"])
+    assert any("midnight" in w for w in body["warnings"])
+
+
+def test_recent_normal_call_has_no_warnings(client, super_jwt):
+    r = client.get("/memories/recent?limit=5", headers=auth(super_jwt))
+    assert r.status_code == 200
+    assert r.json()["warnings"] == []
+
+
 # ---------------------------------------------------------------------------
 # GET /memories/{id}
 # ---------------------------------------------------------------------------

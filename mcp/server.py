@@ -631,11 +631,18 @@ def search_recent(
       project_id: opcional, filtrar a un project concreto.
       user_id: opcional, filtrar por creador (id numérico del user autor).
       agent_identifier: opcional, filtrar por agente (identifier, ej. "Eco"; error si no existe).
-      fecha_desde: opcional ISO 8601 (created_at >= fecha_desde).
-      fecha_hasta: opcional ISO 8601 (created_at <= fecha_hasta).
+      fecha_desde: opcional ISO 8601 (created_at >= fecha_desde). Es un INSTANTE;
+        una fecha sin hora es 00:00:00. Intervalo cerrado por ambos lados.
+      fecha_hasta: opcional ISO 8601 (created_at <= fecha_hasta). Es un INSTANTE:
+        "2026-09-16" = 00:00:00 = INICIO de ese día. Para cubrir el día D entero:
+        fecha_desde="D", fecha_hasta="DT23:59:59.999999". "Del 16 al 16" con
+        fechas sin hora es anchura cero y devuelve 0.
       tags: opcional, lista de tags — AND lógico (memoria debe tener TODOS). Ejemplo: ["landing", "status:approved"].
       expand_scope: opcional, override visibility por jerarquía estricta. Audit
         log obligatorio. Default false.
+
+    La respuesta incluye `warnings` (lista, vacía si nada que avisar): avisa de
+    ventanas de fecha de anchura cero o de fecha_hasta a medianoche sin resultados.
     """
     from mcp.types import TextContent, ImageContent
     import base64 as _b64
