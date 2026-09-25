@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid as _uuid
 from datetime import datetime
 from typing import Literal, Optional
@@ -185,6 +186,14 @@ _DOC_TYPE_MAP = {
 # C16: types a caller may force on upload — the inferred ones plus the parser's
 # fast-path names (parsers.py: "txt"/"md" skip docling) that the MCP sends.
 _UPLOAD_DOC_TYPES = frozenset(_DOC_TYPE_MAP.values()) | {"md", "txt"}
+# C16b: upload is the only gate for agent documents — cap, denylist and a sane
+# extension shape are enforced before anything is written. Same size env as the parser.
+_MAX_UPLOAD_BYTES = int(os.environ.get("MAX_DOC_SIZE_BYTES", str(50 * 1024 * 1024)))
+_DENIED_UPLOAD_EXTENSIONS = frozenset({
+    ".env", ".key", ".pem", ".pfx", ".p12", ".p8", ".ppk", ".der", ".yaml", ".toml", ".ini",
+    ".config", ".exe", ".dll", ".bat", ".ps1", ".sh", ".cmd",
+})
+_EXT_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
@@ -201,47 +210,54 @@ async def upload_document(
         raise HTTPException(400, "file has no name")
     if doc_type is not None and doc_type not in _UPLOAD_DOC_TYPES:
         raise HTTPException(422, f"doc_type must be one of {sorted(_UPLOAD_DOC_TYPES)}")
-
-    os.makedirs(_MEDIA_STORE, exist_ok=True)
-    safe_id = str(_uuid.uuid4())
     ext = os.path.splitext(file.filename)[1].lower()
-    stored_name = f"{safe_id}{ext}"
-    stored_path = os.path.join(_MEDIA_STORE, stored_name)
+    if not _EXT_RE.match(ext):
+        raise HTTPException(422, "file must have a plain alphanumeric extension")
+    if ext in _DENIED_UPLOAD_EXTENSIONS:
+        raise HTTPException(422, f"file extension '{ext}' blocked for security")
 
-    content = await file.read()
-    with open(stored_path, "wb") as f:
-        f.write(content)
+    content = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"file exceeds max size ({_MAX_UPLOAD_BYTES} bytes)")
 
     if doc_type is None:
         doc_type = _DOC_TYPE_MAP.get(ext, "text")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # C16b: permission and project checks BEFORE the file is written.
         if not actor.get("is_super"):
             visible = await visible_project_ids(conn, actor)
             if project_id not in visible:
-                os.unlink(stored_path)
                 raise HTTPException(403, "no access to target project")
 
         workspace_id = await conn.fetchval(
             "SELECT workspace_id FROM projects WHERE id = $1", project_id
         )
         if workspace_id is None:
-            os.unlink(stored_path)
             raise HTTPException(404, "project not found")
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO documents (uri, filename, doc_type, workspace_id, project_id, visibility, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 'queued')
-            RETURNING id, uri, filename, doc_type, workspace_id, project_id,
-                      visibility::text, status, retry_count,
-                      processing_started_at, last_indexed, processing_metrics,
-                      base_weight, created_at
-            """,
-            stored_path, file.filename, doc_type,
-            workspace_id, project_id, visibility,
-        )
+        os.makedirs(_MEDIA_STORE, exist_ok=True)
+        stored_path = os.path.join(_MEDIA_STORE, f"{_uuid.uuid4()}{ext}")
+        with open(stored_path, "wb") as f:
+            f.write(content)
+
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO documents (uri, filename, doc_type, workspace_id, project_id, visibility, status)
+                VALUES ($1, $2, $3, $4, $5, $6, 'queued')
+                RETURNING id, uri, filename, doc_type, workspace_id, project_id,
+                          visibility::text, status, retry_count,
+                          processing_started_at, last_indexed, processing_metrics,
+                          base_weight, created_at
+                """,
+                stored_path, file.filename, doc_type,
+                workspace_id, project_id, visibility,
+            )
+        except Exception:
+            os.unlink(stored_path)  # no orphan file when the row could not be created
+            raise
         await conn.execute("SELECT pg_notify('ecodb_ingest', $1)", str(row["id"]))
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
