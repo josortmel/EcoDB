@@ -246,6 +246,22 @@ async def detect_contradictions(
     return contradictions
 
 
+def _apply_rerank(results: list, query_text, limit: int, enabled: bool) -> list:
+    """Etapa 9: cross-encoder order, top `limit`. C26 (#243): each result keeps its
+    reranker_score so a demotion is visible next to the composite score."""
+    if not enabled:
+        return results[:limit]
+    import reranker
+    rerank_dicts = [{"content": r.content, "_idx": i} for i, r in enumerate(results)]
+    reranked = reranker.rerank(query_text, rerank_dicts, top_k=limit)
+    out = []
+    for d in reranked:
+        r = results[d["_idx"]]
+        r.reranker_score = d.get("reranker_score")
+        out.append(r)
+    return out
+
+
 def agent_name_warning(query_text, requested_agent, identifiers, results) -> Optional[str]:
     """C21 (#365): the query names exactly one of the actor's agents, no agent filter was
     passed, and some memory results belong to someone else. Label it; never re-rank."""
@@ -881,6 +897,9 @@ class SearchResult(BaseModel):
     graph_score: float = Field(0.0, description="Score de proximidad por grafo [0..1]")
     freshness_score: float = Field(1.0, description="Score de frescura temporal [0..1]")
     score_breakdown: Optional[ScoreBreakdown] = Field(None, description="Desglose del score compuesto")
+    reranker_score: Optional[float] = Field(
+        None, description="Score del cross-encoder que fija el orden final (null si el reranker esta off o fallo). "
+                          "Compararlo con score muestra cuanto reordeno el reranker.")
     matched_modality: str = Field(..., description="Modalidad del embedding que produjo el match (text/image/audio)")
     media_path: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -1396,13 +1415,10 @@ async def search_memories(
     results.sort(key=lambda x: x.score, reverse=True)
 
     # Etapa 9 — Cross-encoder reranking (Option A: memories only, before graph bonus)
-    from reranker import rerank, is_available as reranker_available
-    if reranker_available() and body.query_text and resolved_query_type != "cross_modal":
-        rerank_dicts = [{"content": r.content, "_idx": i} for i, r in enumerate(results)]
-        reranked = rerank(body.query_text, rerank_dicts, top_k=body.limit)
-        results = [results[d["_idx"]] for d in reranked]
-    else:
-        results = results[:body.limit]
+    from reranker import is_available as reranker_available
+    results = _apply_rerank(
+        results, body.query_text, body.limit,
+        enabled=bool(reranker_available() and body.query_text and resolved_query_type != "cross_modal"))
 
     # GC1 — Discovery: fetch memorias descubiertas por grafo (opt-in)
     if body.graph_discovery:

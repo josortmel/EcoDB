@@ -468,7 +468,7 @@ def search(
       deep_factor: pool interno fetch_k = limit*deep_factor (1-10, default 2).
       cluster_mode: none (default: aun asi hasta 3 related_clusters)|include (hasta 10 related_clusters)|mixed (merged_results: memorias+clusters por score).
 
-    Respuesta: results[] (score, semantic/graph/freshness_score, score_breakdown, trust_warnings);
+    Respuesta: results[] (score, semantic/graph/freshness_score, score_breakdown, reranker_score, trust_warnings);
     graph_context; contradictions (pares de alta similitud, NO verificadas); related_clusters/merged_results
     segun cluster_mode; warnings (leelos si hay 0 resultados).
     """
