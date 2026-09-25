@@ -444,6 +444,8 @@ def search(
     deep_factor: int = 2,
     cluster_mode: str = "none",
     include_dormant: bool = False,
+    rerank_mode: Optional[str] = None,
+    rerank_alpha: Optional[float] = None,
 ) -> list:
     """Busqueda semantica multimodal GAMR, SIEMPRE ordenada por score compuesto
     (el reranker solo decide que resultados entran; su nota va en reranker_score).
@@ -463,10 +465,11 @@ def search(
       tags: AND logico (la memoria debe tener TODOS). Ej: ["ancla-visual"].
       include_dormant: incluye memorias dormant/archived (default false: quedan FUERA).
       expand_scope: override de visibilidad por jerarquia estricta (audit log).
-      graph_discovery: añade memorias halladas solo via grafo (semantic_score=0). Default false.
+      graph_discovery: añade memorias halladas solo via grafo (default false).
       include_documents: añade chunks de documentos (default true).
       max_document_results: max chunks de documentos (0-20, default 3).
       deep_factor: pool interno fetch_k = limit*deep_factor (1-10, default 2).
+      rerank_mode, rerank_alpha: replace|blend|off; peso compuesto 0-1 (None = servidor).
       cluster_mode: none (default: aun asi hasta 3 related_clusters)|include (hasta 10 related_clusters)|mixed (merged_results: memorias+clusters por score).
 
     Respuesta: results[] (score, semantic/graph/freshness_score, score_breakdown, reranker_score, trust_warnings);
@@ -519,6 +522,10 @@ def search(
         payload["cluster_mode"] = cluster_mode
     if include_dormant:
         payload["include_dormant"] = True
+    if rerank_mode is not None:
+        payload["rerank_mode"] = rerank_mode
+    if rerank_alpha is not None:
+        payload["rerank_alpha"] = rerank_alpha
     try:
         data = _api_call("POST", "/search", json=payload)
     except RuntimeError as e:

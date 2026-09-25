@@ -152,6 +152,17 @@ def validate_production_secrets() -> None:
 def _env_bool(key: str, default: bool = False) -> bool:
     return os.environ.get(key, str(default)).lower() in ("true", "1", "yes", "on")
 
+
+# C32 (#243): how the cross-encoder picks top-k membership in search. "replace" = the
+# reranker's own top-k (historic default); "blend" = alpha*norm(composite) +
+# (1-alpha)*norm(reranker); "off" = composite top-k. Final order is composite regardless.
+RERANK_MODE = os.environ.get("RERANK_MODE", "replace").lower()
+if RERANK_MODE not in ("replace", "blend", "off"):
+    raise ValueError(f"RERANK_MODE must be replace|blend|off, got {RERANK_MODE!r}")
+RERANK_BLEND_ALPHA = float(os.environ.get("RERANK_BLEND_ALPHA", "0.5"))
+if not 0.0 <= RERANK_BLEND_ALPHA <= 1.0:
+    raise ValueError(f"RERANK_BLEND_ALPHA must be in [0, 1], got {RERANK_BLEND_ALPHA}")
+
 ENABLE_BM25 = _env_bool("ENABLE_BM25")
 ENABLE_AUTO_LINK = _env_bool("ENABLE_AUTO_LINK")
 ENABLE_WEIGHT_DYNAMIC = _env_bool("ENABLE_WEIGHT_DYNAMIC")

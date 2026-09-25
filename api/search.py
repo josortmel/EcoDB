@@ -34,6 +34,7 @@ from permissions import no_null_bytes as _no_null_bytes
 from permissions import visible_project_ids, visible_workspace_ids
 import settings
 from settings import ENABLE_BM25, ENABLE_BM25_EXPANSION, ENABLE_STOP_ENTITIES_DYNAMIC, ENABLE_TRUST_TIERS, ENABLE_WEIGHT_DYNAMIC, GAMR_WEIGHTS_BM25
+from settings import RERANK_BLEND_ALPHA, RERANK_MODE
 
 async def generate_hypothetical(query_text: str) -> str | None:
     """Generate a hypothetical answer for HyDE. Returns None if LLM unavailable."""
@@ -246,20 +247,45 @@ async def detect_contradictions(
     return contradictions
 
 
-def _apply_rerank(results: list, query_text, limit: int, enabled: bool) -> list:
-    """Etapa 9: the cross-encoder picks which `limit` results survive. C26 (#243): each
-    keeps its reranker_score so a demotion is visible next to the composite score.
-    The ORDER it returns is not final — see _final_order (C30)."""
-    if not enabled:
+def _minmax(values: list[float]) -> list[float]:
+    lo, hi = min(values), max(values)
+    return [0.0] * len(values) if hi == lo else [(v - lo) / (hi - lo) for v in values]
+
+
+def _apply_rerank(results: list, query_text, limit: int, enabled: bool,
+                  mode: str = "replace", alpha: float = 0.5) -> list:
+    """Etapa 9: decides which `limit` results survive (membership). `results` arrive sorted
+    by composite score. C32 (#243) modes:
+      replace — the cross-encoder's own top-k (historic behaviour);
+      blend   — top-k by alpha*norm(composite) + (1-alpha)*norm(reranker), min-max within
+                the candidate pool; a degraded reranker (no scores) falls back to composite;
+      off     — composite top-k, reranker not called.
+    C26: kept results carry reranker_score. The ORDER returned is not final (C30)."""
+    if not enabled or mode == "off":
         return results[:limit]
     import reranker
     rerank_dicts = [{"content": r.content, "_idx": i} for i, r in enumerate(results)]
-    reranked = reranker.rerank(query_text, rerank_dicts, top_k=limit)
+    if mode == "replace":
+        reranked = reranker.rerank(query_text, rerank_dicts, top_k=limit)
+        out = []
+        for d in reranked:
+            r = results[d["_idx"]]
+            r.reranker_score = d.get("reranker_score")
+            out.append(r)
+        return out
+    scored = reranker.rerank(query_text, rerank_dicts, top_k=len(rerank_dicts))
+    if not scored or any(d.get("reranker_score") is None for d in scored):
+        return results[:limit]
+    by_idx = {d["_idx"]: d["reranker_score"] for d in scored}
+    idxs = list(by_idx)
+    comp = _minmax([results[i].score for i in idxs])
+    rer = _minmax([by_idx[i] for i in idxs])
+    blended = {i: alpha * c + (1 - alpha) * r for i, c, r in zip(idxs, comp, rer)}
+    chosen = sorted(idxs, key=lambda i: (blended[i], results[i].score), reverse=True)[:limit]
     out = []
-    for d in reranked:
-        r = results[d["_idx"]]
-        r.reranker_score = d.get("reranker_score")
-        out.append(r)
+    for i in chosen:
+        results[i].reranker_score = by_idx[i]
+        out.append(results[i])
     return out
 
 
@@ -835,6 +861,11 @@ class SearchRequest(BaseModel):
     max_document_results: int = Field(3, ge=0, le=20, description="Max chunks de documentos a incluir (0-20). Solo aplica si include_documents=true.")
     tags: Optional[list[str]] = Field(None, max_length=20, description="Filtrar por tags (AND logic). Max 20 tags, each max 128 chars.")
     include_dormant: bool = Field(False, description="Si true, incluye memorias dormant/archived en resultados. Default false.")
+    rerank_mode: Optional[Literal["replace", "blend", "off"]] = Field(
+        None, description="Como elige el reranker los top-limit: replace (sus top-k), blend (mezcla con el score "
+                          "compuesto), off (sin reranker). None = RERANK_MODE del servidor. El orden final es siempre compuesto.")
+    rerank_alpha: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Solo blend: peso del score compuesto (0-1). None = RERANK_BLEND_ALPHA del servidor.")
     deep_factor: int = Field(2, ge=1, le=10, description="Internal pool multiplier. fetch_k = limit * deep_factor. Default 2.")
     cluster_mode: Optional[Literal["none", "include", "mixed"]] = Field(
         "none", description="Cluster enrichment: none=no clusters, include=add related_clusters, mixed=merged_results interleaving memories+clusters")
@@ -1442,7 +1473,9 @@ async def search_memories(
     from reranker import is_available as reranker_available
     results = _apply_rerank(
         results, body.query_text, body.limit,
-        enabled=bool(reranker_available() and body.query_text and resolved_query_type != "cross_modal"))
+        enabled=bool(reranker_available() and body.query_text and resolved_query_type != "cross_modal"),
+        mode=body.rerank_mode or RERANK_MODE,
+        alpha=RERANK_BLEND_ALPHA if body.rerank_alpha is None else body.rerank_alpha)
 
     # GC1 — Discovery: fetch memorias descubiertas por grafo (opt-in)
     if body.graph_discovery:
