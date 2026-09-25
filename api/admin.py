@@ -1,4 +1,4 @@
-"""Endpoints administrativos — .7.
+"""Endpoints administrativos.
 
 POST /admin/redistribute/memories: redistribuye memorias entre projects.
 Used to redistribute memories from the default 'general' project to
@@ -459,7 +459,7 @@ async def admin_extract_entities(
     actor: dict = Depends(require_super),
 ) -> ExtractEntitiesResponse:
     """Extrae entidades de un texto via GLiNER. Super-only — endpoint de
-    verificacion para .
+    verificacion de la extraccion NER.
 
     El primer call carga el modelo (~10-30s). Calls siguientes ~200-500ms CPU.
     """
@@ -532,7 +532,7 @@ async def create_dictionary_entry(
 ) -> EntityDictionaryEntry:
     """Crea entrada en entity_dictionary. Super-only.
 
-    Validaciones (
+    Validaciones:
     - entity_type contra allowlist EntityType (matiz adv-code: typo "persoana"
       → 422 antes que corromper graph_context silenciosamente).
     - Pattern Pydantic en name + entity_type (matiz adv-seg: anti emoji y

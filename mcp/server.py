@@ -1,4 +1,4 @@
-"""EcoDB MCP wrapper — .
+"""EcoDB MCP wrapper.
 
 MCP → HTTP API translator. No business logic. Each tool proxies to the
 corresponding API endpoint and returns JSON.
@@ -56,7 +56,7 @@ ECODB_API_URL = os.environ.get("ECODB_API_URL", "http://localhost:8080").rstrip(
 ECODB_API_KEY = os.environ.get("ECODB_API_KEY", "")
 ECODB_TIMEOUT = float(os.environ.get("ECODB_TIMEOUT", "60.0"))
 
-# Transport selector — 
+# Transport selector — --transport CLI o env MCP_TRANSPORT:
 # - "stdio" (default, dev local): subprocess invocado por Claude Code.
 # - "sse": HTTP server-sent events, util para containerizar y servir por red.
 # - "streamable-http": variante mas moderna del transport HTTP.
@@ -79,7 +79,7 @@ if not ECODB_API_KEY:
     # cualquier tool fallara con mensaje claro al primer call.
     print("[ecodb-mcp] WARNING: ECODB_API_KEY no configurada", file=sys.stderr)
 
-# VS1-MCP fix .
+# VS1-MCP fix: validar el esquema de ECODB_API_URL.
 # Permitimos https a cualquier host (cloud deployments legitimos) pero
 # rechazamos http a hosts NO internos — http externo transmite ECODB_API_KEY
 # en claro al destino, vector SSRF + exfiltracion. Hosts internos OK con http
@@ -220,7 +220,7 @@ def _ensure_jwt(client: httpx.Client, force_refresh: bool = False) -> str:
     r = client.post(f"{ECODB_API_URL}/auth/token", json={"api_key": ECODB_API_KEY})
     if r.status_code != 200:
         raise RuntimeError(f"auth/token failed: HTTP {r.status_code}")
-    # BC1 fix 
+    # BC1 fix: si /auth/token no devuelve JSON (p.ej. un proxy con
     # error page con 200 OK), r.json() lanza JSONDecodeError (subclase de
     # ValueError), no RuntimeError. Sin este guard la excepcion escapa el
     # except del tool y crashea el FastMCP server.
@@ -781,7 +781,7 @@ def read_memory(memory_id: str, expand_scope: bool = False) -> list:
     import base64 as _b64
     from pathlib import Path as _Path
 
-    # VS2-MCP fix .
+    # VS2-MCP fix: memory_id va quoted en el path (anti path traversal).
     params = {"expand_scope": expand_scope} if expand_scope else None
     try:
         data = _api_call("GET", f"/memories/{quote(memory_id, safe='')}", params=params)
@@ -877,7 +877,7 @@ def neighbors(node: str, depth: int = 1) -> dict:
       node: nombre del nodo central.
       depth: 1-3 (default 1). Mayor profundidad = mas resultados pero mas lento.
     """
-    # UA2 fix .
+    # UA2 fix: clamp de depth a 1-3 en el cliente.
     # El API tiene su propia validacion, pero un agente con depth=50 dispara un
     # roundtrip caro innecesario. Mejor reject barato aqui.
     depth = max(1, min(int(depth), 3))

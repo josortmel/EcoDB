@@ -1,13 +1,13 @@
-"""Helpers de permisos compartidos — .
+"""Helpers de permisos compartidos.
 
 Consolida helpers de cascada CEO/Lead/Worker que vivían dispersos en
-memories.py, workspaces.py y projects.py (deuda IC1 acumulada en .2).
+memories.py, workspaces.py y projects.py (deuda IC1).
 Coherencia + única implementación + tests unitarios independientes.
 
-Nuevo en 2.3 además de la consolidación: `visible_project_ids(actor)` que
-.
+Nuevo en 2.3 además de la consolidación: `visible_project_ids(actor)`, el
+conjunto de projects que el actor puede leer (lo usan /search y /memories/recent).
 
-Modelo de roles (desde sesión 2026-05-07 cierre 
+Modelo de roles (desde sesión 2026-05-07):
 - Super (is_super=true): sees and modifies everything.
 - CEO (dueño empresa cliente): users.is_ceo=true + organizations.ceo_user_id.
 - Admin/Lead (jefe departamento): workspace_leads.user_id.
@@ -17,7 +17,7 @@ Convención: todos los helpers reciben `actor: dict` con shape de JWT/build_jwt_
 (`is_super`, `is_ceo`, `organization_id`, `lead_workspaces`, `sub`).
 
 Helpers SÍNCRONOS: deciden con info que ya está en memoria (actor + row leída
-previamente). Sin DB round-trip — evitan timing oracles (lección VS1-WS + VS1-PROJ .
+previamente). Sin DB round-trip — evitan timing oracles (lección VS1-WS + VS1-PROJ).
 
 Helpers ASÍNCRONOS: hacen DB queries. Reciben `conn` asyncpg como primer parámetro.
 """
@@ -56,7 +56,7 @@ def validate_name_strip_blank(value: str, field_name: str = "name") -> str:
     2. Rechazar si queda blank o solo whitespace.
     3. Rechazar null bytes.
 
-    Razones (OBS-WS1 
+    Razones (OBS-WS1):
     - `name=" "` (un solo espacio) pasa min_length=1 de Pydantic — sin strip,
       crea workspace/project con nombre invisible.
     - `name="  foo  "` se guardaría con espacios y UNIQUE constraint lo trataría
@@ -122,7 +122,7 @@ def user_can_delete_workspace(actor: dict, ws_row) -> bool:
 
 # ---------------------------------------------------------------------------
 # Project permissions (síncronos — usan project_row con ws_organization_id
-# del LEFT JOIN, patrón VS1-PROJ 
+# del LEFT JOIN, patrón VS1-PROJ)
 # ---------------------------------------------------------------------------
 
 def user_can_modify_project(actor: dict, project_row) -> bool:
@@ -279,13 +279,13 @@ async def visible_workspace_ids(conn, actor: dict) -> set[int]:
 async def visible_project_ids(conn, actor: dict) -> set[int]:
     """Conjunto de project_ids que el actor puede leer.
 
-    Cascada (NUEVO en .5 con team_resources):
+    Cascada (incluye team_resources):
     - Super: todos los projects.
     - CEO: projects de workspaces de su organization.
     - Lead: projects de SUS workspaces.
     - Worker: projects donde es project_member, MÁS projects is_common del
       workspace donde tiene algún assignment, MÁS projects vinculados a teams
-      ad-hoc donde es team_member (.
+      ad-hoc donde es team_member (via team_resources).
     """
     if actor.get("is_super"):
         rows = await conn.fetch("SELECT id FROM projects")

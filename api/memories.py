@@ -1,4 +1,4 @@
-"""Endpoints de memorias — .2.
+"""Endpoints de memorias.
 
 Endpoints:
 - POST /memories            crear memoria con embedding automático y GLiNER entity linking.
@@ -15,10 +15,10 @@ Modelo de permisos (cascada CEO/Lead/Worker del plan v3 §4.2 + visibility):
 - Member de project P: ve memorias de P. Modifica solo las que él creó.
 - Visibility=private: solo visible para user_id creador + super + CEO de la org.
 
-.
-- POST /memories: tras INSERT, llama al servicio embeddings (POST /embed/text con
-  prompt_name=passage) y hace UPDATE con vector(512). Todo en una transaccion —
-  si embeddings falla, se hace rollback del INSERT (decision A: invariante
+Embeddings:
+- POST /memories: embebe el content (POST /embed/text con prompt_name=passage)
+  FUERA del pool y hace un INSERT atomico con el vector(512) ya en la fila —
+  si embeddings falla no se inserta nada (decision A: invariante
   "memoria sin embedding es invisible" prevalece sobre disponibilidad parcial).
 - PUT /memories/{id}: re-embed solo si content cambia. Otros campos
   (tags/visibility/type/media_path) NO disparan re-embed.
@@ -300,7 +300,7 @@ def _date_window_warnings(
 
 # ---------------------------------------------------------------------------
 # Permisos: helpers `visible_workspace_ids`, `can_read_memory`, `can_write_memory`
-# extraídos a permissions.py en .
+# extraídos a permissions.py.
 # Importados al top del archivo. Comportamiento idéntico al previo.
 # ---------------------------------------------------------------------------
 
@@ -315,7 +315,7 @@ async def create_memory(
 ) -> MemoryResponse:
     """Crear memoria con embedding automatico.
 
-    VS2 fix 
+    VS2 fix: la llamada a embeddings (lenta con GPU saturada, hasta
     30s timeout) se hace FUERA de pool.acquire() para evitar starvation del
     pool asyncpg. Flujo: validaciones rapidas → libero pool → embed (sin DB)
     → re-acquire pool → INSERT atomico con embedding ya en la fila. Asi solo
@@ -447,7 +447,7 @@ async def create_memory(
                 "referenced resource (workspace, project, user or agent) was deleted concurrently",
             )
 
-        # FASE 3b — .
+        # FASE 3b — filas en memory_embeddings (multimodal).
         # Backward compat: memories.embedding sigue lleno con text embedding (arriba).
         # memory_embeddings es la fuente de verdad para search post-migración.
         try:
@@ -489,8 +489,9 @@ async def create_memory(
         _perf_log.info("create_memory phase=insert %.2fs", _t_insert - _t_embed)
     # conn released here — pool free during GLiNER CPU inference
 
-    # FASE 4 — .
-    # Decisión     # - Skip + log si GLiNER falla → NO rollback memoria. GLiNER es
+    # FASE 4 — entity linking GLiNER.
+    # Decisión:
+    # - Skip + log si GLiNER falla → NO rollback memoria. GLiNER es
     #   enriquecimiento, no la verdad de la memoria.
     # - Si AGE/SQL fallan dentro del linking → rollback de la transaction
     #   de linking (deja memoria sin links, no rompe la creación).
@@ -702,7 +703,7 @@ async def list_recent(
     org_id = actor.get("organization_id")
     lead_ws = list(actor.get("lead_workspaces") or [])
 
-    # .
+    # Anti-fingerprinting: worker sin rol elevado no combina expand_scope con user_id ajeno.
     if (expand_scope and user_id_filter is not None
             and user_id_filter != user_id
             and not is_super and not is_ceo and not lead_ws):
@@ -726,7 +727,7 @@ async def list_recent(
                 raise HTTPException(403, "no access to specified workspace")
 
         if not is_super and not visible_projects:
-            # VS1 fix 
+            # VS1 fix: sin projects visibles y con
             # expand_scope=true, audit ANTES del early-return para no
             # bypasear la invariante "audit obligatorio expand_scope=true".
             if expand_scope:
@@ -800,7 +801,7 @@ async def list_recent(
             params.append(tag)
             idx += 1
 
-        # check_visibility (.
+        # check_visibility (funcion SQL, misma regla que /search).
         where_parts.append(
             f"check_visibility("
             f"m.user_id, m.visibility::text, m.workspace_id, m.project_id, "
@@ -833,7 +834,7 @@ async def list_recent(
             *params_for_count,
         )
 
-        # Audit log .
+        # Audit log obligatorio con expand_scope=true.
         if expand_scope:
             await conn.execute(
                 """
@@ -870,8 +871,8 @@ async def get_memory(
     expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
     actor: dict = Depends(get_current_user),
 ) -> MemoryResponse:
-    """Lookup por UUID. 
-    acepta — opción B consenso, coherente con búsqueda).
+    """Lookup por UUID. Acepta expand_scope (opción B consenso, coherente con
+    búsqueda).
 
     Sin expand_scope: comportamiento estricto (private solo creator/CEO/super).
     Con expand_scope: override jerárquica (Lead/project_lead ven private del
@@ -907,7 +908,7 @@ async def get_memory(
             "UPDATE memories SET access_count = access_count + 1, last_accessed = now() WHERE id = $1",
             memory_id,
         )
-        # Audit log .
+        # Audit log obligatorio con expand_scope=true.
         if expand_scope:
             await conn.execute(
                 """

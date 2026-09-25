@@ -1,4 +1,4 @@
-"""Endpoints de projects — .6.
+"""Endpoints de projects.
 
 Endpoints:
 - POST   /workspaces/{ws_id}/projects   crear project en workspace.
@@ -14,24 +14,24 @@ Modelo de permisos (cascada CEO/Lead/Worker del plan v3 §4.2):
 - Worker: lee projects donde es project_member O is_common=true del workspace donde
   tiene assignment en algún otro project. NO crea ni modifica ni borra.
 
-Anti-IDOR (lección recuerdo f5960075 + 
+Anti-IDOR (lección recuerdo f5960075): 403 tanto si no existe como si no hay
 acceso, NUNCA 404. GET /{pid} usa SQL único con cascada permisos en WHERE para
 eliminar timing oracle entre "no existe" vs "existe sin acceso".
 
-Hard delete (consenso A' 
+Hard delete (consenso A'):
 - CASCADE estructural en schema actual: project_members, team_resources.
 - FK NO ACTION en memories.project_id y documents.project_id (init.sql 304, 431)
   → Postgres rechaza el DELETE si hay data → 409 Conflict con counts.
 - Audit log atómico: INSERT audit_log + DELETE projects en transacción única
-  (lección VS2-WS .
+  (lección VS2-WS).
 
 `is_common` (boolean en schema, default false): proyecto común del workspace
 visible para todos los workers del workspace (cualquiera que sea miembro de
-algún project del ws). 
-se respeta el flag en read-cascade.
+algún project del ws). visible_project_ids
+respeta el flag en read-cascade.
 
 Deuda registrada para Tarea 2.x (multi-tenant fork): rate limit en bulk-delete
-/memories antes de exponer DELETE /projects a CEOs cliente (heredado de .
+/memories antes de exponer DELETE /projects a CEOs cliente.
 """
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ class ProjectListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# — project_leads 
+# project_leads
 # ---------------------------------------------------------------------------
 
 class ProjectLeadAdd(BaseModel):
@@ -126,7 +126,7 @@ class ProjectLeadsResponse(BaseModel):
     lead_user_ids: list[int]
 
 
-# Helpers de permisos extraídos a permissions.py en 
+# Helpers de permisos extraídos a permissions.py:
 #   user_can_create_project_in_ws (async — necesita SELECT del ws),
 #   user_can_modify_project (sync — usa ws_organization_id del LEFT JOIN),
 #   user_can_delete_project (sync — alias de modify).
@@ -267,7 +267,7 @@ async def get_project(
 ) -> ProjectResponse:
     """Leer project por id. 403 si no tiene acceso O no existe (anti-IDOR).
 
-    VS1-WS pattern ( — ambas
+    VS1-WS pattern: SQL único con la cascada de permisos en el WHERE — ambas
     ramas (no existe / existe sin acceso) tienen mismo coste, sin timing oracle.
     """
     is_super = bool(actor.get("is_super"))
@@ -344,7 +344,7 @@ async def update_project(
         except UniqueViolationError:
             raise HTTPException(409, "project with this name already exists in the workspace")
 
-        # BC2 pattern (
+        # BC2 pattern: si el project desaparece entre el SELECT y el UPDATE,
         # RETURNING devuelve None.
         if new_row is None:
             raise HTTPException(403, "no access to this project")
@@ -371,9 +371,9 @@ async def delete_project(
     - CASCADE en `project_members`, `team_resources`.
     - FK NO ACTION en `memories.project_id` (línea 304) y `documents.project_id`
       (línea 431) → Postgres rechaza si hay data → 409 Conflict con counts
-      condicionales (OBS-WS2 .
+      condicionales (OBS-WS2).
 
-    Audit log atómico VS2-WS pattern (.
+    Audit log atómico VS2-WS pattern (INSERT audit_log + DELETE en una transacción).
 
     Permisos: super | CEO de la org del ws | lead del ws. Worker → 403.
     """
@@ -393,8 +393,8 @@ async def delete_project(
         if row is None or not user_can_delete_project(actor, row):
             raise HTTPException(403, "no access to this project")
 
-        # VS1 fix 
-        # project_common del workspace. La 
+        # VS1 fix: 409 si se intenta borrar el
+        # project_common del workspace. La invariante es
         # "todo workspace nace con un project_common" para que workers añadidos
         # tengan sitio de escritura desde día 0. Un Lead borrando el common
         # rompe esa utilidad sin fricción (DoS funcional). Si the platform owner quiere
@@ -521,7 +521,7 @@ async def remove_project_lead(
         if row is None or not user_can_manage_project_leads(actor, row):
             raise HTTPException(403, "no access to manage project leads")
 
-        # BC1 fix 
+        # BC1 fix: el audit log se condiciona
         # a rowcount>0. Antes el endpoint era idempotente 204 incluso si el
         # user nunca fue project_lead, y el audit log se ensuciaba con
         # 'remove_lead' para asignaciones inexistentes. Ahora: solo audit

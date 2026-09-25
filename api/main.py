@@ -1,5 +1,5 @@
 """
-EcoDB API — .
+EcoDB API — app factory FastAPI (create_app).
 
 Endpoints en este sprint:
 - GET  /health        — liveness check, sin dependencias externas, siempre 200 OK.
@@ -14,7 +14,7 @@ Hardening de seguridad:
   respuestas, Server header suprimido a nivel uvicorn (--no-server-header).
 - CORS restrictivo — origins explicitos, credentials=False.
 - SecurityHeadersMiddleware migrado a ASGI puro para que las
-  excepciones DB (que llegan en 
+  excepciones DB no escapen del middleware
   y dejen respuestas 500 sin headers.
 
 Pendiente (deuda anotada):
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     # Si DATABASE_URL apunta a un host que aun no existe (tests, builds en CI),
     # arrancar igual y dejar que el pool falle al primer endpoint que lo use.
 
-    # 
+    # entity_dictionary en cache RAM al arranque (bloque try de abajo),
     # lookup-first (consenso adv-code 2026-05-09: cache RAM al arranque vs
     # query per-call cuando E llama al diccionario en CADA POST /memories
     # + ráfaga de 946 memorias en migración 3.0c).
@@ -206,55 +206,55 @@ def create_app(environment: str = None) -> FastAPI:
     async def health_head() -> Response:
         return Response(status_code=200, media_type="application/json")
 
-    # Auth router (.
+    # Auth router.
     app.include_router(auth_module.router)
 
-    # Memories router (.
+    # Memories router.
     import memories
     app.include_router(memories.router)
 
-    # Graph router ( — SQL + AGE atomico.
+    # Graph router — SQL + AGE atomico.
     import graph
     app.include_router(graph.router)
 
-    # Search router ( — busqueda semantica basica = Etapa 3 GAMR.
+    # Search router — busqueda semantica basica = Etapa 3 GAMR.
     import search
     app.include_router(search.router)
 
-    # Workspaces router ( — CRUD workspaces con cascada permisos.
+    # Workspaces router — CRUD workspaces con cascada permisos.
     import workspaces
     app.include_router(workspaces.router)
 
-    # Projects router ( — CRUD projects con cascada heredada de 2.1.
+    # Projects router — CRUD projects con cascada heredada de 2.1.
     import projects
     app.include_router(projects.router)
 
-    # Teams router ( — equipos ad-hoc cross-workspace.
+    # Teams router — equipos ad-hoc cross-workspace.
     import teams
     app.include_router(teams.router)
 
-    # Admin router ( — operaciones admin (redistribución, etc.).
+    # Admin router — operaciones admin (redistribución, etc.).
     import admin
     app.include_router(admin.router)
 
-    # Users router ( — user_preferences GET/PUT /users/me/preferences.
+    # Users router — user_preferences GET/PUT /users/me/preferences.
     import users
     app.include_router(users.router)
 
-    # Agents router ( — agent_identity endpoints (Sprint Paridad parcial Opción A).
+    # Agents router — agent_identity endpoints (Sprint Paridad parcial Opción A).
     import agents
     app.include_router(agents.router)
     app.include_router(agents.router_v1, prefix="/api/v1")
 
-    # Stats router ( — métricas de memorias, grafo, agentes, búsqueda, sistema.
+    # Stats router — métricas de memorias, grafo, agentes, búsqueda, sistema.
     import stats
     app.include_router(stats.router, prefix="/api/v1")
 
-    # Events router ( — session events + last_seen.
+    # Events router — session events + last_seen.
     import events
     app.include_router(events.router, prefix="/api/v1")
 
-    # Onboarding router ( — resumen de proyecto para agente/dashboard.
+    # Onboarding router — resumen de proyecto para agente/dashboard.
     import onboarding
     app.include_router(onboarding.router, prefix="/api/v1")
 

@@ -10,7 +10,7 @@ internamente via prompt_name. NO inyectar prefijos manualmente.
 Refactor deuda #23 (2026-05-08): unifica `_embed_text_for_memory` (memories.py)
 y `_embed_query` (search.py) en una sola funcion `embed_text(text, prompt_name)`.
 
-Decision arquitectonica 
+Decision arquitectonica: el endpoint llamante debe
 estar FUERA del pool DB cuando llame esto. Si embeddings tarda 30s con la GPU
 saturada, no queremos bloquear conexiones del pool. El patron trifasico
 (validar → libera pool → embed → re-acquire) lo aplica el endpoint llamante.
@@ -107,7 +107,7 @@ async def embed_image(
     Raises:
         HTTPException 503: embeddings caído o respuesta inválida.
 
-    . Jina v4 embede texto e imagen en el mismo
+    Jina v4 embede texto e imagen en el mismo
     espacio vectorial 512 dims → cross-modal search gratis.
     """
     mime = _detect_image_mime(image_base64)
