@@ -34,29 +34,36 @@ async def run_governance_cycle(pool) -> None:
     log.info("Governance cycle complete in %.1fs", elapsed)
 
 
+# First day /search access was actually recorded (flush moved into the API process).
+ACCESS_TRACKING_SINCE = datetime(2026, 9, 25, tzinfo=timezone.utc)
+
+
 async def mark_stale_memories(pool) -> None:
     """Transition memories: active→stale, stale→dormant.
 
     Rules:
-    - active→stale: decay makes freshness<0.3 AND last_accessed>60d ago (or never)
+    - active→stale: last_accessed>60d ago (unmeasured: counted from ACCESS_TRACKING_SINCE)
     - stale→dormant: last_accessed>90d ago (or never accessed + created>90d)
     - decision/acuerdo: NEVER auto-stale
     """
     async with pool.acquire() as conn:
         # active → stale
+        # Access was never recorded by /search before 2026-09-25 (flush ran in the wrong
+        # process), so a NULL last_accessed means "unknown", not "never read". Unmeasured
+        # memories are aged from ACCESS_TRACKING_SINCE, never from before it.
         staled = await conn.execute("""
             UPDATE memories SET staleness = 'stale', updated_at = now()
             WHERE staleness = 'active'
               AND type NOT IN ('decision', 'acuerdo')
-              AND (last_accessed IS NULL OR last_accessed < now() - INTERVAL '60 days')
+              AND COALESCE(last_accessed, GREATEST(created_at, $1::timestamptz)) < now() - INTERVAL '60 days'
               AND created_at < now() - INTERVAL '60 days'
-        """)
+        """, ACCESS_TRACKING_SINCE)
         # stale → dormant
         dormanted = await conn.execute("""
             UPDATE memories SET staleness = 'dormant', updated_at = now()
             WHERE staleness = 'stale'
-              AND (last_accessed IS NULL OR last_accessed < now() - INTERVAL '90 days')
-        """)
+              AND COALESCE(last_accessed, GREATEST(created_at, $1::timestamptz)) < now() - INTERVAL '90 days'
+        """, ACCESS_TRACKING_SINCE)
         log.info("Stale marking: %s→stale, %s→dormant", staled, dormanted)
 
 

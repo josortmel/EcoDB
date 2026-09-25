@@ -116,7 +116,29 @@ async def lifespan(app: FastAPI):
         is_avail = await llm.available()
         _ecodb_log.info("LLM provider %s: available=%s", settings.ECODB_LLM_PROVIDER, is_avail)
 
+    # Access tracking (code-2, 25-sep): /search buffers returned ids in THIS process
+    # (search._accessed_buffer), but the only flush loop lived in ecodb-worker, whose buffer is
+    # always empty — so last_accessed was never written by search (5741/5838 NULL) and the
+    # governance decay dormanted memories in daily use. The API flushes its own buffer.
+    import asyncio as _asyncio
+    from search import flush_accessed_buffer
+
+    async def _access_flush_loop():
+        while True:
+            await _asyncio.sleep(300)
+            try:
+                await flush_accessed_buffer(await get_pool())
+            except Exception as exc:  # never kill the loop
+                _ecodb_log.error("Access flush failed: %r", exc)
+
+    _flush_task = _asyncio.create_task(_access_flush_loop())
+
     yield
+    _flush_task.cancel()
+    try:
+        await flush_accessed_buffer(await get_pool())
+    except Exception as exc:
+        _ecodb_log.error("Final access flush failed: %r", exc)
     from llm_provider import get_llm_provider
     llm = get_llm_provider()
     if llm and hasattr(llm, "aclose"):
