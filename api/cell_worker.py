@@ -1293,10 +1293,12 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 'run_id': str(run_id), 'cell_type': 'consolidation',
                 'agent_identifier': ident}, org_id)
 
+            # code-2 review: fetch the week itself (end exclusive-ish: next midnight, filtered below),
+            # so margin rows can't crowd in-period ones out of the MAX_MEMORIES weight sample.
             memories = await _fetch_memories(
                 conn, agent_id, ws_id,
-                week_start - timedelta(days=3),
-                week_end + timedelta(days=3))
+                week_start,
+                week_end + timedelta(days=1))
             # #362: the +-3 day margin let boundary memories be clustered in two adjacent weeks,
             # giving twin clusters (same members, same centroid, two narratives; 34 active pairs
             # measured 2026-09-25). A memory is woven once: drop the ones already in another
@@ -2061,10 +2063,24 @@ async def main():
             """)
         for cfg in configs:
             try:
-                prev_fire = croniter(cfg["schedule_cron"], now).get_prev(datetime)
+                it = croniter(cfg["schedule_cron"], now)
+                prev_fire = it.get_prev(datetime)
+                next_fire = croniter(cfg["schedule_cron"], prev_fire).get_next(datetime)
                 age = now - prev_fire
-                if timedelta(hours=1) <= age <= timedelta(hours=RETRY_WINDOW_HOURS):
-                    await _run_from_config(pool, dict(cfg))
+                if not (timedelta(hours=1) <= age <= min(timedelta(hours=RETRY_WINDOW_HOURS),
+                                                         next_fire - prev_fire)):
+                    continue
+                # code-2 review: foresight and skill compute their period from TODAY, so a retry on
+                # a later day/week would run the NEXT period early. Retry them only while "now" is
+                # still in the fire's period; consolidation levels use the last CLOSED period (safe).
+                ct = cfg["cell_type"]
+                if ct == "foresight" and now.date() != prev_fire.date():
+                    continue
+                if ct == "skill_distillation" and now.isocalendar()[:2] != prev_fire.isocalendar()[:2]:
+                    continue
+                if ct not in ("consolidation", "foresight", "skill_distillation"):
+                    continue  # custom cells: period semantics unknown, no blind retry
+                await _run_from_config(pool, dict(cfg))
             except Exception:
                 log.exception("Retry sweep failed: %s/%s agent=%s", cfg["cell_type"], cfg.get("level"), cfg["identifier"])
         try:
