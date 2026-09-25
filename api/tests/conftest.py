@@ -12,7 +12,7 @@ Pure tests (no DB) run anywhere. (C18, after the 2026-09-25 live-run incident.)
 """
 import functools
 import os
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import asyncpg
 import pytest
@@ -32,12 +32,38 @@ LIVE_DB_HOSTS = {"postgres", "ecodb-postgres"}
 LIVE_API_PORTS = {8080}
 
 
-def _targets_live_db(dsn=None, host=None, port=None) -> bool:
+def _resolve_targets(dsn=None, host=None, port=None) -> list[tuple[str, int]]:
+    """(host, port) pairs asyncpg would try, libpq-style: explicit kwargs, then the
+    DSN netloc (comma-separated multi-host allowed), then ?host=/?port= in the DSN,
+    then PGHOST/PGPORT, then localhost:5432."""
+    dsn_hosts: list[str] = []
+    dsn_ports: list[str] = []
+    query: dict = {}
     if dsn:
         parsed = urlparse(dsn)
-        host = host or parsed.hostname
-        port = port or parsed.port
-    return int(port or 5432) in LIVE_DB_PORTS or (host or "") in LIVE_DB_HOSTS
+        query = parse_qs(parsed.query)
+        netloc = parsed.netloc.rsplit("@", 1)[-1]
+        for part in filter(None, netloc.split(",")):
+            if part.startswith("["):  # bracketed IPv6: [::1]:5435
+                h, _, rest = part[1:].partition("]")
+                p = rest[1:] if rest.startswith(":") else ""
+            elif part.count(":") == 1:
+                h, _, p = part.partition(":")
+            else:
+                h, p = part, ""
+            dsn_hosts.append(h)
+            dsn_ports.append(p)
+    hosts = ([host] if host else None) or [h for h in dsn_hosts if h] or query.get("host") \
+        or [os.environ.get("PGHOST") or "localhost"]
+    ports = ([str(port)] if port else None) or [p for p in dsn_ports if p] or query.get("port") \
+        or [os.environ.get("PGPORT") or "5432"]
+    if len(ports) == 1:
+        ports = ports * len(hosts)
+    return [(h, int(p)) for h, p in zip(hosts, ports)]
+
+
+def _targets_live_db(dsn=None, host=None, port=None) -> bool:
+    return any(p in LIVE_DB_PORTS or h in LIVE_DB_HOSTS for h, p in _resolve_targets(dsn, host, port))
 
 
 def _refuse_live(dsn=None, **kwargs) -> None:
@@ -46,8 +72,7 @@ def _refuse_live(dsn=None, **kwargs) -> None:
     if _targets_live_db(dsn, kwargs.get("host"), kwargs.get("port")):
         pytest.exit(
             "REFUSED: test tried to connect to the live family DB "
-            f"({urlparse(dsn).hostname if dsn else kwargs.get('host')}:"
-            f"{urlparse(dsn).port if dsn else kwargs.get('port')}). "
+            f"({_resolve_targets(dsn, kwargs.get('host'), kwargs.get('port'))}). "
             "Use the throwaway DB (TEST_DB_PORT=5436) or set ECODB_ALLOW_LIVE_TESTS=1 on purpose.",
             returncode=3,
         )

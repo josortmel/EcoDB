@@ -47,3 +47,29 @@ def test_wrapped_connect_never_reaches_asyncpg_for_live(monkeypatch):
         guarded(dsn=LIVE)
     guarded(THROWAWAY)
     assert calls == [THROWAWAY]
+
+
+@pytest.mark.parametrize("dsn,env", [
+    ("postgresql:///ecodb", {"PGPORT": "5435"}),                      # port from env
+    ("postgresql://ecodb@/ecodb", {"PGHOST": "postgres"}),             # host from env
+    (None, {"PGPORT": "5435"}),                                        # no dsn at all
+    ("postgresql://ecodb@localhost/ecodb?port=5435", {}),              # port in query string
+    ("postgresql://ecodb@/ecodb?host=ecodb-postgres", {}),             # host in query string
+    ("postgresql://ecodb@localhost:5436,localhost:5435/ecodb", {}),    # multi-host list
+    ("postgresql://ecodb@[::1]:5435/ecodb", {}),                       # bracketed IPv6
+])
+def test_guard_resolves_env_and_libpq_forms(monkeypatch, dsn, env):
+    monkeypatch.delenv("ECODB_ALLOW_LIVE_TESTS", raising=False)
+    for k in ("PGHOST", "PGPORT"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    with pytest.raises(pytest.exit.Exception, match="live"):
+        conftest._refuse_live(dsn)
+
+
+def test_guard_env_throwaway_is_allowed(monkeypatch):
+    monkeypatch.delenv("ECODB_ALLOW_LIVE_TESTS", raising=False)
+    monkeypatch.setenv("PGPORT", "5436")
+    monkeypatch.setenv("PGHOST", "localhost")
+    conftest._refuse_live("postgresql:///ecodb")
