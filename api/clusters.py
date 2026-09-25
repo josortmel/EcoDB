@@ -593,8 +593,9 @@ async def fractal_zoom(
             cluster["source_count"] = len(cluster["source_ids"] or [])
             parent = _cluster_summary(cluster)
             if cluster["source_ids"]:
+                # C25: a superseded twin stays in source_ids; its content lives in the kept twin.
                 cluster_children = await _zoom_clusters(
-                    conn, "mc.id = ANY($1::uuid[]) AND mc.agent_id = $2",
+                    conn, "mc.id = ANY($1::uuid[]) AND mc.agent_id = $2 AND mc.status = 'active'",
                     [cluster["source_ids"], aid], q_emb, body.limit)
             else:
                 child_type = "memories"
@@ -827,13 +828,13 @@ async def get_cluster_sources(
             source_rows = await conn.fetch(
                 "SELECT *, coalesce(array_length(member_ids,1),0) AS member_count, "
                 "coalesce(array_length(source_ids,1),0) AS source_count "
-                "FROM memory_clusters WHERE id = ANY($1::uuid[]) AND agent_id = $2",
+                "FROM memory_clusters WHERE id = ANY($1::uuid[]) AND agent_id = $2 AND status = 'active'",
                 cluster["source_ids"], agent_id)
             sources = [_cluster_summary(r) for r in source_rows]
         parents = await conn.fetch("""
             SELECT *, coalesce(array_length(member_ids,1),0) AS member_count,
                    coalesce(array_length(source_ids,1),0) AS source_count
-            FROM memory_clusters WHERE $1::uuid = ANY(source_ids) AND agent_id = $2
+            FROM memory_clusters WHERE $1::uuid = ANY(source_ids) AND agent_id = $2 AND status = 'active'
         """, cluster_id, agent_id)
     return {"cluster_id": str(cluster_id),
             "sources": sources,
