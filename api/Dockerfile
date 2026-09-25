@@ -2,7 +2,7 @@
 # Esqueleto minimalista. Crece con cada tarea de Fase 1: auth, CRUD, search, etc.
 
 # #373: Python patch version pinned to production (3.12.13); the floating 3.12-slim tag drifts.
-FROM python:3.12.13-slim
+FROM python:3.12.13-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
 
 # El repo apt.debian.org rechaza HTTP plano (Fastly 451) — pasar a HTTPS antes
 # de cualquier apt-get update. python:3.12-slim YA trae ca-certificates.
@@ -27,6 +27,8 @@ RUN mkdir -p /app/.cache/huggingface /app/media && chown -R apiuser:apiuser /app
 COPY --chown=apiuser:apiuser api/requirements.txt api/constraints.txt ./
 # #373: constraints pin every transitive version to what production runs (torch was unpinned:
 # a rebuild silently moved 2.13.0 -> 2.14.0).
+# NOTE: requirements.txt says "torch CPU" — stale: PyPI's default torch wheel is the CUDA-13
+# build and it pulls the nvidia-* wheels (all pinned in constraints.txt).
 RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 # ecodb-langchain SDK (used by cell_worker via LangChain)
