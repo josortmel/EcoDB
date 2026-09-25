@@ -1,14 +1,14 @@
 """Motor GAMR — busqueda semantica con 8 etapas.
 
 Etapas:
-1. Clasificacion query_type (
-2. Filtro permisos cascada (.10)
-3. Busqueda semantica coseno (
-4. Expansion por grafo (
+1. Clasificacion query_type
+2. Filtro permisos cascada
+3. Busqueda semantica coseno
+4. Expansion por grafo
 5. Resolucion de fuentes (Fase 4+5)
-6. Coherencia temporal (
-7. Contradicciones (
-8. Ensamblaje score compuesto (
+6. Coherencia temporal
+7. Contradicciones
+8. Ensamblaje score compuesto
 """
 from __future__ import annotations
 
@@ -990,7 +990,7 @@ async def search_memories(
     t0 = time.time()
     pool = await get_pool()
 
-    # Etapa 1 — Clasificacion query_type (
+    # Etapa 1 — Clasificacion query_type.
     resolved_query_type = body.query_type or (
         classify_query_type(body.query_text) if body.query_text else "contextual"
     )
@@ -1003,7 +1003,7 @@ async def search_memories(
     org_id = actor.get("organization_id")
     lead_ws = list(actor.get("lead_workspaces") or [])
 
-    # Restricción 
+    # Restricción anti-fingerprinting: un worker sin rol elevado
     # (no_super, no_ceo, sin lead_ws) con expand_scope=true + user_id ajeno NO
     # puede pedir contenido dirigido a otro user. Es el patrón "fingerprinting
     # dirigido" que la observación quiere prevenir.
@@ -1022,14 +1022,14 @@ async def search_memories(
         )
 
     async with pool.acquire() as conn:
-        # Pre-filtro project-level .10 (visible_project_ids ya
+        # Pre-filtro project-level (visible_project_ids ya
         # incluye 5ª OR clause project_leads).
         if is_super:
             visible_projects: set[int] = set()
         else:
             visible_projects = await visible_project_ids(conn, actor)
             if not visible_projects:
-                # VS1 fix 
+                # VS1 fix: sin projects visibles y con
                 # expand_scope=true, audit ANTES del early-return para no
                 # bypasear la invariante "audit obligatorio expand_scope=true"
                 # del consenso 5/5. Forensics de sondeos sin membresía.
@@ -1071,7 +1071,7 @@ async def search_memories(
                     audit_id=audit_uuid_early,
                 )
 
-        # Filtro workspace_id explicito anti-IDOR (mantenido de .
+        # Filtro workspace_id explicito anti-IDOR.
         if body.workspace_id is not None and not is_super:
             visible_ws = await visible_workspace_ids(conn, actor)
             if body.workspace_id not in visible_ws:
@@ -1161,7 +1161,7 @@ async def search_memories(
             where_parts.append(DORMANT_EXCLUSION_CLAUSE)
 
         # check_visibility: visibility filter unificado con expand_scope opt-in.
-        # Reemplaza el filter Python-built de .
+        # Reemplaza el filter Python-built anterior.
         where_parts.append(
             f"check_visibility("
             f"m.user_id, m.visibility::text, m.workspace_id, m.project_id, "
@@ -1182,7 +1182,7 @@ async def search_memories(
         params.append(fetch_k)
         limit_idx = idx
 
-        # .
+        # Etapa 3 — busqueda semantica multimodal sobre memory_embeddings.
         # CTE best_match: para cada memoria, toma el embedding con menor distancia
         # coseno al query vector (DISTINCT ON memory_id, ORDER BY distance ASC).
         # Outer query: JOIN memories para row completa + filtros permisos + agents.
@@ -1263,7 +1263,7 @@ async def search_memories(
                     semantic_top, body.query_text[:60],
                 )
 
-        # Audit log 
+        # Audit log obligatorio con expand_scope=true: fila en
         # audit_log con action='search_expanded'. Al FINAL del request (con
         # result_count). Para forensics: "quién buscó private expandidas, con
         # qué filtros, cuántos resultados" → detectable patrón anómalo.
@@ -1292,16 +1292,16 @@ async def search_memories(
                 }), actor.get("organization_id"),
             )
 
-    # --- Etapas 4-8 GAMR (
+    # --- Etapas 4-8 GAMR ---
 
     candidate_ids = [r["id"] for r in rows]
 
-    # Etapa 4 — Expansión por grafo (
+    # Etapa 4 — Expansión por grafo.
     _vp_list = list(visible_projects) if visible_projects else None
     graph_scores, graph_context = await expand_by_graph(pool, candidate_ids, visible_project_ids=_vp_list,
                                                         query_vec=query_vec)
 
-    # Etapa 3b — BM25 scoring (
+    # Etapa 3b — BM25 scoring (re-rank de candidatos).
     bm25_scores: dict[str, float] = {}
     if ENABLE_BM25 and body.query_text and resolved_query_type != "cross_modal":
         bm25_scores = await compute_bm25_scores(pool, body.query_text, candidate_ids, query_vec)
@@ -1310,7 +1310,7 @@ async def search_memories(
     candidate_id_strs = [str(cid) for cid in candidate_ids]
     source_scores = await compute_source_scores(pool, candidate_id_strs)
 
-    # Etapa 7 — Contradicciones (
+    # Etapa 7 — Contradicciones.
     try:
         contradictions_raw = await detect_contradictions(pool, candidate_ids)
     except Exception as _ctr_err:

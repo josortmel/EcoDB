@@ -1,4 +1,4 @@
-"""Endpoints de estadísticas — ."""
+"""Endpoints de estadísticas."""
 from __future__ import annotations
 
 from datetime import datetime

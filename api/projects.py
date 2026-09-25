@@ -460,7 +460,7 @@ async def add_project_lead(
     observación adv-seg consenso 5/5).
 
     Idempotente (ON CONFLICT DO NOTHING + 201). 422 si user_id no existe.
-    Audit log atómico (VS1 pattern ."""
+    Audit log atómico (VS1 pattern)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(

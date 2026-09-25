@@ -1,4 +1,4 @@
-"""Endpoints de grafo SQL+AGE — .4 + §4 patron dual.
+"""Endpoints de grafo SQL+AGE — patron dual (SQL canonico + proyeccion AGE).
 
 Endpoints:
 - POST   /graph/triples          crea tripleta atomica SQL + AGE.
@@ -20,7 +20,7 @@ Modelo del grafo (plan v3 §4.0):
 Cypher injection: PROHIBIDO interpolar strings en queries Cypher. Usar el 3er
 argumento de cypher() como `$1::agtype` con JSON parametrizado por Python.
 
-Permisos en este sprint (
+Permisos en este sprint:
 - Cualquier user autenticado puede leer/escribir el grafo (es shared a nivel
   sistema, plataforma-wide single-tenant).
 - Scoping por workspace/org del grafo viene en Tarea 2.x cuando se decida si
@@ -167,7 +167,7 @@ async def _ensure_node(conn, name: str) -> int:
             params,
         )
 
-    # 
+    # ON CONFLICT (name_canonical = lower(name)) para
     # unificar nodos por casing. "Eco" y "eco" → mismo nodo. El nombre display
     # se preserva del primer INSERT (el que creó el nodo).
     name = name[:MAX_NODE_NAME_LEN]
@@ -228,7 +228,7 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
     - Entidades duplicadas dentro del mismo content (GLiNER puede detectar la
       misma palabra varias veces) se deduplican antes del link.
     - ON CONFLICT DO NOTHING en memory_entity_links — idempotente para
-      migración retroactiva (.
+      migración retroactiva.
 
     Returns: número de entity_links creados (0 si GLiNER falló o no encontró).
     Si AGE falla a mitad de procesamiento, la excepción se propaga — el caller

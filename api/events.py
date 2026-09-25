@@ -1,4 +1,4 @@
-"""Endpoints de eventos de agentes — .9 SSE.
+"""Endpoints de eventos de agentes (SSE).
 
 SSE endpoint for the frontend dashboard.
 Archivo: events.py | Endpoint: GET /api/v1/events/stream

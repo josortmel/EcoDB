@@ -1,7 +1,7 @@
 """
-Migracion eco_graph viejo (5433) -> EcoDB (5435 + AGE). .1.
+Migracion eco_graph viejo (5433) -> EcoDB (5435 + AGE).
 
-Decisiones aplicadas :
+Decisiones aplicadas:
 - 118 literales sin objeto_id -> nodos artificiales `nodes.type='literal'`.
 - peso -> `triples.metadata.peso`.
 - fecha y origen -> columnas top-level `triples.fecha DATE` y `triples.origen TEXT`.

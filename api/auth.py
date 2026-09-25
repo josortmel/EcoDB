@@ -1,6 +1,6 @@
 """Auth core — JWT + API keys + dependency get_current_user.
 
-Modelo de roles cerrado en sesion 2026-05-07 durante construccion de 
+Modelo de roles cerrado en sesion 2026-05-07:
 - Superuser: users.is_super=true, platform owner.
 - CEO            (dueño empresa cliente): users.is_ceo=true + organizations.ceo_user_id.
 - Admin / Lead   (jefe departamento): workspace_leads.user_id.

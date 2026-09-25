@@ -1,4 +1,4 @@
-"""Endpoints de equipos ad-hoc -- .7.
+"""Endpoints de equipos ad-hoc.
 
 Equipos cross-workspace: agrupan users y projects de cualquier workspace para
 acceso compartido. Caso de uso: tarea transversal que agrupa personas y
@@ -23,7 +23,7 @@ Modelo de permisos (Fase 2 single-tenant mode):
 - Lectura de teams: super + team_members del propio team (ven name + members
   + resources de SU team).
 
-Efecto cascada en visible_project_ids (.py):
+Efecto cascada en visible_project_ids (permissions.py):
 - Si user es team_member del team T y T tiene team_resource project P,
   visible_project_ids(user) incluye P -> /search devuelve memorias de P aunque
   user NO sea project_member directo de P. Patron "acceso transversal".
@@ -196,7 +196,7 @@ async def get_team(
     """Leer team por id con members y resources. 403 si no es super ni member.
 
     Anti-IDOR: 403 unificado para "no existe" y "no es member" via SQL unico
-    con cascada permisos en WHERE (patron VS1-WS ."""
+    con cascada permisos en WHERE (patron VS1-WS)."""
     is_super = bool(actor.get("is_super"))
     user_id = int(actor["sub"])
 

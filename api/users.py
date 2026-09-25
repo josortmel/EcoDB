@@ -1,4 +1,4 @@
-"""Endpoints user_preferences -- .13.
+"""Endpoints user_preferences.
 
 Preferencias de UI por user (tema, layout, filtros guardados, etc.). Estructura
 designed for the frontend dashboard -- no hardcodeamos keys aqui.

@@ -1,4 +1,4 @@
-"""Endpoint de onboarding por proyecto — ."""
+"""Endpoint de onboarding por proyecto."""
 from __future__ import annotations
 
 from typing import Literal

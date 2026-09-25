@@ -1,4 +1,4 @@
-"""Normalizacion de entidades + allowlist tipos — .
+"""Normalizacion de entidades + allowlist tipos.
 
 Modulo de CONFIG/REGLAS puro (separacion adv-code 2026-05-09):
 - gliner_service.py = ejecucion del pipeline ML.

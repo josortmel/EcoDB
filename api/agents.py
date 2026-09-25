@@ -1,4 +1,4 @@
-"""Endpoints agent_identity — .3.1 + §3.1.
+"""Endpoints agent_identity.
 
 Identidad de agentes: fragmentos versionados. Cada `version` es un snapshot
 completo (no parche). Schema en init.sql §1.3.1:

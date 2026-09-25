@@ -1,4 +1,4 @@
-"""Endpoints de workspaces — .6.
+"""Endpoints de workspaces.
 
 Endpoints:
 - POST   /workspaces        crear workspace.
@@ -61,7 +61,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-# Validador de name extraído a permissions.validate_name_strip_blank en .
+# Validador de name extraído a permissions.validate_name_strip_blank.
 
 
 class WorkspaceCreate(BaseModel):
@@ -105,7 +105,7 @@ class WorkspaceListResponse(BaseModel):
     total: int
 
 
-# Helpers de permisos extraídos a permissions.py en 
+# Helpers de permisos extraídos a permissions.py:
 #   user_can_create_workspace, user_can_modify_workspace, user_can_delete_workspace.
 # Lectura (GET) sigue haciendo filtro en SQL para evitar timing oracles.
 
@@ -136,7 +136,7 @@ async def create_workspace(
             raise HTTPException(403, "only super or ceo can create workspaces")
         raise HTTPException(403, "ceo can only create workspaces in their own organization")
 
-    # 
+    # Crear el workspace y su project común (is_common) en una
     # transacción atómica. Razón: sin un project común, el workspace nuevo no
     # es usable hasta que alguien cree manualmente un project — los workers
     # añadidos al workspace no tienen sitio donde escribir memorias. La
@@ -156,7 +156,7 @@ async def create_workspace(
                 # Project común 'general' asociado al workspace recién creado.
                 # is_common=true → visible para todos los workers que tengan
                 # cualquier project_member en el workspace (cascada definida
-                # en visible_project_ids de .
+                # en visible_project_ids de permissions.py).
                 await conn.execute(
                     """
                     INSERT INTO projects (workspace_id, name, is_common)
@@ -343,7 +343,7 @@ async def delete_workspace(
     - FK NO ACTION en `memories.workspace_id` y `documents.workspace_id`.
     - Si workspace contiene memorias o documentos → Postgres rechaza con FK
       violation → endpoint devuelve 409 Conflict con count + mensaje "vacía
-      primero" .
+      primero".
 
     Permisos: super | CEO de la org. Lead y worker → 403.
     """

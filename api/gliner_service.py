@@ -1,4 +1,4 @@
-"""Servicio GLiNER para extraccion de entidades multilingual — .
+"""Servicio GLiNER para extraccion de entidades multilingual.
 
 Architecture E (lookup-first GLiNER): dictionary lookup runs first; unmatched
 spans go to GLiNER. This avoids post-processing overrides on GLiNER output.
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 # GLiNER entity labels in Spanish. Must match the allowlist in entity_normalization.py.
 DEFAULT_LABELS = ["persona", "organizacion", "lugar", "producto", "proyecto", "agente_ia"]
-# Threshold subido de 0.5 a 0.7 .
+# Threshold subido de 0.5 a 0.7.
 DEFAULT_THRESHOLD = 0.7
 
 MODEL_NAME = os.getenv("GLINER_MODEL", "urchade/gliner_multi-v2.1")

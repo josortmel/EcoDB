@@ -4,7 +4,9 @@ A pre-release scrub removed the contents of parentheticals, leaving text like
 "filtrar por creador (." or ". Audit log obligatorio." — the agent reads less
 than was meant and nothing flags it. This test scans the text agents actually
 see: `description=` of Field/Query/Path/Body in api/, docstrings of @mcp.tool
-functions in mcp/server.py and of @tool functions in ecodb-langchain.
+functions in mcp/server.py and of @tool functions in ecodb-langchain, and
+docstrings of FastAPI route functions (@router.get/post/...), which FastAPI
+publishes as the OpenAPI operation description.
 
 Static (AST) check — no DB, no running API.
 """
@@ -19,8 +21,12 @@ TRUNCATION_PATTERNS = {
     "open '(' at end of line": re.compile(r"\(\s*$"),
     "fragment '(.<digits>'": re.compile(r"\(\.\d"),
     "starts with '. '": re.compile(r"^\.\s"),
+    "word then orphan ' .'": re.compile(r"\w\s+\.(\s|$)"),
+    "'( ' followed by dash": re.compile(r"\(\s+[—-]"),
 }
 _PARAM_CALLS = {"Field", "Query", "Path", "Body", "Header", "Form"}
+_DOC_DECORATORS = {"mcp.tool", "tool"} | {
+    f"{obj}.{verb}" for obj in ("router", "app") for verb in ("get", "post", "put", "patch", "delete", "head")}
 
 
 def truncations(text: str) -> list[str]:
@@ -50,7 +56,7 @@ def agent_facing_texts(source: str, filename: str = "<src>") -> list[tuple[str, 
                         and isinstance(kw.value.value, str):
                     out.append((f"{filename}:{kw.value.lineno}", kw.value.value))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if any(_decorator_name(d) in ("mcp.tool", "tool") for d in node.decorator_list):
+            if any(_decorator_name(d) in _DOC_DECORATORS for d in node.decorator_list):
                 doc = ast.get_docstring(node, clean=False)
                 if doc:
                     out.append((f"{filename}:{node.lineno} {node.name}()", doc))
