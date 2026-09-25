@@ -840,6 +840,22 @@ async def get_cluster_sources(
             "parent_clusters": [_cluster_summary(r) for r in parents]}
 
 
+# C23 (#221): an owner rewrite is no longer the cell's text, so the cluster must stop
+# claiming the cell's model: cell_model is removed (readers report model=None, i.e. "no
+# measurement"), kept once as cell_model_before_owner, and narrated_by="owner" is set.
+_OWNER_NARRATE_SQL = """
+    UPDATE memory_clusters
+    SET narrative = $1,
+        narrated_at = NOW(),
+        metadata = (coalesce(metadata, '{}'::jsonb) - 'cell_model')
+                   || jsonb_build_object('narrated_by', 'owner')
+                   || CASE WHEN metadata ? 'cell_model'
+                           THEN jsonb_build_object('cell_model_before_owner', metadata->'cell_model')
+                           ELSE '{}'::jsonb END
+    WHERE id = $2
+"""
+
+
 @router.put("/{cluster_id}/narrate")
 async def narrate_cluster(
     cluster_id: UUID, body: NarrateBody,
@@ -848,9 +864,7 @@ async def narrate_cluster(
     pool = await get_pool()
     async with pool.acquire() as conn:
         cluster = await resolve_cluster_for_actor(conn, actor, cluster_id)
-        await conn.execute(
-            "UPDATE memory_clusters SET narrative=$1, narrated_at=NOW() WHERE id=$2",
-            body.narrative, cluster_id)
+        await conn.execute(_OWNER_NARRATE_SQL, body.narrative, cluster_id)
         org_id = await conn.fetchval(
             "SELECT organization_id FROM workspaces WHERE id=$1",
             cluster["workspace_id"])
