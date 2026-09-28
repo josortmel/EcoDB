@@ -141,7 +141,8 @@ services:
       CELL_LLM_KEY: ${CELL_LLM_KEY}
       CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-v4-pro}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+      - "[::1]:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -180,7 +181,8 @@ services:
       ENABLE_CONTEXT_INJECTION: "true"
       ECODB_MEDIA_DIR: /app/media
     ports:
-      - "8091:8091"
+      - "127.0.0.1:8091:8091"
+      - "[::1]:8091:8091"
     volumes:
       - ecodb_media:/app/media
     depends_on:
@@ -197,7 +199,8 @@ services:
     container_name: ecodb-ner
     ports:
       # Host 8092 — mcp already owns 8091. Internal: http://ner:8091
-      - "8092:8091"
+      - "127.0.0.1:8092:8091"
+      - "[::1]:8092:8091"
     volumes:
       - api_hf_cache:/app/.cache/huggingface
     environment:
