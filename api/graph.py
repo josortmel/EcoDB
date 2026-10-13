@@ -170,7 +170,8 @@ async def _ensure_node(conn, name: str) -> int:
     # ON CONFLICT (name_canonical = lower(name)) para
     # unificar nodos por casing. "Eco" y "eco" → mismo nodo. El nombre display
     # se preserva del primer INSERT (el que creó el nodo).
-    name = name[:MAX_NODE_NAME_LEN]
+    # #478: espacios seguidos colapsados («la      familia» era un gemelo de «la familia»).
+    name = " ".join(name.split())[:MAX_NODE_NAME_LEN]
     # Prevent concurrent duplicate creation — must be inside a transaction.
     await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", name)
     inserted = await conn.fetchrow(
@@ -214,7 +215,42 @@ async def _ensure_node(conn, name: str) -> int:
         return sql_id
     sql_id = inserted["id"]
     # AGE node created by trg_age_sync_insert trigger — no manual _age_create here.
+    await _flag_accent_twin(conn, name, sql_id)
     return sql_id
+
+
+async def _flag_accent_twin(conn, name: str, sql_id: int) -> None:
+    """#478: un nodo NUEVO cuya clave sin tildes coincide con la de otro nodo activo de
+    distinto nombre («Okó» con «Oko» ya existente) deja un candidato a alias pendiente.
+    Nunca fusiona: «Pärt» y «Part» tienen que poder convivir, y los candidatos se revisan a
+    mano (invariante 17). En un savepoint y sin propagar: no puede tumbar la escritura."""
+    try:
+        async with conn.transaction():
+            twins = await conn.fetch(
+                """
+                SELECT id FROM nodes
+                WHERE status = 'active' AND id <> $2
+                  AND f_unaccent(lower(name)) = f_unaccent(lower($1))
+                  AND lower(name) <> lower($1)
+                """,
+                name, sql_id,
+            )
+            for twin in twins:
+                await conn.execute(
+                    """
+                    INSERT INTO entity_alias_candidates
+                        (source_name, target_node_id, confidence, sample_contexts)
+                    SELECT $1, $2, 0.95, ARRAY['solo difieren en tildes']
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM entity_alias_candidates
+                        WHERE source_name = $1 AND target_node_id = $2 AND status = 'pending')
+                    """,
+                    name, twin["id"],
+                )
+    except Exception as exc:
+        logging.getLogger("ecodb.graph").warning(
+            "_ensure_node: accent-twin check failed for %r (sql_id=%d): %r", name, sql_id, exc
+        )
 
 
 async def link_entities_from_content(conn, memory_id, content: str, pool=None) -> int:
@@ -709,7 +745,9 @@ async def search_nodes(
 ) -> GraphSearchResponse:
     """Fuzzy search por nombre. Combina ILIKE wildcard (substring match) con
     pg_trgm similarity para ranking. ILIKE captura "Cerv" en "pytest-Cervantes"
-    sin depender del threshold de pg_trgm que es exigente con prefijos largos."""
+    sin depender del threshold de pg_trgm que es exigente con prefijos largos.
+    #478: también por la clave sin tildes, para que «Jotaro» encuentre Jōtarō y no se
+    escondan los gemelos (antes cada grafía solo se encontraba a sí misma)."""
     if "\x00" in q:
         raise HTTPException(400, "query cannot contain null bytes")
     pool = await get_pool()
@@ -717,9 +755,11 @@ async def search_nodes(
         pattern = f"%{q}%"
         rows = await conn.fetch(
             """
-            SELECT id, name, similarity(name, $1) AS sim
+            SELECT id, name,
+                   GREATEST(similarity(name, $1),
+                            similarity(f_unaccent(lower(name)), f_unaccent(lower($1)))) AS sim
             FROM nodes
-            WHERE name ILIKE $2
+            WHERE name ILIKE $2 OR f_unaccent(lower(name)) LIKE f_unaccent(lower($2))
             ORDER BY sim DESC, length(name) ASC
             LIMIT $3
             """,

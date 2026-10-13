@@ -21,11 +21,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import gliner_service
-from gliner_service import _match_dictionary
+from gliner_service import _compile_dictionary_pattern, _match_dictionary, dictionary_rows_to_renormalize
 
 
 def _build_cache(entries: list[tuple[str, str]]) -> list[tuple[re.Pattern, str, str]]:
-    """Construye el cache pre-compilado equivalente al de load_dictionary_to_cache.
+    """Construye el cache pre-compilado igual que load_dictionary_to_cache.
 
     entries: lista de (name_normalized, entity_type). Original name = capitalized
     primera letra para tests legibles.
@@ -33,7 +33,7 @@ def _build_cache(entries: list[tuple[str, str]]) -> list[tuple[re.Pattern, str, 
     # Ordenar por longitud DESC — longest-match wins.
     sorted_entries = sorted(entries, key=lambda e: len(e[0]), reverse=True)
     return [
-        (re.compile(r"\b" + re.escape(name_norm) + r"\b"), etype, name_norm.title())
+        (_compile_dictionary_pattern(name_norm), etype, name_norm.title())
         for name_norm, etype in sorted_entries
     ]
 
@@ -167,3 +167,65 @@ def test_dedupe_same_entity_multiple_occurrences():
     entities, residual = _match_dictionary("alan llamó a alan sobre alan")
     assert len(entities) == 3
     assert all(e["text"] == "alan" for e in entities)
+
+
+# --- #478: el diccionario busca sin tildes de verdad (decisión 24 de Pepe) ---------------
+# Las entradas se guardan con normalize_name (sin tildes). Antes se buscaban contra
+# text.lower(), que CONSERVA las tildes: «España» no casaba con «espana» y GLiNER creaba
+# el nodo gemelo. Casos de la tabla de tildes_430_2026-10-09.md (Prima y Hilo).
+
+
+@pytest.mark.parametrize("entry, text, expected", [
+    ("espana", "Vivimos en España desde mayo", "España"),
+    ("el ultimo emperador", "Vimos El Último Emperador anoche", "El Último Emperador"),
+    ("lazaro", "Lázaro cambió de concha", "Lázaro"),
+    ("lazaro", "Lazaro cambio de concha", "Lazaro"),
+    ("jotaro", "Jōtarō llegó tarde", "Jōtarō"),
+    ("diseno", "el diseño final", "diseño"),
+    ("la juderia", "Paseamos por La Judería", "La Judería"),
+])
+def test_accent_insensitive_match_keeps_original_spelling(entry, text, expected):
+    gliner_service._dictionary_cache = _build_cache([(entry, "concepto")])
+    entities, residual = _match_dictionary(text)
+    assert [e["text"] for e in entities] == [expected]
+    start, end = entities[0]["start"], entities[0]["end"]
+    assert text[start:end] == expected
+    assert residual == text[:start] + " " * (end - start) + text[end:]
+
+
+def test_entry_ending_in_a_sign_matches():
+    """\b no encuentra borde detrás de «)», así que una entrada así no casaba NUNCA."""
+    gliner_service._dictionary_cache = _build_cache(
+        [("comfyui-ipadapter-flux (shakker-labs)", "producto")])
+    entities, _ = _match_dictionary("Usé ComfyUI-IPAdapter-Flux (Shakker-Labs) ayer.")
+    assert [e["text"] for e in entities] == ["ComfyUI-IPAdapter-Flux (Shakker-Labs)"]
+
+
+def test_accent_folding_keeps_word_boundaries():
+    gliner_service._dictionary_cache = _build_cache([("eco", "agente_ia")])
+    entities, _ = _match_dictionary("un sistema ecológico y Écotone")
+    assert entities == []
+
+
+def test_known_gaps_stay_unmatched():
+    """Lo que el plegado carácter a carácter NO cubre, dicho en un test para que se vea si
+    cambia: una ligadura (ﬁ = dos letras en una) y un texto en forma NFD (la tilde como
+    carácter aparte). Las memorias que guarda la API llegan en NFC."""
+    gliner_service._dictionary_cache = _build_cache([("fiesta", "evento"), ("espana", "lugar")])
+    assert _match_dictionary("la ﬁesta")[0] == []
+    assert _match_dictionary("Espan\u0303a")[0] == []
+
+
+def test_dictionary_rows_to_renormalize():
+    """Las 17 entradas del 15-may llevan la tilde dentro de name_normalized. Se arreglan con
+    normalize_name, salvo que la clave nueva choque con otra entrada (índice único)."""
+    rows = [
+        {"id": 1, "name": "Lázaro", "name_normalized": "lázaro"},
+        {"id": 2, "name": "workflow-diseño", "name_normalized": "workflow-diseño"},
+        {"id": 3, "name": "Eco", "name_normalized": "eco"},
+        {"id": 4, "name": "Pärt", "name_normalized": "pärt"},
+        {"id": 5, "name": "Part", "name_normalized": "part"},
+    ]
+    fixes, collisions = dictionary_rows_to_renormalize(rows)
+    assert fixes == [(1, "lazaro"), (2, "workflow-diseno")]
+    assert collisions == [(4, "part")]
