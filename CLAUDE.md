@@ -249,6 +249,31 @@ docker compose restart mcp
 - **Reranker (#243/#374):** el cross-encoder ms-marco es solo inglés y, en modo `replace`, dejaba fuera del top-k aciertos en español. `rerank_mode` = replace|blend|off (por petición o env `RERANK_MODE`); **por defecto blend, α=0.7** (`RERANK_BLEND_ALPHA`), elegido con un benchmark de 5 variantes (sin filtro, P@1/P@5 0,43/0,71 → 0,50/0,86). El orden final es siempre el score compuesto; el reranker solo decide quién entra, y su nota va en `reranker_score`. Recalibrar α tras #374/#375.
 - **#359:** el canal de documentos del graph_context se ordena por similitud a la consulta, sin duplicados, y cada item dice `ranked_by`. `DOC_EXPANSION_MIN_SIMILARITY` = 0.0 (ningún umbral absoluto separa: consultas en español sin relación llegan a 0,58–0,63).
 
+## 13-oct-2026 (Hilo) — lo que hay que saber
+
+- **Búsqueda (#486, decide Pepe): el salto 2 de `expand_by_graph` (search.py:514-538) no termina nunca en 5 s.**
+  En la semana del 6-oct: 82 de 82 búsquedas de la API con «AGE query timed out hop=2», y 139 «canceling
+  statement» en postgres. Cada búsqueda pierde ~5 s y el salto 2 no aporta nada al graph_bonus. El
+  `SET LOCAL statement_timeout` va fuera de una transacción y no hace nada (postgres deja un WARNING).
+  Medido en solo lectura: `[*2]` desde los hubs (Pepe, Eco, Hilo y EcoDB, grado 285-664) pasa de 30 s;
+  el salto 1 más el 2 por SQL por conjuntos sobre `ecodb_graph._ag_label_edge` tardan 0,375 s. Esto
+  completa lo que se apuntó como F3 en la deuda de abajo.
+- **Tildes (#478): rama `feat/478-tildes` (a1e27b3), en el worktree `EcoDB-wt478`, SIN desplegar.** La
+  verifica Prima el mié 14 a las 19 y se despliega el jue 15 a las 10 (#494: build api, recrear api,
+  worker y cell, reindexar en modo dictionary_only). Lleva la migración 5.4.0 (unaccent + `f_unaccent`
+  IMMUTABLE + índice) y `renormalize_dictionary()` en el arranque.
+- **Migraciones:** el contenedor api monta `./sql` del host en `/app/sql`, pero `migrations.py` va dentro
+  de la imagen. Un .sql nuevo se ve en el contenedor al momento, pero solo se aplica tras un rebuild que
+  lleve su línea en MIGRATIONS.
+- **Simulacro de restauración del backup:** el contenedor de prueba deja un volumen anónimo si se borra
+  sin `-v`. Usar `docker rm -f -v`, y no fiarse de `pg_isready` durante el init: esperar a «PostgreSQL
+  init process complete». Receta: EcoDB aa7f97f9. El del 13-oct restauró las 6.727 memorias.
+- **Scripts con un valor por defecto peligroso (#488):** `sync_age.py`, `seed_predicates.py` y
+  `migrate_predicates.py` apuntan por defecto a `localhost:5432`, que es el Postgres NATIVO de Windows,
+  no EcoDB (127.0.0.1:5435).
+- **mcp 1.29.0** (fijado `<2.0.0`; la 1.x solo recibe arreglos de seguridad; 1.29.1 va en #386). El MCP de
+  EcoDB también descarta en silencio los argumentos no declarados: #492, el mismo arreglo que el #339 de FarOS.
+
 ## Deuda técnica — deep hunt v0.9 (2026-06-01)
 
 ### Spec §7 — deferred by design
