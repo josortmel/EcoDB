@@ -14,17 +14,24 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import time
 
 import asyncpg
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://ecodb:ecodb_dev_pass@postgres:5432/ecodb")
+# #488: sin valor por defecto. localhost:5432 es el Postgres NATIVO de Windows, no EcoDB,
+# y un valor por defecto que apunta a otra base es como se cuelan los accidentes.
+DATABASE_URL = os.environ.get("DATABASE_URL")
+NO_DATABASE_URL = ("DATABASE_URL no esta puesta. Desde el host: postgresql://ecodb:<clave>@127.0.0.1:5435/ecodb ; "
+                   "dentro de Docker: postgresql://ecodb:<clave>@postgres:5432/ecodb")
 GRAPH_NAME = "ecodb_graph"
 PREDICATE = "related_to"
 AUTHOR = "system:cooccurrence"
 
 
 async def main(threshold: int = 2, dry_run: bool = False):
+    if not DATABASE_URL:
+        sys.exit(NO_DATABASE_URL)
     conn = await asyncpg.connect(DATABASE_URL)
 
     triples_before = await conn.fetchval("SELECT count(*) FROM triples")

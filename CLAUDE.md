@@ -268,9 +268,12 @@ docker compose restart mcp
 - **Simulacro de restauración del backup:** el contenedor de prueba deja un volumen anónimo si se borra
   sin `-v`. Usar `docker rm -f -v`, y no fiarse de `pg_isready` durante el init: esperar a «PostgreSQL
   init process complete». Receta: EcoDB aa7f97f9. El del 13-oct restauró las 6.727 memorias.
-- **Scripts con un valor por defecto peligroso (#488):** `sync_age.py`, `seed_predicates.py` y
-  `migrate_predicates.py` apuntan por defecto a `localhost:5432`, que es el Postgres NATIVO de Windows,
-  no EcoDB (127.0.0.1:5435).
+- **Los scripts de `scripts/` exigen `DATABASE_URL` (#488, 14-oct):** `sync_age.py`, `seed_predicates.py`,
+  `migrate_predicates.py` y `generate_cooccurrence_triples.py` ya no tienen valor por defecto (antes era
+  `localhost:5432`, que es el Postgres NATIVO de Windows, o `postgres:5432`, que solo existe dentro de Docker, con
+  la clave de desarrollo escrita). Sin la variable salen con código 1 antes de conectar y dicen qué poner: desde
+  el host `127.0.0.1:5435`, dentro de Docker `postgres:5432`. `sync_age.py` VACÍA el grafo AGE antes de
+  rehacerlo: nunca contra producción sin el daemon parado.
 - **mcp 1.29.0** (fijado `<2.0.0`; la 1.x solo recibe arreglos de seguridad; 1.29.1 va en #386). El MCP de
   EcoDB también descarta en silencio los argumentos no declarados: #492, el mismo arreglo que el #339 de FarOS.
 
