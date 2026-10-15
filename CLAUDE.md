@@ -275,10 +275,10 @@ docker compose restart mcp
 - **Base de PRUEBAS (5436):** `docker compose -p ecodb-test -f docker-compose.yml -f docker-compose.testdb.yml
   up -d postgres` (mismo initdb que producción, volumen aparte). Tests de la api desde la RAÍZ del repo
   (`TEST_DB_PORT=5436 python -m pytest api/tests/...`); desde api/ no encuentra `sql/`.
-- **No construir desde este árbol:** tiene SIN COMMITEAR la migración a flash (`CELL_LLM_MODEL` por defecto
-  en `api/cell_worker.py`, en el compose y en el seed), pendiente de la decisión de Pepe. Hoy flash entra en
-  producción por el entorno del compose y no por la imagen (medido el 15-oct). Un build desde aquí la metería
-  también en la imagen, así que se construye desde un worktree limpio del commit que se despliega.
+- **Flash es el modelo de la cell, y ya está en git** (93473ff, 15-oct: decisión de Pepe, en producción desde el
+  10-sep). Siguen SIN COMMITEAR en este árbol README.md, scripts/setup.*, alerting/, docker-compose.alerting.yml,
+  docker-compose.autoheal.yml, AUTOHEAL_DEPLOY.md y api/cell_worker.md, de dueño sin identificar. Construir
+  siempre desde un worktree limpio del commit que se despliega, o con una capa como la del #513.
 - **Migraciones:** el contenedor api monta `./sql` del host en `/app/sql`, pero `migrations.py` va dentro
   de la imagen. Un .sql nuevo se ve en el contenedor al momento, pero solo se aplica tras un rebuild que
   lleve su línea en MIGRATIONS.
