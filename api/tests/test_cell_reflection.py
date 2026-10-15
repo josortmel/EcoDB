@@ -25,3 +25,15 @@ def test_members_are_the_weeks_heaviest():
 def test_only_from_the_given_week_list():
     week = [_m(0, 0.5), _m(1, 0.5)]
     assert sorted(cw._reflection_member_ids(week)) == ["m0", "m1"]
+
+
+# #500: si el modelo devuelve «arcos_que_cruzan» o «lo_que_evitas» como lista, la narrativa guardaba los corchetes.
+def test_reflection_list_is_joined_as_text():
+    out = cw._reflection_text(["1) uno", "2) dos"])
+    assert out == "1) uno\n\n2) dos"
+    assert "['" not in out and "']" not in out
+
+
+def test_reflection_text_stays_as_is():
+    assert cw._reflection_text("1) uno\n2) dos") == "1) uno\n2) dos"
+    assert cw._reflection_text(None) == ""

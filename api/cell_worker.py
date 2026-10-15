@@ -150,6 +150,16 @@ async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end,
     """, agent_id, cluster_level, p_start, p_end) is not None
 
 
+def _reflection_text(value):
+    """#500: the model sometimes returns arcos_que_cruzan / lo_que_evitas as a list; the f-string then stored
+    the Python repr (['…', '…']) in the narrative. Join a list into paragraphs; text passes through."""
+    if not value:
+        return ""
+    if isinstance(value, list):
+        return "\n\n".join(str(v).strip() for v in value if str(v).strip())
+    return str(value)
+
+
 def _reflection_member_ids(memories):
     """#393: the reflection cluster's 2 members are the week's own heaviest memories (it used to take the
     agent's heaviest of all time, so the same April memories hung from every week)."""
@@ -777,7 +787,8 @@ Reflect on each cluster. What happened? What mattered? What do you want your fut
                     break
         if not duplicate:
             deduped.append(c)
-    return deduped, parsed.get("arcos_que_cruzan", ""), parsed.get("lo_que_evitas", "")
+    return (deduped, _reflection_text(parsed.get("arcos_que_cruzan")),
+            _reflection_text(parsed.get("lo_que_evitas")))
 
 
 async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
