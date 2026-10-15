@@ -258,10 +258,20 @@ docker compose restart mcp
   Medido en solo lectura: `[*2]` desde los hubs (Pepe, Eco, Hilo y EcoDB, grado 285-664) pasa de 30 s;
   el salto 1 más el 2 por SQL por conjuntos sobre `ecodb_graph._ag_label_edge` tardan 0,375 s. Esto
   completa lo que se apuntó como F3 en la deuda de abajo.
-- **Tildes (#478): rama `feat/478-tildes` (a1e27b3), en el worktree `EcoDB-wt478`, SIN desplegar.** La
-  verifica Prima el mié 14 a las 19 y se despliega el jue 15 a las 10 (#494: build api, recrear api,
-  worker y cell, reindexar en modo dictionary_only). Lleva la migración 5.4.0 (unaccent + `f_unaccent`
-  IMMUTABLE + índice) y `renormalize_dictionary()` en el arranque.
+- **Tildes (#478): DESPLEGADO el 15-oct a las 10:15 (#494, merge 50aa8a8).** Prima lo verificó el 14 sobre
+  una copia. Lleva la migración 5.4.0 (unaccent + `f_unaccent` IMMUTABLE + índice) y `renormalize_dictionary()`
+  en el arranque (17 entradas arregladas; la línea de log no sale porque el logger de `gliner_service` está en
+  WARNING, así que se comprueba por datos). `normalize_name` ahora QUITA las tildes («España» → «espana»).
+  Imagen viva `ecodb-api:0.25.0` = e9578fd8: es una capa encima de `ecodb-api:0.25.0-pre494` (92459ef1, para
+  volver atrás) con solo los 4 módulos del #478, porque el build en frío no tenía caché y volvía a bajar CUDA
+  y apt (EcoDB 77487c0d). El próximo `docker compose build api` completo la sustituye sin problema.
+  **El reindexado `dictionary_only` NO se ha hecho:** `eval/reindex_memories.py` busca el nodo con
+  `lower(name) = normalize_name(...)`, y con los gemelos todavía vivos enlazaría al gemelo sin tilde.
+  Va después de las fusiones de Prima (#479) y con el script corregido (#513).
+- **No construir desde este árbol:** tiene SIN COMMITEAR la migración a flash (`CELL_LLM_MODEL` por defecto
+  en `api/cell_worker.py`, en el compose y en el seed), pendiente de la decisión de Pepe. Hoy flash entra en
+  producción por el entorno del compose y no por la imagen (medido el 15-oct). Un build desde aquí la metería
+  también en la imagen, así que se construye desde un worktree limpio del commit que se despliega.
 - **Migraciones:** el contenedor api monta `./sql` del host en `/app/sql`, pero `migrations.py` va dentro
   de la imagen. Un .sql nuevo se ve en el contenedor al momento, pero solo se aplica tras un rebuild que
   lleve su línea en MIGRATIONS.
