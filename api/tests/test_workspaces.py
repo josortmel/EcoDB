@@ -465,12 +465,42 @@ def test_super_deletes_empty_workspace(client, super_jwt):
 
 
 def test_delete_workspace_with_memories_returns_409(client, super_jwt):
-    """Workspace 1 tiene 939 memorias migradas — DELETE debe devolver 409."""
-    r = client.delete("/workspaces/1", headers=auth(super_jwt))
-    assert r.status_code == 409
-    detail = r.json()["detail"]
-    # Debe mencionar el count y "empty" o equivalente.
-    assert "memories" in detail.lower()
+    """Un workspace con memorias no se borra: DELETE debe devolver 409.
+    #559: antes usaba el workspace 1 dando por hecho sus memorias de producción; en la base de pruebas está vacío
+    (204, y lo borraba para los tests siguientes) o no existe (403). Ahora se monta el suyo con una memoria."""
+    ws_id = client.post(
+        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-with-mem"}
+    ).json()["id"]
+
+    async def _add_memory():
+        conn = await _aconn()
+        try:
+            pid = await conn.fetchval(
+                "INSERT INTO projects (workspace_id, name) VALUES ($1, 'pytest-ws-del-with-mem-proj') RETURNING id",
+                ws_id)
+            return pid, await conn.fetchval(
+                "INSERT INTO memories (workspace_id, project_id, type, content) "
+                "VALUES ($1, $2, 'observacion', 'pytest-559') RETURNING id", ws_id, pid)
+        finally:
+            await conn.close()
+
+    async def _cleanup(mid):
+        conn = await _aconn()
+        try:
+            await conn.execute("DELETE FROM memories WHERE id=$1", mid)
+            await conn.execute("DELETE FROM workspaces WHERE id=$1", ws_id)
+        finally:
+            await conn.close()
+
+    _pid, mid = _run(_add_memory())
+    try:
+        r = client.delete(f"/workspaces/{ws_id}", headers=auth(super_jwt))
+        assert r.status_code == 409
+        detail = r.json()["detail"]
+        # Debe mencionar el count y "empty" o equivalente.
+        assert "memories" in detail.lower()
+    finally:
+        _run(_cleanup(mid))
 
 
 def test_worker_cannot_delete(client, worker_setup, super_jwt):
