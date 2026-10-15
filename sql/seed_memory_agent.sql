@@ -230,7 +230,7 @@ BEGIN;
 -- Per-level template assignment: weekly -> weekly template, monthly -> higher
 -- template (looked up by name — higher is NOT is_default for consolidation).
 INSERT INTO cell_task_configs (agent_id, cell_type, model, provider, prompt_template_id, schedule_cron, level, config)
-SELECT a.id, ct.cell_type, 'deepseek-v4-pro', 'deepseek',
+SELECT a.id, ct.cell_type, 'deepseek-flash', 'deepseek',
        (SELECT id FROM cell_prompt_templates WHERE name = ct.template_name LIMIT 1),
        ct.schedule_cron, ct.level, ct.config::jsonb
 FROM agents a
@@ -247,7 +247,7 @@ ON CONFLICT (agent_id, cell_type, level) DO NOTHING;
 
 -- 2b. Configs with NULL level (foresight, skill_distillation)
 INSERT INTO cell_task_configs (agent_id, cell_type, model, provider, prompt_template_id, schedule_cron, level, config)
-SELECT a.id, ct.cell_type, 'deepseek-v4-pro', 'deepseek',
+SELECT a.id, ct.cell_type, 'deepseek-flash', 'deepseek',
        (SELECT id FROM cell_prompt_templates WHERE is_default = true AND cell_type = ct.cell_type LIMIT 1),
        ct.schedule_cron, NULL, ct.config::jsonb
 FROM agents a

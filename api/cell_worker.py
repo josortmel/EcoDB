@@ -28,7 +28,7 @@ API_URL = os.environ.get("ECODB_API_INTERNAL_URL", "http://ecodb-api:8080")
 _INTERNAL_SECRET = os.environ.get("INTERNAL_BROADCAST_SECRET", "")
 
 _CELL_LLM = None
-CELL_MODEL = os.environ.get("CELL_LLM_MODEL", "deepseek-v4-pro")
+CELL_MODEL = os.environ.get("CELL_LLM_MODEL", "deepseek-flash")
 # LLM call timeout. Default None = no timeout (deepseek-v4-pro reasoning can take many
 # minutes on a large consolidation; recover_stuck_runs (60 min) is the safety net).
 # Set CELL_LLM_TIMEOUT=<seconds> to re-enable a cap.

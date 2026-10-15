@@ -139,7 +139,7 @@ services:
       CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}
       CELL_LLM_URL: ${CELL_LLM_URL:-https://api.deepseek.com}
       CELL_LLM_KEY: ${CELL_LLM_KEY}
-      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-v4-pro}
+      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-flash}
     ports:
       - "127.0.0.1:8080:8080"
       - "[::1]:8080:8080"
@@ -302,7 +302,7 @@ services:
       CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}
       CELL_LLM_URL: ${CELL_LLM_URL:-https://api.deepseek.com}
       CELL_LLM_KEY: ${CELL_LLM_KEY}
-      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-v4-pro}
+      CELL_LLM_MODEL: ${CELL_LLM_MODEL:-deepseek-flash}
       EMBEDDINGS_URL: http://embeddings:8090
       ECODB_API_INTERNAL_URL: http://ecodb-api:8080
       INTERNAL_BROADCAST_SECRET: ${INTERNAL_BROADCAST_SECRET}
