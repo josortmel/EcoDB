@@ -262,7 +262,7 @@ docker compose restart mcp
   una copia. Lleva la migración 5.4.0 (unaccent + `f_unaccent` IMMUTABLE + índice) y `renormalize_dictionary()`
   en el arranque (17 entradas arregladas; la línea de log no sale porque el logger de `gliner_service` está en
   WARNING, así que se comprueba por datos). `normalize_name` ahora QUITA las tildes («España» → «espana»).
-  Imagen viva `ecodb-api:0.25.0` = **c725e774** (15-oct, 14:22, #513): `0.25.0-pre494` (92459ef1, para volver
+  Imagen viva al 15-oct a las 14:22 = **c725e774** (#513; ya NO es la viva, ver la sección del 15-oct): `0.25.0-pre494` (92459ef1, para volver
   atrás) + los 4 módulos de HEAD (gliner_service, graph, main, migrations), con pip freeze igual al de
   producción (66f66faa). Se hace como capa porque el build en frío no tenía caché y volvía a bajar CUDA y apt
   (EcoDB 77487c0d). **OJO:** `ecodb-api:0.25.0-coldbuild494` (37e54376) es un build en frío que terminó solo en
@@ -275,7 +275,7 @@ docker compose restart mcp
 - **Base de PRUEBAS (5436):** `docker compose -p ecodb-test -f docker-compose.yml -f docker-compose.testdb.yml
   up -d postgres` (mismo initdb que producción, volumen aparte). Tests de la api desde la RAÍZ del repo
   (`TEST_DB_PORT=5436 python -m pytest api/tests/...`); desde api/ no encuentra `sql/`.
-- **Flash es el modelo de la cell, y ya está en git** (93473ff, 15-oct: decisión de Pepe, en producción desde el
+- **Flash es el modelo de la cell, y ya está en git** (819f07d, antes 93473ff; 15-oct: decisión de Pepe, en producción desde el
   10-sep). Siguen SIN COMMITEAR en este árbol README.md, scripts/setup.*, alerting/, docker-compose.alerting.yml,
   docker-compose.autoheal.yml, AUTOHEAL_DEPLOY.md y api/cell_worker.md, de dueño sin identificar. Construir
   siempre desde un worktree limpio del commit que se despliega, o con una capa como la del #513.
@@ -291,8 +291,38 @@ docker compose restart mcp
   la clave de desarrollo escrita). Sin la variable salen con código 1 antes de conectar y dicen qué poner: desde
   el host `127.0.0.1:5435`, dentro de Docker `postgres:5432`. `sync_age.py` VACÍA el grafo AGE antes de
   rehacerlo: nunca contra producción sin el daemon parado.
-- **mcp 1.29.0** (fijado `<2.0.0`; la 1.x solo recibe arreglos de seguridad; 1.29.1 va en #386). El MCP de
+- **mcp** (fijado `<2.0.0`; la 1.x solo recibe arreglos de seguridad): 1.29.1 desde el 15-oct (#386). El MCP de
   EcoDB también descarta en silencio los argumentos no declarados: #492, el mismo arreglo que el #339 de FarOS.
+
+## 15-oct-2026, tarde (Hilo) — lo que hay que saber
+
+- **Imagen viva** `ecodb-api:0.25.0` = **0e10528f** (17:03, #386 fase 1): `0.25.0-pre386` (9ba0bad2) + `pip install`
+  de fastapi 0.141.0, starlette 1.7.0, PyJWT 2.15.1 y python-multipart 0.0.32. `9ba0bad2` = `0.25.0-pre393`
+  (c725e774) + `cell_worker.py` de 582be4a. **ecodb-mcp:1.8.0** = 1a22c1a9 (mcp 1.29.1, PyJWT 2.15.1). Dockerfiles
+  de las capas en `Hilo/_deploy494/Dockerfile.overlay*`. Receta: capa sobre la imagen viva con SOLO lo que cambia;
+  antes de recrear, md5 de los módulos y `pip freeze` de la imagen nueva contra la vieja (diff = solo lo previsto).
+- **Probar dependencias = correr los tests DENTRO de la imagen**: `Hilo/_deploy494/run_tests_per_file.sh <imagen>
+  <etiqueta>` monta el repo en /repo, lanza un pytest por fichero desde la raíz contra `ecodb-test-pg` y deja junit.
+  Comparar vieja contra nueva sobre la MISMA base y en el mismo estado (la carpeta entera de golpe da «Event loop is
+  closed»). Benchmark de búsqueda: el v4 de Prima (`Prima/laboratorio/benchmark_v4`), comparando ids por llamada.
+- **La base de pruebas se ensuciaba sola**: `test_delete_workspace_with_memories_returns_409` borraba el workspace 1
+  (vacío en la base de pruebas → 204). Arreglado (4085bfa): monta su propio workspace. Si ves fallos en cadena con
+  «1 in set()», workspace_id nulo o 403 sobre el workspace 1, recrea la base: `docker compose -p ecodb-test -f
+  docker-compose.yml -f docker-compose.testdb.yml down -v postgres && … up -d postgres` (otro proyecto y otro volumen
+  que producción).
+- **Cell (#393, #500)**: una semana partida en dos cuenta como hecha cuando terminan las dos mitades
+  (`_mark_split_complete`, metrics.split_into). El cluster «Arcos y puntos ciegos» toma como miembros las 2 memorias
+  de más peso DE SU SEMANA (antes, las 2 de más peso de toda la vida del agente) y las listas del modelo se unen en
+  párrafos (`_reflection_text`). Datos viejos reparados con el sí de Pepe: 143 miembros (antiguos en
+  `metadata.member_ids_before_393`) y 34 narrativas con corchetes (antiguas en `metadata.narrative_before_500`).
+- **El MCP de EcoDB de las sesiones no es el contenedor**: es `mcp/server.py` con el Python del host (stdio), que
+  comparte paquetes (site de usuario) con el MCP de FarOS y el de scrapling. Subidos ahí los mismos cinco paquetes
+  (#560). `ecodb-mcp` (SSE :8091) no tiene clientes: recrearlo no corta a nadie.
+- **Avisos que quedan** (#561, inventario y versiones objetivo en `Hilo/Documentacion/compat_386_2026-10-15.md`):
+  50 en la api (docling, transformers…), 29 en ner, 85 en embeddings. transformers solo se arregla saltando a 5.10.
+- **Historia reescrita antes del push del 15-oct** (firma de 502fd61 → josortmel): todos los hashes de ese día
+  cambiaron. Tabla viejo → nuevo en EcoDB (memoria con tag 520); los viejos siguen en la rama local
+  `backup/pre-rewrite-520-20261015`, que no se sube.
 
 ## Deuda técnica — deep hunt v0.9 (2026-06-01)
 
