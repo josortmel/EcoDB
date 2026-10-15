@@ -262,12 +262,19 @@ docker compose restart mcp
   una copia. Lleva la migración 5.4.0 (unaccent + `f_unaccent` IMMUTABLE + índice) y `renormalize_dictionary()`
   en el arranque (17 entradas arregladas; la línea de log no sale porque el logger de `gliner_service` está en
   WARNING, así que se comprueba por datos). `normalize_name` ahora QUITA las tildes («España» → «espana»).
-  Imagen viva `ecodb-api:0.25.0` = e9578fd8: es una capa encima de `ecodb-api:0.25.0-pre494` (92459ef1, para
-  volver atrás) con solo los 4 módulos del #478, porque el build en frío no tenía caché y volvía a bajar CUDA
-  y apt (EcoDB 77487c0d). El próximo `docker compose build api` completo la sustituye sin problema.
-  **El reindexado `dictionary_only` NO se ha hecho:** `eval/reindex_memories.py` busca el nodo con
-  `lower(name) = normalize_name(...)`, y con los gemelos todavía vivos enlazaría al gemelo sin tilde.
-  Va después de las fusiones de Prima (#479) y con el script corregido (#513).
+  Imagen viva `ecodb-api:0.25.0` = **c725e774** (15-oct, 14:22, #513): `0.25.0-pre494` (92459ef1, para volver
+  atrás) + los 4 módulos de HEAD (gliner_service, graph, main, migrations), con pip freeze igual al de
+  producción (66f66faa). Se hace como capa porque el build en frío no tenía caché y volvía a bajar CUDA y apt
+  (EcoDB 77487c0d). **OJO:** `ecodb-api:0.25.0-coldbuild494` (37e54376) es un build en frío que terminó solo en
+  BuildKit después de matar el cliente y se quedó con la etiqueta (EcoDB a7b3fd95). Tiene OTRO pip freeze: no
+  usarlo. Antes de recrear contenedores, comprobar md5 de los módulos y pip freeze de la imagen etiquetada.
+  **Reindexado hecho (#513):** las fusiones de Prima (#479, merge_log 65-86) y después
+  `eval/reindex_dictionary_unaccent.py --apply`: 1.058 enlaces, 0 hacia nodos fusionados, y el segundo simulacro
+  da 0. Ese script sustituye a `eval/reindex_memories.py`, que busca con `lower(name) = normalize_name(...)` y
+  ahora enlazaría al gemelo sin tilde: no usar el viejo. `search_nodes` solo devuelve nodos activos.
+- **Base de PRUEBAS (5436):** `docker compose -p ecodb-test -f docker-compose.yml -f docker-compose.testdb.yml
+  up -d postgres` (mismo initdb que producción, volumen aparte). Tests de la api desde la RAÍZ del repo
+  (`TEST_DB_PORT=5436 python -m pytest api/tests/...`); desde api/ no encuentra `sql/`.
 - **No construir desde este árbol:** tiene SIN COMMITEAR la migración a flash (`CELL_LLM_MODEL` por defecto
   en `api/cell_worker.py`, en el compose y en el seed), pendiente de la decisión de Pepe. Hoy flash entra en
   producción por el entorno del compose y no por la imagen (medido el 15-oct). Un build desde aquí la metería
