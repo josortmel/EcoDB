@@ -35,6 +35,8 @@ MIGRATIONS: list[tuple[str, str]] = [
     # v2: per-section word budgets + completeness check (v4-pro undershot
     # global targets — Eco's quarterly came out at 1/3 of the 2500-word floor).
     ("5.3.1_higher_prompts_v2", "sql/seed_higher_prompts_v2.sql"),
+    # #478: nodos buscados y emparejados sin tildes (unaccent + f_unaccent inmutable + índice).
+    ("5.4.0_unaccent_nodes", "sql/migrate_5.4.0_unaccent_nodes.sql"),
 ]
 
 _LOCK_KEY = 728_1990

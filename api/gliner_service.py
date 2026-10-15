@@ -9,9 +9,10 @@ Flujo:
 2. `_match_dictionary(text, dict_cache)`:
    - Diccionario ordenado por len(name) DESC → longest-match wins
      (e.g. "eco consulting" matches before standalone "eco").
-   - Regex `\b{re.escape(name)}\b` por entry — word-boundary CRITICO
+   - Regex `(?<!\\w){re.escape(name)}(?!\\w)` por entry — borde de palabra CRITICO
      (coord+verificador+adv-seg convergentes: sin el "Eco" matchea
-     "Ecosistema" → falso positivo silencioso).
+     "Ecosistema" → falso positivo silencioso), buscado sobre el texto plegado
+     sin tildes y de la misma longitud (#478).
 3. Spans matcheados → tipo del diccionario, sin GLiNER.
 4. Texto residual: spans REEMPLAZADOS con espacios mismo largo (NO eliminados).
    Coord+adv-seg: preserva offsets + evita fusion tokens fantasma en frontera.
@@ -34,6 +35,7 @@ Modelo: urchade/gliner_multi-v2.1 (multilingual con español).
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import re
@@ -99,18 +101,88 @@ async def load_dictionary_to_cache(pool: asyncpg.Pool) -> int:
             )
         # Ordenar por len(name_normalized) DESC — longest match wins.
         sorted_rows = sorted(rows, key=lambda r: len(r["name_normalized"]), reverse=True)
-        # Precompilar regex con word-boundary \b — coord+verif+adv-seg convergentes.
-        compiled: list[tuple[re.Pattern, str, str]] = []
-        for r in sorted_rows:
-            # re.escape evita que caracteres especiales del nombre rompan el regex.
-            # IGNORECASE + el name_normalized ya esta en lower, pero el texto
-            # original del usuario puede tener mayusculas — buscamos contra el
-            # texto NORMALIZADO en _match_dictionary, no contra el original.
-            pattern = re.compile(r"\b" + re.escape(r["name_normalized"]) + r"\b")
-            compiled.append((pattern, r["entity_type"], r["name"]))
+        compiled: list[tuple[re.Pattern, str, str]] = [
+            (_compile_dictionary_pattern(r["name_normalized"]), r["entity_type"], r["name"])
+            for r in sorted_rows
+        ]
         _dictionary_cache = compiled
         logger.info("Entity dictionary cache loaded: %d entries", len(compiled))
         return len(compiled)
+
+
+def _compile_dictionary_pattern(name_normalized: str) -> re.Pattern:
+    """Regex de una entrada, buscada sobre el texto plegado (_fold_same_length).
+
+    #478: bordes con (?<!\\w)…(?!\\w) y no con \\b…\\b. \\b exige una letra al lado, así que
+    una entrada que empieza o acaba en un signo («… (Shakker-Labs)») no casaba nunca.
+    re.escape evita que los caracteres especiales del nombre rompan el regex.
+    """
+    return re.compile(r"(?<!\w)" + re.escape(name_normalized) + r"(?!\w)")
+
+
+@functools.lru_cache(maxsize=8192)
+def _fold_char(c: str) -> str:
+    n = normalize_name(c)
+    if len(n) == 1:
+        return n
+    low = c.lower()
+    return low if len(low) == 1 else c
+
+
+def _fold_same_length(text: str) -> str:
+    """Minúsculas y sin tildes carácter a carácter, CONSERVANDO la longitud (#478).
+
+    Cada carácter pasa por normalize_name si eso da exactamente un carácter («É»→«e»,
+    «ñ»→«n», «ō»→«o»); si no (una ligadura como «ﬁ», una tilde suelta de un texto NFD,
+    un espacio), se queda en minúscula o como está, y simplemente no casa. Al tener la
+    misma longitud, los offsets del texto plegado son los del original.
+    """
+    return "".join(_fold_char(c) for c in text)
+
+
+def dictionary_rows_to_renormalize(rows) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """(arreglos, choques) para las entradas cuyo name_normalized no es normalize_name(name).
+
+    La siembra del 15-may no pasó por normalize_name (17 entradas con la tilde dentro).
+    Si la clave buena ya la tiene otra entrada (índice único), no se toca y se avisa.
+    """
+    taken = {r["name_normalized"] for r in rows}
+    fixes: list[tuple[int, str]] = []
+    collisions: list[tuple[int, str]] = []
+    for r in rows:
+        want = normalize_name(r["name"])
+        if want == r["name_normalized"]:
+            continue
+        if want in taken:
+            collisions.append((r["id"], want))
+            continue
+        taken.discard(r["name_normalized"])
+        taken.add(want)
+        fixes.append((r["id"], want))
+    return fixes, collisions
+
+
+async def renormalize_dictionary(pool: asyncpg.Pool) -> int:
+    """Pone name_normalized = normalize_name(name) donde no lo está. Idempotente.
+
+    Va en el arranque, antes de cargar el cache: el arreglo de la búsqueda (#478) y el de
+    estas entradas tienen que entrar a la vez, porque por separado cada uno rompe algo.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, name, name_normalized FROM entity_dictionary")
+        fixes, collisions = dictionary_rows_to_renormalize(rows)
+        for entry_id, want in collisions:
+            logger.warning("entity_dictionary %d: normalize_name gives %r, already taken; left as is",
+                           entry_id, want)
+        if fixes:
+            async with conn.transaction():
+                for entry_id, want in fixes:
+                    await conn.execute(
+                        "UPDATE entity_dictionary SET name_normalized = $2, updated_at = now() WHERE id = $1",
+                        entry_id, want,
+                    )
+            logger.info("entity_dictionary: %d entries renormalized", len(fixes))
+    return len(fixes)
 
 
 def _match_dictionary(text: str) -> tuple[list[dict], str]:
@@ -128,26 +200,17 @@ def _match_dictionary(text: str) -> tuple[list[dict], str]:
     """
     if not text or not _dictionary_cache:
         return [], text
-    # Necesitamos matches sobre el texto ORIGINAL para preservar la subcadena
-    # con su tilde/case. Solucion: normalizar texto, hacer match sobre normalizado,
-    # extraer offsets, sustituir en texto original con esos offsets.
-    # Esto funciona porque normalize_name preserva longitud (NFKD descompone pero
-    # luego elimina los marks — la longitud puede cambiar si hay caracteres
-    # como "ñ" → "n~" → "n" (longitud diferente!). Hay que mapear offsets.
-    #
-    # Para simplicidad single-tenant mode HOY: asumimos que la mayoria de
-    # contenido NO tiene tildes en los nombres del diccionario. Para evitar
-    # complejidad mapeo offset, hacemos lookup sobre text_lower (lower del
-    # original) que preserva longitud — aceptamos que tildes puedan no
-    # matchear hoy.
-    # DEUDA registrada: full unicode-aware matching con offset mapping para
-    # nombres con tildes/diacriticos. Multi-tenant.
-    text_lower = text.lower()
+    # Las entradas están sin tildes (normalize_name). Se busca sobre el texto plegado
+    # carácter a carácter, que tiene la MISMA longitud que el original: los offsets del
+    # match sirven tal cual para sacar text[start:end] con su tilde y su mayúscula (#478;
+    # antes se buscaba sobre text.lower(), que conserva las tildes, y «España» no casaba
+    # con «espana»).
+    text_folded = _fold_same_length(text)
     entities: list[dict] = []
     consumed_ranges: list[tuple[int, int]] = []
     # Iterar diccionario ordenado por longitud DESC (longest-match wins).
     for pattern, entity_type, name_original in _dictionary_cache:
-        for match in pattern.finditer(text_lower):
+        for match in pattern.finditer(text_folded):
             start, end = match.start(), match.end()
             # Verificar que este span no se solapa con uno ya consumido (un
             # match mas largo que ya pillo este rango). Como iteramos DESC,

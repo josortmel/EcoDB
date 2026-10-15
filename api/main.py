@@ -96,8 +96,11 @@ async def lifespan(app: FastAPI):
     await run_migrations(pool)
 
     try:
-        from gliner_service import load_dictionary_to_cache
+        from gliner_service import load_dictionary_to_cache, renormalize_dictionary
         pool = await get_pool()
+        # #478: las entradas mal normalizadas se arreglan ANTES de cargar el cache, en el
+        # mismo arranque que trae la búsqueda sin tildes (por separado, cada uno rompe algo).
+        await renormalize_dictionary(pool)
         count = await load_dictionary_to_cache(pool)
         import logging
         logging.getLogger("ecodb.startup").info(
