@@ -150,6 +150,36 @@ async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end,
     """, agent_id, cluster_level, p_start, p_end) is not None
 
 
+def _reflection_member_ids(memories):
+    """#393: the reflection cluster's 2 members are the week's own heaviest memories (it used to take the
+    agent's heaviest of all time, so the same April memories hung from every week)."""
+    top = sorted(memories, key=lambda m: m.get('weight') or 0, reverse=True)[:2]
+    return [m['id'] for m in top]
+
+
+async def _mark_split_complete(conn, agent_id, p_start, mid, p_end):
+    """#393: a week whose JSON failed is split in two halves, and each half completes with ITS period.
+    _check_idempotency looks for the whole week's exact period, never finds it, and the catch-up relaunched
+    the whole week on every restart (~8 min of LLM each time; 10 times with Eco). When BOTH halves are
+    completed, record the whole week as completed by split (items_created=0, metrics.split_into).
+    Idempotent: does nothing if the week is already recorded. Returns True if the week counts as done."""
+    async def _completed(a, b):
+        return await conn.fetchval("""
+            SELECT 1 FROM cell_runs WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
+              AND metrics->>'period_start'=$2 AND metrics->>'period_end'=$3 LIMIT 1
+        """, agent_id, str(a), str(b)) is not None
+    if await _completed(p_start, p_end):
+        return True
+    second = mid + timedelta(days=1)
+    if not (await _completed(p_start, mid) and await _completed(second, p_end)):
+        return False
+    run_id = await _create_run(conn, 'consolidation', agent_id, p_start, p_end)
+    await conn.execute("UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1", run_id,
+                       json.dumps({"split_into": [[str(p_start), str(mid)], [str(second), str(p_end)]]}))
+    await _complete_run(conn, run_id, 0)
+    return True
+
+
 async def _resolve_context(conn, agent_id):
     ws = await conn.fetchrow("""
         SELECT workspace_id, COUNT(*) AS cnt FROM memories
@@ -1427,14 +1457,13 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                              narrative, narrated_at, member_ids,
                              metadata, period_start, period_end, status)
                         VALUES ($1,$2,'weekly','Arcos y puntos ciegos',
-                                $3, NOW(), ARRAY(SELECT id FROM memories
-                                    WHERE agent_id=$1 ORDER BY weight DESC LIMIT 2),
+                                $3, NOW(), $7::uuid[],
                                 $4, $5, $6, 'active')
                         RETURNING id
                     """, agent_id, ws_id,
                         reflection_narrative.strip(),
                         json.dumps(meta_reflection),
-                        week_start, week_end)
+                        week_start, week_end, _reflection_member_ids(memories))
 
             tension_count = await _detect_identity_tensions(
                 conn, agent_id, ws_id, identity, memories)
@@ -1467,6 +1496,8 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 await conn.execute("SELECT pg_advisory_unlock($1)", lock)
                 r1 = await run_consolidation(pool, agent_id, week_start, mid)
                 r2 = await run_consolidation(pool, agent_id, mid + timedelta(days=1), week_end)
+                # #393: with both halves done, the whole week must stop being retried
+                await _mark_split_complete(conn, agent_id, week_start, mid, week_end)
                 return r1 or r2
             raise
         except Exception as e:
