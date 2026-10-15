@@ -215,6 +215,25 @@ def test_search_finds_similar_node(client, super_jwt):
     assert any("pytest-Cervantes" in m["name"] for m in matches)
 
 
+def test_search_skips_merged_nodes(client, super_jwt):
+    """#513 (Prima, 15-oct): un nodo fusionado (status='merged') no sale en la búsqueda; el activo sí.
+    Antes «Jotaro» devolvía el 40359 ya fusionado al lado de Jōtarō."""
+    client.post("/graph/triples", headers=auth(super_jwt),
+                json={"subject": "pytest-Fusionado", "predicate": "r", "object": "pytest-Vivo", "author": "pytest-graph"})
+
+    async def _merge():
+        conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
+        try:
+            await conn.execute("UPDATE nodes SET status = 'merged' WHERE name = 'pytest-Fusionado'")
+        finally:
+            await conn.close()
+    asyncio.run(_merge())
+
+    names = [m["name"] for m in client.get("/graph/search?q=pytest-", headers=auth(super_jwt)).json()["matches"]]
+    assert "pytest-Vivo" in names
+    assert "pytest-Fusionado" not in names
+
+
 def test_search_min_3_chars(client, super_jwt):
     """VS2 (adv-seg): q < 3 chars rechazado para evitar seq scan sobre nodes."""
     r = client.get("/graph/search?q=a", headers=auth(super_jwt))

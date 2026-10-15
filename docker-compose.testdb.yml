@@ -1,0 +1,11 @@
+# Base de datos de PRUEBAS (conftest: localhost:5436, ecodb/ecodb_test_pass). Mismo esquema que producción,
+# porque usa los mismos scripts de initdb del servicio postgres. Proyecto y volumen aparte: no toca la base viva.
+#   docker compose -p ecodb-test -f docker-compose.yml -f docker-compose.testdb.yml up -d postgres
+#   docker compose -p ecodb-test -f docker-compose.yml -f docker-compose.testdb.yml down -v    (borrarla)
+services:
+  postgres:
+    container_name: ecodb-test-pg
+    environment:
+      POSTGRES_PASSWORD: ecodb_test_pass
+    ports: !override
+      - "127.0.0.1:5436:5432"

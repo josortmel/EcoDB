@@ -759,7 +759,8 @@ async def search_nodes(
                    GREATEST(similarity(name, $1),
                             similarity(f_unaccent(lower(name)), f_unaccent(lower($1)))) AS sim
             FROM nodes
-            WHERE name ILIKE $2 OR f_unaccent(lower(name)) LIKE f_unaccent(lower($2))
+            WHERE status = 'active'
+              AND (name ILIKE $2 OR f_unaccent(lower(name)) LIKE f_unaccent(lower($2)))
             ORDER BY sim DESC, length(name) ASC
             LIMIT $3
             """,
