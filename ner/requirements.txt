@@ -1,5 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.12.1+cpu
-fastapi==0.118.0
+fastapi==0.141.0
+starlette==1.7.0
+anyio==4.14.2
 uvicorn[standard]==0.40.0
 gliner==0.2.26

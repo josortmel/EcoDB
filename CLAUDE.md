@@ -296,6 +296,18 @@ docker compose restart mcp
 
 ## 15-oct-2026, tarde (Hilo) — lo que hay que saber
 
+- **16-oct, 10:57 (#561, fase 2b de #386): imágenes vivas** (capas en `Hilo/_deploy494/Dockerfile.overlay561-*`;
+  para volver atrás, retaguear `-pre561` y recrear): `ecodb-api:0.25.0` = **e1b51888** (urllib3 2.8.0, langgraph-sdk
+  0.4.4, pip 26.2 + apt upgrade), `ecodb-mcp:1.8.0` = **1d436f8c** (mcp 1.30.0: GHSA-84m7-p3x7-pcfv), `ecodb-ner:1.0.0` =
+  **a158da92** (fastapi 0.141, starlette 1.7, anyio 4.14.2; setuptools SE QUEDA en 81 porque torch 2.12.1+cpu exige <82),
+  `ecodb-embeddings:0.2.5` = **43262bdf** (fastapi/starlette/anyio, urllib3 2.2.3→2.8.0, requests, soupsieve, Jinja2,
+  filelock, h2, hpack, lief, Brotli, fsspec, idna, Pygments, wheel, setuptools y **pillow 12.3.0**) y
+  `ecodb-postgres:1.0.0` = **ab6c113f** (apt upgrade: openssl, krb5, perl…; probado antes en ecodb-test-pg). Volcado
+  previo: `Hilo/_deploy494/ecodb_pre561pg_20261016_104843.sql.gz`. Medido: tests de la api iguales (399/69/6, 0
+  diferencias), benchmark v4 idéntico 96/96 tras la tanda 1 y otra vez 96/96 tras apt+pillow, vectores de texto e imagen IDÉNTICOS (`vec561.py`), mismas 6.947
+  memorias. Avisos de Python 273 → 88, apt sin pendientes. **Inventario de avisos con `pip list --format=json`, nunca
+  con `pip freeze`** (no lista pip/setuptools ni versiona los `@ file://`). Pendiente: transformers 5.10 + torch 2.13
+  (#572) y docling (#573).
 - **16-oct, 09:27 (#443): imagen viva `ecodb-api:0.25.0` = dc59dd20** = `0.25.0-pre443` (0e10528f, lo de abajo) +
   `graph.py` de f01cdac: `save_memory` aplica también las stop_entities (antes solo los documentos). Volver atrás:
   retaguear `0.25.0-pre443` y recrear api, worker y ecodb-cell. Capa: `Hilo/_deploy494/Dockerfile.overlay443`.
