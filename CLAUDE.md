@@ -296,7 +296,10 @@ docker compose restart mcp
 
 ## 15-oct-2026, tarde (Hilo) — lo que hay que saber
 
-- **Imagen viva** `ecodb-api:0.25.0` = **0e10528f** (17:03, #386 fase 1): `0.25.0-pre386` (9ba0bad2) + `pip install`
+- **16-oct, 09:27 (#443): imagen viva `ecodb-api:0.25.0` = dc59dd20** = `0.25.0-pre443` (0e10528f, lo de abajo) +
+  `graph.py` de f01cdac: `save_memory` aplica también las stop_entities (antes solo los documentos). Volver atrás:
+  retaguear `0.25.0-pre443` y recrear api, worker y ecodb-cell. Capa: `Hilo/_deploy494/Dockerfile.overlay443`.
+- **Imagen viva hasta el 16-oct** `ecodb-api:0.25.0` = **0e10528f** (17:03, #386 fase 1): `0.25.0-pre386` (9ba0bad2) + `pip install`
   de fastapi 0.141.0, starlette 1.7.0, PyJWT 2.15.1 y python-multipart 0.0.32. `9ba0bad2` = `0.25.0-pre393`
   (c725e774) + `cell_worker.py` de 582be4a. **ecodb-mcp:1.8.0** = 1a22c1a9 (mcp 1.29.1, PyJWT 2.15.1). Dockerfiles
   de las capas en `Hilo/_deploy494/Dockerfile.overlay*`. Receta: capa sobre la imagen viva con SOLO lo que cambia;
