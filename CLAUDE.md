@@ -296,6 +296,13 @@ docker compose restart mcp
 
 ## 15-oct-2026, tarde (Hilo) — lo que hay que saber
 
+- **16-oct, 11:22 (#447, decisión 42 de Pepe): los triggers de AGE (`sql/trigger_age_sync.sql`) pasan nombre e id
+  como parámetro agtype** (`EXECUTE … $cypher$…$name…$cypher$, $1 … USING jsonb_build_object(...)::text::agtype`), no
+  con format(%L): un nombre con apóstrofo («McGee's») rompía el INSERT del nodo entero. Aplicado a producción con psql
+  (no hace falta imagen nueva: el trigger vive en la base). Después: 3.884 nodos = 3.884 vértices. Test
+  `api/tests/test_age_trigger_comillas.py`. CASI-ACCIDENTE al probarlo: un DELETE con un id sacado del texto de psql
+  apuntó al nodo 1 (Eco) y lo paró una FK. En producción, ningún id pasa por el shell: la fila se identifica en el
+  propio SQL, con RETURNING, y dentro de BEGIN/ROLLBACK cuando se pueda.
 - **16-oct, 10:57 (#561, fase 2b de #386): imágenes vivas** (capas en `Hilo/_deploy494/Dockerfile.overlay561-*`;
   para volver atrás, retaguear `-pre561` y recrear): `ecodb-api:0.25.0` = **e1b51888** (urllib3 2.8.0, langgraph-sdk
   0.4.4, pip 26.2 + apt upgrade), `ecodb-mcp:1.8.0` = **1d436f8c** (mcp 1.30.0: GHSA-84m7-p3x7-pcfv), `ecodb-ner:1.0.0` =
