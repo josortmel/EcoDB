@@ -290,6 +290,15 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
     if not entities:
         return 0
 
+    # #443: the stop list applies to memories too, not only to documents
+    # (extract_entities_from_chunks). Stored values are re-normalized because rows
+    # written before #478 kept their accents.
+    from gliner_service import filter_stop_entities, normalize_name
+    stop_rows = await conn.fetch("SELECT name_normalized FROM stop_entities")
+    entities = filter_stop_entities(entities, {normalize_name(r["name_normalized"]) for r in stop_rows})
+    if not entities:
+        return 0
+
     # Sort entities by name for consistent advisory lock order (prevents deadlock)
     entities = sorted(entities, key=lambda e: e["text"].lower())
     # Deduplicar por nombre exacto preservando orden sorted (dict.fromkeys mantiene
