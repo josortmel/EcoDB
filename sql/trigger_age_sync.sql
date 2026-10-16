@@ -1,14 +1,15 @@
 -- Auto-sync nodes table → AGE graph.
--- Uses EXECUTE format() for AGE Cypher compatibility inside PL/pgSQL.
 -- Delimiters: $cypher$ instead of $$ to avoid conflict with node names containing $$.
+-- #447 (16-oct): the values travel as an agtype PARAMETER (EXECUTE … USING, AGE manual «Prepared
+-- Statements»), never interpolated. format(%L) is SQL escaping: cypher does not read '' as an escaped quote,
+-- so a name like «O'Brien» made the node in SQL but no vertex in AGE (only a WARNING). Rule (graph.py:21):
+-- no value is ever interpolated into a cypher text, not in SQL or triggers either.
 
 CREATE OR REPLACE FUNCTION age_sync_insert() RETURNS trigger AS
 $body$
 BEGIN
-    EXECUTE format(
-        'SELECT * FROM cypher(''ecodb_graph'', $cypher$CREATE (n:Entity {name: %L, sql_id: %s}) RETURN id(n)$cypher$) AS (node_id agtype)',
-        NEW.name, NEW.id
-    );
+    EXECUTE 'SELECT * FROM cypher(''ecodb_graph'', $cypher$CREATE (n:Entity {name: $name, sql_id: $sid}) RETURN id(n)$cypher$, $1) AS (node_id agtype)'
+        USING (jsonb_build_object('name', NEW.name, 'sid', NEW.id))::text::agtype;
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
     RAISE WARNING 'AGE sync INSERT failed for node %: %', NEW.id, SQLERRM;
@@ -51,10 +52,8 @@ CREATE OR REPLACE FUNCTION age_sync_rename() RETURNS trigger AS
 $body$
 BEGIN
     IF NEW.name != OLD.name THEN
-        EXECUTE format(
-            'SELECT * FROM cypher(''ecodb_graph'', $cypher$MATCH (n:Entity {sql_id: %s}) SET n.name = %L RETURN id(n)$cypher$) AS (node_id agtype)',
-            NEW.id, NEW.name
-        );
+        EXECUTE 'SELECT * FROM cypher(''ecodb_graph'', $cypher$MATCH (n:Entity {sql_id: $sid}) SET n.name = $name RETURN id(n)$cypher$, $1) AS (node_id agtype)'
+            USING (jsonb_build_object('name', NEW.name, 'sid', NEW.id))::text::agtype;
     END IF;
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
@@ -69,10 +68,8 @@ CREATE OR REPLACE FUNCTION age_sync_reactivate() RETURNS trigger AS
 $body$
 BEGIN
     IF NEW.status = 'active' AND (OLD.status != 'active' OR OLD.status IS NULL) THEN
-        EXECUTE format(
-            'SELECT * FROM cypher(''ecodb_graph'', $cypher$CREATE (n:Entity {name: %L, sql_id: %s}) RETURN id(n)$cypher$) AS (node_id agtype)',
-            NEW.name, NEW.id
-        );
+        EXECUTE 'SELECT * FROM cypher(''ecodb_graph'', $cypher$CREATE (n:Entity {name: $name, sql_id: $sid}) RETURN id(n)$cypher$, $1) AS (node_id agtype)'
+            USING (jsonb_build_object('name', NEW.name, 'sid', NEW.id))::text::agtype;
     END IF;
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
