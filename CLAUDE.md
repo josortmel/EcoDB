@@ -315,6 +315,12 @@ docker compose restart mcp
   memorias. Avisos de Python 273 → 88, apt sin pendientes. **Inventario de avisos con `pip list --format=json`, nunca
   con `pip freeze`** (no lista pip/setuptools ni versiona los `@ file://`). Pendiente: transformers 5.10 + torch 2.13
   (#572) y docling (#573).
+- **19-oct, 14:36 (#605): imagen viva `ecodb-api:0.25.0` = 65fbe310** = `0.25.0-pre605` (e1b51888, que era 0.25.0-561apt) +
+  `classifier.py` de 5bc08fa: `classify_with_llm` cuenta y anota en `ecodb.perf` el MOTIVO de cada salida
+  («classify_with_llm outcome=no_provider|empty|other|unknown_type|bad_json|classified»), sin cambiar lo que devuelve.
+  Volver atrás: retaguear `0.25.0-pre605` y recrear api, worker y ecodb-cell. Capa: `Hilo/_deploy494/Dockerfile.overlay605`.
+  OJO al correr la suite con `run_tests_per_file.sh`: en ese entorno salen 31 fallos y 38 errores que NO son
+  regresiones (tests que necesitan la API viva); se compara siempre vieja contra nueva, test a test.
 - **16-oct, 09:27 (#443): imagen viva `ecodb-api:0.25.0` = dc59dd20** = `0.25.0-pre443` (0e10528f, lo de abajo) +
   `graph.py` de f01cdac: `save_memory` aplica también las stop_entities (antes solo los documentos). Volver atrás:
   retaguear `0.25.0-pre443` y recrear api, worker y ecodb-cell. Capa: `Hilo/_deploy494/Dockerfile.overlay443`.
