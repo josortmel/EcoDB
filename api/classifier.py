@@ -8,8 +8,20 @@ Runs best-effort after memory save. Never blocks save.
 import html
 import re
 import logging
+from collections import Counter
 
 log = logging.getLogger("ecodb.classifier")
+
+# #605: classify_with_llm devolvía el mismo None por motivos distintos (sin proveedor, «other», el
+# proveedor falla…) y una medida lo leyó como un fallo. Cada salida cuenta su motivo y lo dice en
+# ecodb.perf; lo que devuelve no cambia. Motivos: no_provider, empty, other, unknown_type, bad_json, classified.
+_perf = logging.getLogger("ecodb.perf")
+CLASSIFY_LLM_OUTCOMES: Counter = Counter()
+
+
+def _outcome(reason: str) -> None:
+    CLASSIFY_LLM_OUTCOMES[reason] += 1
+    _perf.info("classify_with_llm outcome=%s", reason)
 
 PATTERNS = {
     "bug_fix": [
@@ -66,6 +78,7 @@ async def classify_with_llm(content: str) -> dict | None:
     from llm_provider import get_llm_provider
     provider = get_llm_provider()
     if not provider:
+        _outcome("no_provider")
         return None
     safe = html.escape(content[:600])
     prompt = (
@@ -77,22 +90,28 @@ async def classify_with_llm(content: str) -> dict | None:
     )
     raw = await provider.generate(prompt, max_tokens=60, temperature=0.1)
     if not raw:
+        _outcome("empty")
         return None
     try:
         result = _json.loads(raw)
         template_type = result.get("type", "other")
         if template_type not in PATTERNS and template_type != "other":
+            _outcome("unknown_type")
             return None
         if template_type == "other":
+            _outcome("other")
             return None
         confidence = max(0.0, min(1.0, float(result.get("confidence", 0.5))))
-        return {
+        out = {
             "template_type": template_type,
             "confidence": round(confidence, 2),
             "fields": _extract_fields(content, template_type),
         }
+        _outcome("classified")
+        return out
     except Exception:
         log.warning("LLM classifier returned non-JSON: %s", raw[:80])
+        _outcome("bad_json")
         return None
 
 
