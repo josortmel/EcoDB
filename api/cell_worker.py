@@ -1355,6 +1355,8 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                         and week_start <= m['created_at'].date() <= week_end]
 
             if len(memories) < MIN_CLUSTER_SIZE:
+                # #701: the week's lone memory is left out too — say so.
+                await _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
                 await _complete_run(conn, run_id, 0)
                 return run_id
 
@@ -1484,6 +1486,9 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             # Unified weekly artifact above the thematic clusters just created.
             await _ensure_week_rollup(conn, agent_id, week_start, week_end)
 
+            # #701: say which of the week's memories no weekly cluster took.
+            await _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
+
             await _complete_run(conn, run_id, len(cluster_records) + tension_count)
             await _broadcast_sse('cell.run.completed', {
                 'run_id': str(run_id), 'cell_type': 'consolidation',
@@ -1529,6 +1534,95 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
 # Cell: consolidation stacking (monthly / quarterly / yearly)
 # ---------------------------------------------------------------------------
 
+async def _week_uncovered(conn, agent_id, ws_id, week_start, week_end):
+    """#701 coverage invariant, counted in MEMORIES and starting at the weekly: the
+    week's active memories that are a member of NO active weekly cluster (thematic,
+    rollup or reflection, of this or a neighbouring week). Measured 23-oct: 655
+    such memories between July and 11-oct for Eco, Hilo, Lienzo and Prima. They
+    leave _label_clusters_llm without a word (index left out by the LLM, cluster
+    under MIN_CLUSTER_SIZE, dedup) or with a week of fewer than 2 memories. This
+    does not fix them: it makes them visible instead of silent."""
+    rows = await conn.fetch("""
+        SELECT m.id FROM memories m
+        WHERE m.agent_id=$1 AND m.workspace_id=$2 AND m.staleness='active'
+          AND m.created_at >= $3 AND m.created_at < $4
+          AND NOT EXISTS (
+              SELECT 1 FROM memory_clusters mc
+              WHERE mc.agent_id=$1 AND mc.level='weekly' AND mc.status='active'
+                AND m.id = ANY(mc.member_ids))
+        ORDER BY m.created_at
+    """, agent_id, ws_id, week_start, week_end + timedelta(days=1))
+    return [r["id"] for r in rows]
+
+
+async def _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end):
+    """#701: log the week's uncovered memories and keep the count in the run's metrics."""
+    uncovered = await _week_uncovered(conn, agent_id, ws_id, week_start, week_end)
+    if uncovered:
+        log.warning("COVERAGE agent %d week %s..%s: %d memories in no weekly cluster: %s",
+                    agent_id, week_start, week_end, len(uncovered),
+                    ", ".join(str(u)[:8] for u in uncovered[:20]))
+        await conn.execute("""
+            UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1
+        """, run_id, json.dumps({"uncovered": len(uncovered),
+                                 "uncovered_ids": [str(u) for u in uncovered[:100]]}))
+    return uncovered
+
+
+def _last_week_of_period(p_end):
+    """#701: (monday, sunday) of the last ISO week whose Thursday falls on or before
+    p_end, i.e. the last week that feeds the period ending on p_end. It may end up
+    to 3 days after p_end (a month ending on a Thursday ends its week on the 3rd)."""
+    monday = p_end - timedelta(days=p_end.weekday())
+    if monday + timedelta(days=3) > p_end:
+        monday -= timedelta(days=7)
+    return monday, monday + timedelta(days=6)
+
+
+async def _last_week_done(conn, agent_id, p_end):
+    """#701 guard: the weekly consolidation of the period's last week has COMPLETED.
+    It looks at the run, not at clusters: a week with fewer than 2 own memories
+    completes its run with no cluster and must still count as done (Prima, 23-oct)."""
+    w_start, w_end = _last_week_of_period(p_end)
+    return await conn.fetchval("""
+        SELECT 1 FROM cell_runs
+        WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
+          AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3
+        LIMIT 1
+    """, agent_id, str(w_start), str(w_end)) is not None
+
+
+async def _select_higher_sources(conn, agent_id, source_level, p_start, p_end):
+    """Active clusters of `source_level` that feed the period [p_start, p_end].
+
+    #701: a weekly belongs to the month of the THURSDAY of its ISO week (the ISO
+    rule), so a week that crosses a month (or year) boundary lands in exactly one
+    month. Before, the filter was containment (period_start >= p_start AND
+    period_end <= p_end) and a crossing week fitted in no month: orphaned forever.
+    The Thursday comes from the ISO week of period_start, so the #393 half-weeks
+    (e.g. Fri-Sun) go with their week. Monthly and quarterly sources are aligned
+    with their parent periods, so containment stays for them.
+
+    Lineage filter: skip sources already absorbed by an active same-level
+    cluster (thematic weeklies under a week rollup), or the monthly would eat
+    the same week twice.
+    """
+    if source_level == 'weekly':
+        in_period = "(date_trunc('week', mc.period_start)::date + 3) BETWEEN $3 AND $4"
+    else:
+        in_period = "mc.period_start >= $3 AND mc.period_end <= $4"
+    return await conn.fetch(f"""
+        SELECT mc.* FROM memory_clusters mc
+        WHERE mc.agent_id=$1 AND mc.level=$2 AND mc.status='active'
+          AND {in_period}
+          AND NOT EXISTS (
+              SELECT 1 FROM memory_clusters r
+              WHERE r.agent_id=$1 AND r.status='active' AND r.level=$2
+                AND mc.id = ANY(r.source_ids))
+        ORDER BY mc.period_start
+    """, agent_id, source_level, p_start, p_end)
+
+
 async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, source_level, min_sources=2):
     async with pool.acquire() as conn:
         lock = _lock_key(agent_id, 'consolidation', p_start, p_end)
@@ -1539,19 +1633,16 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
                                         p_start, p_end, cluster_level=level):
                 return None
 
-            # Lineage filter: skip sources already absorbed by an active
-            # same-level cluster (thematic weeklies under a week rollup) —
-            # otherwise the monthly would eat the same week twice.
-            sources = await conn.fetch("""
-                SELECT mc.* FROM memory_clusters mc
-                WHERE mc.agent_id=$1 AND mc.level=$2 AND mc.status='active'
-                  AND mc.period_start >= $3 AND mc.period_end <= $4
-                  AND NOT EXISTS (
-                      SELECT 1 FROM memory_clusters r
-                      WHERE r.agent_id=$1 AND r.status='active' AND r.level=$2
-                        AND mc.id = ANY(r.source_ids))
-                ORDER BY mc.period_start
-            """, agent_id, source_level, p_start, p_end)
+            # #701: never seal a monthly before its last week has been consolidated —
+            # idempotency would then keep that week out forever. Not sealing means the
+            # (daily, idempotent) cron tries again the next day.
+            if source_level == 'weekly' and not await _last_week_done(conn, agent_id, p_end):
+                w_start, w_end = _last_week_of_period(p_end)
+                log.warning("monthly agent %d %s..%s NOT built: last week %s..%s not consolidated yet",
+                            agent_id, p_start, p_end, w_start, w_end)
+                return None
+
+            sources = await _select_higher_sources(conn, agent_id, source_level, p_start, p_end)
 
             if len(sources) < min_sources:
                 return None
