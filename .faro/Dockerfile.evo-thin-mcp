@@ -1,0 +1,2 @@
+FROM ecodb-mcp:1.8.0-prevo
+COPY --chown=mcpuser:mcpuser server.py /app/server.py

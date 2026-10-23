@@ -1,0 +1,13 @@
+# Thin rebuild for the 2026-09-25 evolution: same OS/pip/torch as production (imported from the
+# running container's rootfs), only the application code of the branch is replaced.
+# Reason: torch is unpinned in api/requirements.txt (prod 2.13.0; a fresh build pulls 2.14.0).
+FROM ecodb-api:0.25.0-prevo
+COPY --chown=apiuser:apiuser api/admin.py api/agents.py api/auth.py api/background.py api/bootstrap_first_apikey.py api/briefing.py api/cases.py api/cell_configs.py api/cell_templates.py api/cell_worker.py api/cells.py api/chunker.py api/classifier.py api/clusters.py api/crypto.py api/db.py api/documents.py api/embeddings_client.py api/entity_normalization.py api/events.py api/foresights.py api/gliner_service.py api/graph.py api/llm_provider.py api/main.py api/migrations.py api/memories.py api/onboarding.py api/pagination.py api/parsers.py api/permissions.py api/projects.py api/providers.py api/rate_limit.py api/reranker.py api/search.py api/settings.py api/shared_models.py api/skills.py api/stats.py api/teams.py api/telemetry.py api/telemetry_api.py api/users.py api/worker.py api/workspaces.py /app/
+COPY --chown=apiuser:apiuser ecodb-langchain /tmp/ecodb-langchain-evo
+RUN pip install --no-deps --no-cache-dir /tmp/ecodb-langchain-evo && rm -rf /tmp/ecodb-langchain-evo && find /app -name "__pycache__" -type d -prune -exec rm -rf {} +
+ENV HF_HOME=/app/.cache/huggingface
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--no-server-header"]
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3     CMD curl --fail --silent http://localhost:8080/health || exit 1
