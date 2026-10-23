@@ -1188,10 +1188,11 @@ Rules:
             log.warning("Agent %d ws %d: no is_common project, skipping tension", agent_id, ws_id)
             continue
         evidence_ids = [str(m["id"]) for m in memories[:5]]
+        content = f"Identity tension: {observed} vs {tension.get('declared_trait', '')}"
         await conn.execute("""
             INSERT INTO memories
                 (user_id, agent_id, workspace_id, project_id,
-                 type, content, metadata, weight, weight_base, tags)
+                 type, content, metadata, weight, weight_base, tags, embedding)
             VALUES (
               (SELECT user_id FROM agents WHERE id=$1),
               $1, $2, $3,
@@ -1199,17 +1200,19 @@ Rules:
               $4,
               $5::jsonb,
               0.6, 0.6,
-              ARRAY['identity_tension']
+              ARRAY['identity_tension'],
+              $6::vector
             )
         """, agent_id, ws_id, proj_id,
-            f"Identity tension: {observed} vs {tension.get('declared_trait', '')}",
+            content,
             json.dumps({
                 "observed_trait": observed,
                 "declared_trait": tension.get("declared_trait", ""),
                 "tension_type": t_type,
                 "evidence_memory_ids": evidence_ids,
                 "tension_status": "open",
-            }))
+            }),
+            await _embed_for_memory(content))
         created += 1
     return created
 
@@ -1605,6 +1608,19 @@ async def _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
     return uncovered
 
 
+async def _embed_for_memory(text):
+    """#717: the pgvector literal for a memory the cell writes, or None. The cell used to
+    INSERT memories with raw SQL and no embedding (97 active ones invisible to vector
+    search on 23-oct). An embeddings outage must not cost the memory: it is saved without
+    one and left for the backfill (WHERE embedding IS NULL)."""
+    try:
+        from embeddings_client import embed_text
+        return await embed_text(text, prompt_name="passage")
+    except Exception as e:  # HTTPException 503 from the client, or anything else
+        log.warning("cell memory saved WITHOUT embedding (left for backfill): %s", e)
+        return None
+
+
 def _last_week_of_period(p_end):
     """#701: (monday, sunday) of the last ISO week whose Thursday falls on or before
     p_end, i.e. the last week that feeds the period ending on p_end. It may end up
@@ -1955,16 +1971,17 @@ async def run_skill_distillation(pool, agent_id):
                         INSERT INTO memories
                             (user_id, agent_id, workspace_id, project_id,
                              type, content, metadata,
-                             weight, weight_base, tags)
+                             weight, weight_base, tags, embedding)
                         VALUES (
                           (SELECT user_id FROM agents WHERE id=$1),
                           $1, $2, $3,
                           'skill', $4, $5::jsonb,
-                          0.8, 0.8, ARRAY['auto_skill']
+                          0.8, 0.8, ARRAY['auto_skill'], $6::vector
                         )
                     """, agent_id, ws_id, common_proj_id,
                         skill_data.get("summary", f"Skill: {task_type}"),
-                        json.dumps(skill_meta))
+                        json.dumps(skill_meta),
+                        await _embed_for_memory(skill_data.get("summary", f"Skill: {task_type}")))
                     items_created += 1
 
                 fail_count = group["total"] - group["successes"]
@@ -1984,7 +2001,7 @@ async def run_skill_distillation(pool, agent_id):
                                 (user_id, agent_id, workspace_id, project_id,
                                  type, content,
                                  foresight_start, foresight_end,
-                                 metadata, weight, weight_base, tags)
+                                 metadata, weight, weight_base, tags, embedding)
                             VALUES (
                               (SELECT user_id FROM agents WHERE id=$1),
                               $1, $2, $3,
@@ -1993,7 +2010,8 @@ async def run_skill_distillation(pool, agent_id):
                               NOW(), NOW() + INTERVAL '30 days',
                               $5::jsonb,
                               0.6, 0.6,
-                              ARRAY['auto_foresight', 'skill_failure']
+                              ARRAY['auto_foresight', 'skill_failure'],
+                              $6::vector
                             )
                         """, agent_id, ws_id, common_proj_id,
                             f"Failure pattern in {task_type}: "
@@ -2002,7 +2020,10 @@ async def run_skill_distillation(pool, agent_id):
                                 "foresight_source": "skill_failure",
                                 "task_type": task_type,
                                 "fail_rate": round(1 - success_rate, 2)
-                            }))
+                            }),
+                            await _embed_for_memory(
+                                f"Failure pattern in {task_type}: "
+                                f"{fail_count}/{group['total']} cases failed."))
                         items_created += 1
 
             await _complete_run(conn, run_id, items_created)
@@ -2074,11 +2095,13 @@ async def _run_generic_cell(pool, config, agent_id):
                 provider, model)
 
             await conn.execute("""
-                INSERT INTO memories (workspace_id, project_id, agent_id, type, content, visibility, tags)
+                INSERT INTO memories (workspace_id, project_id, agent_id, type, content, visibility, tags,
+                                      embedding)
                 VALUES ($1, (SELECT id FROM projects WHERE workspace_id=$1 AND is_common=true LIMIT 1),
-                        $2, 'observacion', $3, 'public', $4)
+                        $2, 'observacion', $3, 'public', $4, $5::vector)
             """, ws_id, agent_id, result[:16000],
-                [f"cell:{cell_type}", f"cell_generated"])
+                [f"cell:{cell_type}", f"cell_generated"],
+                await _embed_for_memory(result[:16000]))
 
             await conn.execute("""
                 UPDATE cell_runs SET finished_at=NOW(), status='completed',
