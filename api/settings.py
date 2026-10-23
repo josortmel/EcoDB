@@ -211,7 +211,10 @@ LLAMA_CPP_URL = os.environ.get("LLAMA_CPP_URL", "http://llm:8080")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 HAIKU_MODEL = os.environ.get("HAIKU_MODEL", "claude-haiku-4-5-20251001")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+# #716: the one default model name. deepseek-chat/-reasoner were discontinued on 2026-07-24
+# (api-docs.deepseek.com/updates); «deepseek-flash» always points at the latest Flash build.
+DEFAULT_LLM_MODEL = "deepseek-flash"
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", DEFAULT_LLM_MODEL)
 DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com")
 MAX_LLM_TOKENS = int(os.environ.get("MAX_LLM_TOKENS", "512"))
 
@@ -219,7 +222,7 @@ MAX_LLM_TOKENS = int(os.environ.get("MAX_LLM_TOKENS", "512"))
 CELL_LLM_PROVIDER = os.environ.get("CELL_LLM_PROVIDER", "deepseek")
 CELL_LLM_URL = os.environ.get("CELL_LLM_URL", "https://api.deepseek.com")
 CELL_LLM_KEY = os.environ.get("CELL_LLM_KEY", "")
-CELL_LLM_MODEL = os.environ.get("CELL_LLM_MODEL", "deepseek-chat")
+CELL_LLM_MODEL = os.environ.get("CELL_LLM_MODEL", DEFAULT_LLM_MODEL)
 
 # --- Consolidation parameters ---
 CONSOLIDATION_ALPHA = float(os.environ.get("CONSOLIDATION_ALPHA", "0.70"))

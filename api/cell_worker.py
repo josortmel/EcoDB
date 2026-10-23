@@ -21,6 +21,8 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import cosine as cosine_dist
 from scipy.stats import rankdata
 
+import settings
+
 log = logging.getLogger("ecodb.cell")
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -28,7 +30,7 @@ API_URL = os.environ.get("ECODB_API_INTERNAL_URL", "http://ecodb-api:8080")
 _INTERNAL_SECRET = os.environ.get("INTERNAL_BROADCAST_SECRET", "")
 
 _CELL_LLM = None
-CELL_MODEL = os.environ.get("CELL_LLM_MODEL", "deepseek-flash")
+CELL_MODEL = os.environ.get("CELL_LLM_MODEL", settings.DEFAULT_LLM_MODEL)
 # LLM call timeout. Default None = no timeout (deepseek-v4-pro reasoning can take many
 # minutes on a large consolidation; recover_stuck_runs (60 min) is the safety net).
 # Set CELL_LLM_TIMEOUT=<seconds> to re-enable a cap.
@@ -206,6 +208,7 @@ async def _resolve_context(conn, agent_id):
 
 
 async def _create_run(conn, cell_type, agent_id, p_start, p_end):
+    _responded_models.set({"responded_models": set(), "system_fingerprints": set()})  # #716: new run
     return await conn.fetchval("""
         INSERT INTO cell_runs (cell_type, agent_id, model, prompt_version, metrics)
         VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id
@@ -216,11 +219,15 @@ async def _create_run(conn, cell_type, agent_id, p_start, p_end):
 async def _complete_run(conn, run_id, items_created):
     pv = _active_prompt_version()
     mdl = _active_model()
+    seen = _responded_models.get() or {}  # #716: what the API said answered
+    answered = {k: sorted(v) for k, v in seen.items() if v}
     await conn.execute("""
         UPDATE cell_runs SET finished_at=NOW(), status='completed',
-          items_created=$2, prompt_version=$3, model=$4
+          items_created=$2, prompt_version=$3, model=$4,
+          metrics = CASE WHEN $5::jsonb IS NULL THEN metrics ELSE metrics || $5::jsonb END
         WHERE id=$1 AND status='running'
-    """, run_id, items_created, pv, mdl)
+    """, run_id, items_created, pv, mdl,
+        json.dumps(answered) if answered else None)
 
 
 async def _fail_run(conn, run_id, error):
@@ -361,7 +368,7 @@ async def _llm_call(system_prompt: str, user_prompt: str) -> str:
 async def _llm_call_httpx(system_prompt: str, user_prompt: str) -> str:
     _key = os.environ.get("CELL_LLM_KEY") or os.environ.get("DEEPSEEK_API_KEY", "")
     _url = os.environ.get("CELL_LLM_URL", "https://api.deepseek.com")
-    _model = os.environ.get("CELL_LLM_MODEL", "deepseek-chat")
+    _model = os.environ.get("CELL_LLM_MODEL", CELL_MODEL)
     headers = {"Authorization": f"Bearer {_key}", "Content-Type": "application/json"}
     body = {
         "model": _model,
@@ -376,7 +383,9 @@ async def _llm_call_httpx(system_prompt: str, user_prompt: str) -> str:
     async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
         resp = await client.post(f"{_url}/v1/chat/completions", json=body, headers=headers)
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        _note_responded_model(data)
+        return data["choices"][0]["message"]["content"]
 
 
 async def _get_provider_key(conn, provider: str) -> str:
@@ -419,6 +428,25 @@ _PROVIDER_URLS = {
 # {"provider", "model", "key" (decrypted), "template" (str|None)}. None → default path.
 import contextvars as _contextvars
 _active_cell: "_contextvars.ContextVar[dict | None]" = _contextvars.ContextVar("active_cell", default=None)
+# #716: what answered each LLM call. DeepSeek ships new builds under the SAME name
+# (V4.1-Flash-1017 on 17-oct, still «deepseek-flash»), and its `model` field echoes the alias
+# (measured 23-oct), so the build change only shows in `system_fingerprint`. Both are kept:
+# reset by _create_run, written to cell_runs.metrics by _complete_run. The LangChain path
+# does not report them.
+_responded_models: "_contextvars.ContextVar[dict | None]" = _contextvars.ContextVar("responded_models", default=None)
+
+
+def _note_responded_model(data) -> None:
+    if not isinstance(data, dict):
+        return
+    seen = _responded_models.get()
+    if seen is None:
+        seen = {"responded_models": set(), "system_fingerprints": set()}
+        _responded_models.set(seen)
+    if data.get("model"):
+        seen["responded_models"].add(data["model"])
+    if data.get("system_fingerprint"):
+        seen["system_fingerprints"].add(data["system_fingerprint"])
 
 
 def _active_model() -> str:
@@ -466,7 +494,9 @@ async def _llm_call_with_key(system_prompt: str, user_prompt: str,
             resp = await client.post(f"{_PROVIDER_URLS['anthropic']}/v1/messages",
                                      json=body, headers=headers)
             resp.raise_for_status()
-            return resp.json()["content"][0]["text"]
+            data = resp.json()
+            _note_responded_model(data)
+            return data["content"][0]["text"]
     url = _PROVIDER_URLS.get(provider, f"https://api.{provider}.com")
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     body = {
@@ -482,11 +512,13 @@ async def _llm_call_with_key(system_prompt: str, user_prompt: str,
     async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
         resp = await client.post(f"{url}/v1/chat/completions", json=body, headers=headers)
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        _note_responded_model(data)
+        return data["choices"][0]["message"]["content"]
 
 
 async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
-                            provider: str = "deepseek", model: str = "deepseek-chat") -> str:
+                            provider: str = "deepseek", model: str = CELL_MODEL) -> str:
     """Route LLM call to correct provider with DB key lookup."""
     key = await _get_provider_key(conn, provider)
 
@@ -504,7 +536,9 @@ async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
             resp = await client.post(f"{_PROVIDER_URLS['anthropic']}/v1/messages",
                                      json=body, headers=headers)
             resp.raise_for_status()
-            return resp.json()["content"][0]["text"]
+            data = resp.json()
+            _note_responded_model(data)
+            return data["content"][0]["text"]
     else:
         url = _PROVIDER_URLS.get(provider, f"https://api.{provider}.com")
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
@@ -521,7 +555,9 @@ async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
         async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
             resp = await client.post(f"{url}/v1/chat/completions", json=body, headers=headers)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            data = resp.json()
+            _note_responded_model(data)
+            return data["choices"][0]["message"]["content"]
 
 
 _STYLE_NOTES = {

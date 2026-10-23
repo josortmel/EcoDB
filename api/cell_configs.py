@@ -13,6 +13,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+import settings
 from auth import get_current_user
 from db import get_pool
 from permissions import resolve_agent_for_actor
@@ -50,7 +51,7 @@ class CellConfigCreate(BaseModel):
     agent_identifier: str = Field(..., min_length=1, max_length=200)
     cell_type: str = Field(..., min_length=1, max_length=64, pattern="^[a-z0-9_]+$")
     enabled: bool = True
-    model: str = Field("deepseek-chat", min_length=1, max_length=128)
+    model: str = Field(settings.DEFAULT_LLM_MODEL, min_length=1, max_length=128)  # #716
     provider: str = Field("deepseek", min_length=1, max_length=64, pattern="^[a-z0-9_]+$")
     prompt_template_id: Optional[int] = None
     schedule_cron: Optional[str] = Field(None, max_length=128)
