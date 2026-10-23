@@ -87,8 +87,13 @@ class TripleCreate(BaseModel):
     predicate: str = Field(..., min_length=1, max_length=MAX_PREDICATE_LEN)
     object: str = Field(..., min_length=1, max_length=MAX_NODE_NAME_LEN)
     author: Optional[str] = Field(None, max_length=200)
+    # #569: lo que decidió el mapeo de predicados (lo manda el MCP). Antes no estaban
+    # declarados y pydantic los descartaba sin avisar.
+    original_predicate: Optional[str] = Field(None, max_length=MAX_PREDICATE_LEN)
+    mapper_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    needs_review: bool = False
 
-    @field_validator("subject", "predicate", "object", "author")
+    @field_validator("subject", "predicate", "object", "author", "original_predicate")
     @classmethod
     def _no_nb(cls, v):
         return _no_null_bytes(v, "field") if v is not None else v
@@ -102,6 +107,7 @@ class TripleResponse(BaseModel):
     object_id: int
     object_name: str
     author: Optional[str]
+    original_predicate: Optional[str] = None
 
 
 class TripleBatch(BaseModel):
@@ -579,12 +585,14 @@ async def create_triple(body: TripleCreate, actor: dict = Depends(get_current_us
             # ya existe — devuelve None y respondemos 409 limpio.
             row = await conn.fetchrow(
                 """
-                INSERT INTO triples (subject_id, predicate, object_id, author)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO triples (subject_id, predicate, object_id, author,
+                                     original_predicate, mapper_confidence, needs_review)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (subject_id, predicate, object_id) DO NOTHING
                 RETURNING id
                 """,
                 subj_id, body.predicate, obj_id, body.author,
+                body.original_predicate, body.mapper_confidence, body.needs_review,
             )
             if row is None:
                 raise HTTPException(409, "triple already exists")
@@ -605,6 +613,7 @@ async def create_triple(body: TripleCreate, actor: dict = Depends(get_current_us
         object_id=obj_id,
         object_name=body.object,
         author=body.author,
+        original_predicate=body.original_predicate,
     )
 
 
@@ -621,12 +630,14 @@ async def create_triples_batch(body: TripleBatch, actor: dict = Depends(get_curr
                 # ON CONFLICT DO NOTHING — duplicados se cuentan, no rompen la tx.
                 row = await conn.fetchrow(
                     """
-                    INSERT INTO triples (subject_id, predicate, object_id, author)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO triples (subject_id, predicate, object_id, author,
+                                         original_predicate, mapper_confidence, needs_review)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     ON CONFLICT (subject_id, predicate, object_id) DO NOTHING
                     RETURNING id
                     """,
                     subj_id, triple.predicate, obj_id, triple.author,
+                    triple.original_predicate, triple.mapper_confidence, triple.needs_review,
                 )
                 if row is None:
                     skipped += 1
@@ -640,6 +651,7 @@ async def create_triples_batch(body: TripleBatch, actor: dict = Depends(get_curr
                     object_id=obj_id,
                     object_name=triple.object,
                     author=triple.author,
+                    original_predicate=triple.original_predicate,
                 ))
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)

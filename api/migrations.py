@@ -37,6 +37,8 @@ MIGRATIONS: list[tuple[str, str]] = [
     ("5.3.1_higher_prompts_v2", "sql/seed_higher_prompts_v2.sql"),
     # #478: nodos buscados y emparejados sin tildes (unaccent + f_unaccent inmutable + índice).
     ("5.4.0_unaccent_nodes", "sql/migrate_5.4.0_unaccent_nodes.sql"),
+    # #569: columnas de revisión del mapeo de predicados (producción ya las tenía, sin migración).
+    ("5.4.1_triple_review_columns", "sql/migrate_5.4.1_triple_review_columns.sql"),
 ]
 
 _LOCK_KEY = 728_1990

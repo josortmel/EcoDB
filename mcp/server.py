@@ -852,16 +852,17 @@ def save_triple(
     resolution = _resolve_predicate(predicate)
     canonical_predicate = resolution["canonical"]
 
-    payload = {"subject": subject, "predicate": canonical_predicate, "object": object}
+    # #569: el predicado pedido se guarda SIEMPRE, también cuando no cambia,
+    # para poder medir después qué hizo el diccionario.
+    payload = {"subject": subject, "predicate": canonical_predicate, "object": object,
+               "original_predicate": resolution["original"]}
     if author is not None:
         payload["author"] = author
     if resolution["needs_review"]:
         payload["needs_review"] = True
         payload["mapper_confidence"] = resolution["confidence"]
-        payload["original_predicate"] = resolution["original"]
     elif resolution["original"] != canonical_predicate:
         payload["mapper_confidence"] = resolution["confidence"]
-        payload["original_predicate"] = resolution["original"]
     try:
         data = _api_call("POST", "/graph/triples", json=payload)
         resp = {
@@ -870,6 +871,9 @@ def save_triple(
             "subject": data.get("subject") or data.get("subject_name"),
             "predicate": canonical_predicate,
             "object": data.get("object") or data.get("object_name"),
+            # #569: el agente ve siempre lo que pidió y lo que se guardó.
+            "requested_predicate": resolution["original"],
+            "stored_predicate": canonical_predicate,
         }
         if resolution["original"] != canonical_predicate:
             resp["original_predicate"] = resolution["original"]
@@ -1070,19 +1074,29 @@ def save_triples_batch(
         res = _resolve_predicate(pred)
         resolved = dict(t)
         resolved["predicate"] = res["canonical"]
+        resolved["original_predicate"] = res["original"]  # #569: siempre
         if res["needs_review"]:
             resolved["needs_review"] = True
             resolved["mapper_confidence"] = res["confidence"]
-            resolved["original_predicate"] = res["original"]
         elif res["original"] != res["canonical"]:
             resolved["mapper_confidence"] = res["confidence"]
-            resolved["original_predicate"] = res["original"]
         resolved_triples.append(resolved)
     try:
         data = _api_call("POST", "/graph/triples/batch", json={"triples": resolved_triples})
+        created = data.get("created", [])
+        # #569: por cada tripleta creada, lo pedido y lo guardado. Los duplicados
+        # (ya existían) no salen en `created` y se cuentan en `skipped_duplicates`.
         return _ok({
             "status": "ok",
-            "count": data.get("created", 0),
+            "count": len(created) if isinstance(created, list) else created,
+            "skipped_duplicates": data.get("skipped_duplicates", 0),
+            "triples": [{
+                "id": c.get("id"),
+                "subject": c.get("subject_name"),
+                "requested_predicate": c.get("original_predicate"),
+                "stored_predicate": c.get("predicate"),
+                "object": c.get("object_name"),
+            } for c in created] if isinstance(created, list) else [],
         })
     except RuntimeError as e:
         return _err(e)
