@@ -328,6 +328,17 @@ docker compose restart mcp
   mirar si hay runs dentro de ecodb-cell/worker y avisar en la sala** (el 23-oct se cortó una prueba de Prima).
   Política de imágenes desde el 23-oct (#707, Pepe): la actual + UNA anterior + prevo. El almacén es containerd:
   quitar la etiqueta de un padre no rompe a sus hijas.
+- **Pendiente de desplegar el 26-oct (decisión 76 de Pepe):** en main, sin desplegar: fe3170a (#701, cada semana al
+  mes de su jueves, guarda de la última semana, aviso de cobertura), ab7fcca (#716, sin deepseek-chat por defecto;
+  cada run guarda `responded_models` y `system_fingerprints`: DeepSeek devuelve el ALIAS en `model`, así que la
+  versión solo se ve en el fingerprint) y 49fe607 (#717, las memorias de la célula con embedding y
+  `scripts/backfill_embeddings.py`, en seco por defecto; 97 por rellenar). Las tres van en cell_worker.py, así que
+  se despliegan juntas. La #701 NO se despliega sin mover antes los cron del mensual a los días 5-10: la guarda no
+  deja cerrar el mensual de octubre el 1-nov.
+- **El MCP de EcoDB tiene DOS caminos:** cada sesión lo arranca desde el repo por stdio (carga el código AL
+  ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
+  reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
+  (#569, 23-oct: la api nueva funcionaba y el MCP viejo de las sesiones seguía sin mandar original_predicate).
 - **Corrección del 23-oct:** torch SÍ está fijado (`api/constraints.txt`, #373). Lo que no está demostrado es que
   un build en frío reproduzca producción: `coldbuild494` salió con otro pip freeze (#712, mié 28).
 - **19-oct, 14:36 (#605): imagen viva `ecodb-api:0.25.0` = 65fbe310** = `0.25.0-pre605` (e1b51888, que era 0.25.0-561apt) +
