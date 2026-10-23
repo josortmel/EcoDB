@@ -315,6 +315,21 @@ docker compose restart mcp
   memorias. Avisos de Python 273 → 88, apt sin pendientes. **Inventario de avisos con `pip list --format=json`, nunca
   con `pip freeze`** (no lista pip/setuptools ni versiona los `@ file://`). Pendiente: transformers 5.10 + torch 2.13
   (#572) y docling (#573).
+- **23-oct, 10:28 (#569): imagen viva `ecodb-api:0.25.0` = b32663fb** = `0.25.0-pre569` (65fbe310, lo de abajo) +
+  `graph.py` y `migrations.py` de 7ebe953. Capa: `Hilo/_deploy494/Dockerfile.overlay569`. Volver atrás: retaguear
+  `0.25.0-pre569` y recrear api, worker y ecodb-cell. **Lo que arregla:** el MCP mandaba `original_predicate`,
+  `mapper_confidence` y `needs_review`, pero `TripleCreate` no los declaraba (pydantic los descartaba) y el INSERT
+  no los escribía. Ahora se guardan, y `save_triple(s)` devuelve `requested_predicate`/`stored_predicate`. Primera
+  tripleta con needs_review desde el MCP: 94763. **Deriva de esquema encontrada:** las 7 columnas extra de
+  `triples` (valid_from … original_predicate) y las tablas de predicados existían SOLO en producción, añadidas con
+  `scripts/` sin migración. La migración 5.4.1 crea las columnas con IF NOT EXISTS (en producción no hace nada);
+  **las tablas `predicates_canonical`/alias siguen sin migración** (deuda). **`/app/sql` es un bind mount del repo
+  del host** (no está en la imagen): una migración nueva la lee el contenedor desde el disco. **Antes de recrear:
+  mirar si hay runs dentro de ecodb-cell/worker y avisar en la sala** (el 23-oct se cortó una prueba de Prima).
+  Política de imágenes desde el 23-oct (#707, Pepe): la actual + UNA anterior + prevo. El almacén es containerd:
+  quitar la etiqueta de un padre no rompe a sus hijas.
+- **Corrección del 23-oct:** torch SÍ está fijado (`api/constraints.txt`, #373). Lo que no está demostrado es que
+  un build en frío reproduzca producción: `coldbuild494` salió con otro pip freeze (#712, mié 28).
 - **19-oct, 14:36 (#605): imagen viva `ecodb-api:0.25.0` = 65fbe310** = `0.25.0-pre605` (e1b51888, que era 0.25.0-561apt) +
   `classifier.py` de 5bc08fa: `classify_with_llm` cuenta y anota en `ecodb.perf` el MOTIVO de cada salida
   («classify_with_llm outcome=no_provider|empty|other|unknown_type|bad_json|classified»), sin cambiar lo que devuelve.
