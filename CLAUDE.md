@@ -339,6 +339,11 @@ docker compose restart mcp
   ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
   reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
   (#569, 23-oct: la api nueva funcionaba y el MCP viejo de las sesiones seguía sin mandar original_predicate).
+- **26-oct, 09:46 (#569, la mitad del MCP): imagen viva `ecodb-mcp:1.8.0` = 46fb40ea** = `1.8.0-pre569` (1d436f8c) +
+  `mcp/server.py` de 7ebe953 (md5 32c0cc0c, el mismo que el del host); pip freeze idéntico. Capa:
+  `Hilo/_deploy494/Dockerfile.overlay569-mcp`. Volver atrás: retaguear `1.8.0-pre569` y recrear mcp. Probado desde una
+  sesión real (la de Hilo, arrancada el 26 con el server.py del host): depende_de → original_predicate guardado;
+  was_investigated_on → supervisa con needs_review y requested/stored en la respuesta.
 - **Corrección del 23-oct:** torch SÍ está fijado (`api/constraints.txt`, #373). Lo que no está demostrado es que
   un build en frío reproduzca producción: `coldbuild494` salió con otro pip freeze (#712, mié 28).
 - **19-oct, 14:36 (#605): imagen viva `ecodb-api:0.25.0` = 65fbe310** = `0.25.0-pre605` (e1b51888, que era 0.25.0-561apt) +
