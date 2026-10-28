@@ -872,6 +872,50 @@ Reflect on each cluster. What happened? What mattered? What do you want your fut
             _reflection_text(parsed.get("lo_que_evitas")))
 
 
+LOOSE_LABEL = "Sueltas de la semana"
+
+
+def _cover_uncovered(memories, clusters):
+    """#702 coverage (Prima measured 28-oct: 17-46 % of every agent's memories were in NO weekly, the core
+    of «perdemos recuerdos»). A memory falls out in four places: a singleton group (dies at
+    MIN_CLUSTER_SIZE), an index the LLM leaves out, the dedup dropping an overlapping cluster with its
+    members, or a week with fewer than MIN_CLUSTER_SIZE memories. After all of them, deterministically:
+    each memory still outside joins the cluster whose centroid is most similar (metadata.coverage_added);
+    with no embedding, or with no cluster at all, it goes to ONE cluster per week, «Sueltas de la semana»,
+    with no narrative (so it never enters prev_narratives) and the start of each memory as detail, for the
+    rollup to read. Returns (clusters, ids added)."""
+    covered = {str(m) for c in clusters for m in c["member_ids"]}
+    loose = [m for m in memories if str(m["id"]) not in covered]
+    if not loose:
+        return clusters, []
+    cents = [(c, _parse_embedding(c["centroid"]) if c.get("centroid") else None) for c in clusters]
+    cents = [(c, v) for c, v in cents if v is not None and v.size]
+    rest, added = [], []
+    for m in loose:
+        e = _parse_embedding(m.get("embedding"))
+        if e is None or not e.size or not cents:
+            rest.append(m)
+            continue
+        best = max(cents, key=lambda cv: 1 - cosine_dist(cv[1], e) if cv[1].shape == e.shape else -2)[0]
+        best["member_ids"] = list(best["member_ids"]) + [m["id"]]
+        meta = best.setdefault("metadata", {})
+        meta.setdefault("coverage_added", []).append(str(m["id"]))
+        added.append(str(m["id"]))
+    if rest:
+        embs = [e for e in (_parse_embedding(m.get("embedding")) for m in rest) if e is not None and e.size]
+        clusters = list(clusters) + [{
+            "label": LOOSE_LABEL,
+            "detail": "\n".join(f"- {str(m.get('content') or '')[:300]}" for m in rest),
+            "narrative": None,
+            "centroid": _vec_literal(np.mean(embs, axis=0)) if embs and len({e.shape for e in embs}) == 1 else None,
+            "member_ids": [m["id"] for m in rest],
+            "pattern_flags": {},
+            "metadata": {"assigned_by": "coverage", "coverage_added": [str(m["id"]) for m in rest]},
+        }]
+        added += [str(m["id"]) for m in rest]
+    return clusters, added
+
+
 async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
     ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
     identity = await conn.fetch("""
@@ -1020,6 +1064,19 @@ async def _label_week_rollup(clusters, agent_id, conn):
     cluster_texts = [
         f"=== {c['label']} ===\n{c.get('narrative') or c.get('detail') or '(sin narrativa)'}"
         for c in clusters]
+    # #702: the memories coverage added to a cluster after its narrative was written; the rollup sees them
+    # so it can name the ones that weigh.
+    added = []
+    for c in clusters:
+        meta = c.get("metadata") or {}
+        if isinstance(meta, str):
+            meta = json.loads(meta)
+        if meta.get("assigned_by") != "coverage":
+            added += meta.get("coverage_added") or []
+    if added:
+        rows = await conn.fetch("SELECT content, weight FROM memories WHERE id = ANY($1::uuid[])", added)
+        cluster_texts.append("=== También de esta semana (no estaban en ningún relato) ===\n" + "\n".join(
+            f"- (w={r['weight']:.2f}) {str(r['content'])[:300]}" for r in rows))
     user_prompt = (
         f"Estos son los clusters tematicos de tu semana "
         f"{clusters[0]['period_start']} a {clusters[0]['period_end']}:\n\n"
@@ -1453,11 +1510,13 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             memories = [m for m in memories if m['id'] not in _woven
                         and week_start <= m['created_at'].date() <= week_end]
 
-            if len(memories) < MIN_CLUSTER_SIZE:
-                # #701: the week's lone memory is left out too — say so.
+            if not memories:
                 await _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
                 await _complete_run(conn, run_id, 0)
                 return run_id
+            # #702: a week with fewer memories than a cluster no longer loses them: they go to the week's
+            # «Sueltas» cluster below, without the thematic LLM call.
+            _small_week = len(memories) < MIN_CLUSTER_SIZE
 
             identity = await conn.fetch("""
                 SELECT content, fragment_idx, version FROM agent_identity
@@ -1511,24 +1570,32 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 ORDER BY a.identifier, mc.created_at DESC
             """, agent_id, week_start, week_end)
 
-            distance_matrix = await _compute_distances(conn, memories)
+            if _small_week:
+                cluster_data, arcos_que_cruzan, lo_que_evitas = [], "", ""
+            else:
+                distance_matrix = await _compute_distances(conn, memories)
 
-            cognition_class = await conn.fetchval(
-                "SELECT cognition_class FROM agents WHERE id=$1", agent_id) or 'work'
-            threshold = THRESHOLD_NARRATIVE if cognition_class == 'narrative' else THRESHOLD_WORK
-            labels = _cluster_agglomerative(distance_matrix, threshold)
+                cognition_class = await conn.fetchval(
+                    "SELECT cognition_class FROM agents WHERE id=$1", agent_id) or 'work'
+                threshold = THRESHOLD_NARRATIVE if cognition_class == 'narrative' else THRESHOLD_WORK
+                labels = _cluster_agglomerative(distance_matrix, threshold)
 
-            cross_agent_summary = {}
-            for r in cross_agent:
-                cross_agent_summary.setdefault(r["identifier"], []).append(r["label"])
+                cross_agent_summary = {}
+                for r in cross_agent:
+                    cross_agent_summary.setdefault(r["identifier"], []).append(r["label"])
 
-            cluster_data, arcos_que_cruzan, lo_que_evitas = await _llm_retry(
-                _label_clusters_llm, memories, labels, identity, ident,
-                [dict(r) for r in high_weight_mems],
-                [dict(r) for r in prev_narratives],
-                [r["content"] for r in calibration_mems],
-                [r["content"] for r in voice_samples],
-                cross_agent_summary)
+                cluster_data, arcos_que_cruzan, lo_que_evitas = await _llm_retry(
+                    _label_clusters_llm, memories, labels, identity, ident,
+                    [dict(r) for r in high_weight_mems],
+                    [dict(r) for r in prev_narratives],
+                    [r["content"] for r in calibration_mems],
+                    [r["content"] for r in voice_samples],
+                    cross_agent_summary)
+            # #702 coverage: no memory of the week is left outside every cluster.
+            cluster_data, _added = _cover_uncovered(memories, cluster_data)
+            if _added:
+                log.info("#702 coverage: %d memories of agent %d %s-%s added deterministically",
+                         len(_added), agent_id, week_start, week_end)
 
             async with conn.transaction():
                 cluster_records = []
