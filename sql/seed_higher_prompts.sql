@@ -110,12 +110,21 @@ ON CONFLICT (name) DO UPDATE SET content = EXCLUDED.content;
 -- Rewire consolidation configs to the level-specific templates (idempotent).
 -- Runs after seed_memory_agent.sql, which initially wires monthly/quarterly/yearly
 -- to the legacy "CellAgent Higher Consolidation".
+-- #708 (28-oct): migrations.py runs EVERY migration on every api start, so this used to repoint ALL configs on
+-- each restart, silently undoing a template chosen per agent (decision 81, 3283-3285). Only the configs still on
+-- the legacy template (or on none) are rewired now.
 UPDATE cell_task_configs SET prompt_template_id =
     (SELECT id FROM cell_prompt_templates WHERE name='CellAgent Monthly')
-    WHERE cell_type='consolidation' AND level='monthly';
+    WHERE cell_type='consolidation' AND level='monthly'
+      AND (prompt_template_id IS NULL OR prompt_template_id =
+           (SELECT id FROM cell_prompt_templates WHERE name='CellAgent Higher Consolidation'));
 UPDATE cell_task_configs SET prompt_template_id =
     (SELECT id FROM cell_prompt_templates WHERE name='CellAgent Quarterly')
-    WHERE cell_type='consolidation' AND level='quarterly';
+    WHERE cell_type='consolidation' AND level='quarterly'
+      AND (prompt_template_id IS NULL OR prompt_template_id =
+           (SELECT id FROM cell_prompt_templates WHERE name='CellAgent Higher Consolidation'));
 UPDATE cell_task_configs SET prompt_template_id =
     (SELECT id FROM cell_prompt_templates WHERE name='CellAgent Yearly')
-    WHERE cell_type='consolidation' AND level='yearly';
+    WHERE cell_type='consolidation' AND level='yearly'
+      AND (prompt_template_id IS NULL OR prompt_template_id =
+           (SELECT id FROM cell_prompt_templates WHERE name='CellAgent Higher Consolidation'));
