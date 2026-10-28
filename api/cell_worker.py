@@ -767,16 +767,38 @@ async def _label_clusters_llm(memories, labels, identity, agent_identifier,
         calibration_texts or [], voice_samples or [],
         cross_agent_context or {})
 
-    user_prompt = f"""These are your memories from this week, grouped into clusters:
+    async def _ask(groups):
+        # #808: only the memories of these groups go in, each with its ORIGINAL index, so a half's
+        # member_indices still point at `memories`.
+        idx = sorted(i for g in groups.values() for i in g)
+        user_prompt = f"""These are your memories from this week, grouped into clusters:
 
-{chr(10).join(mem_texts)}
+{chr(10).join(mem_texts[i] for i in idx)}
 
-Pre-computed clusters (by memory index): {json.dumps(cluster_groups)}
+Pre-computed clusters (by memory index): {json.dumps(groups)}
 
 Reflect on each cluster. What happened? What mattered? What do you want your future self to feel when reading this?"""
+        raw = await _llm_call(system_prompt, user_prompt)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # #808: a busy week's answer gets CUT (measured: «Unterminated string … char 19100»,
+            # far below max_tokens) and #393 then split the WEEK by days. Ask for the groups in two
+            # halves instead and merge them: the week stays whole. A single group that still does
+            # not fit raises as before, and the day split remains the last resort.
+            if len(groups) < 2:
+                raise
+            keys = list(groups)
+            half = len(keys) // 2
+            log.warning("#808 cell answer unreadable for %d clusters of %s: asking in halves (%d + %d)",
+                        len(keys), agent_identifier, half, len(keys) - half)
+            a = await _ask({k: groups[k] for k in keys[:half]})
+            b = await _ask({k: groups[k] for k in keys[half:]})
+            return {"clusters": (a.get("clusters") or []) + (b.get("clusters") or []),
+                    "arcos_que_cruzan": a.get("arcos_que_cruzan") or b.get("arcos_que_cruzan"),
+                    "lo_que_evitas": a.get("lo_que_evitas") or b.get("lo_que_evitas")}
 
-    raw = await _llm_call(system_prompt, user_prompt)
-    parsed = json.loads(raw)
+    parsed = await _ask(cluster_groups)
     result = []
     for cl in parsed.get("clusters", []):
         indices = cl.get("member_indices", [])

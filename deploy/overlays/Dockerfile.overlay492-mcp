@@ -1,0 +1,5 @@
+# #492 (28-oct): imagen viva ecodb-mcp:1.8.0 (46fb40ea) + mcp/server.py de fcec1bc (un argumento que la tool no
+# declara falla diciendo cuál, en vez de descartarse en silencio; ArgModelBase extra=forbid). Solo cambia server.py.
+# Volver atrás: retaguear 1.8.0-pre492 y recrear mcp.
+FROM ecodb-mcp:1.8.0-pre492
+COPY --chown=mcpuser:mcpuser mcp/server.py /app/server.py
