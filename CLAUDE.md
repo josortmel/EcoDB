@@ -358,6 +358,29 @@ docker compose restart mcp
   segundo EcoDB en el mismo Docker (o un clon en una carpeta `EcoDB`) recrea los contenedores de producción.
   **Tests:** la imagen de la api no trae `respx` ni `mcp`; los tests que los importan dan error de colección en vieja y
   nueva por igual (no es «sin regresión», es «no medido»): instalar respx en el run y correr los de mcp en el anfitrión.
+- **28-oct, tarde: DESPLEGADO TODO lo anterior + el encargo de Pepe de la memoria** («solucionemos de una vez el
+  problema de la memoria… aunque implique rehacer todos los semanales, mensuales y trimestrales»). Viva:
+  `ecodb-api:0.25.0` = c3650d3 (cell_worker md5 ff86d2a5), `ecodb-mcp:1.8.0` = fcec1bc. Vuelta atrás por etiquetas:
+  `0.25.0-pre701` (b32663fb, lo de antes de hoy), `-701` (#808), `-702` (3e37e74); mcp `1.8.0-pre492`. Volcado previo:
+  `backups/pre784_20261028_1830.sql.gz` (7 496 memorias, comprobado). Lo nuevo, todo en `cell_worker.py`:
+  (1) **#808** la salida de la célula se CORTA hacia los 6-8k tokens aunque pidamos 32768 (`Unterminated string … char
+  19100`), y #393 partía la semana por días (semanales de 19-22 y 23-25). Ahora un JSON ilegible se vuelve a pedir por
+  MITADES de los grupos (cada mitad con sus memorias y sus índices originales): la semana queda entera.
+  (2) **#702** la semana está hecha por lo que EXISTE (`_weekly_done`: run en curso, semanal activo dentro de la semana o
+  semana vacía ya corrida), no por un run viejo: antes una semana superseded no se podía rehacer nunca. Y el contexto de
+  una semana NO lleva nada posterior (prev_narratives, calibración y voz acotados al fin de la semana).
+  (3) **#702 cobertura** (Prima midió 17-46 % de memorias en NINGÚN semanal, el «perdemos recuerdos»): se caían por el
+  grupo de una sola, el índice que el LLM omite, la deduplicación y la semana pequeña. `_cover_uncovered`: cada suelta
+  entra en el cluster de centroide más parecido (`metadata.coverage_added`); sin embedding o sin clusters, en «Sueltas
+  de la semana» (sin narrativa: no entra en prev_narratives). El rollup ve las añadidas.
+  **OJO:** `POST /cells/trigger/consolidation` llama a `run_consolidation` directo y **no** dispara la cadena
+  (`_cascade_up` solo va en `_run_from_config`): para regenerar, los mensuales y trimestrales se lanzan aparte, en orden.
+  El catch-up de la célula al reiniciar construye la ÚLTIMA semana cerrada de cada agente: si sus clusters están
+  superseded, la rehace (fuera de orden si se está regenerando). **Regeneración (#702):** `Hilo/_deploy494/regen702.py`
+  (super key del contenedor ecodb-mcp; por agente supersede TODOS los niveles primero, luego semanas → meses →
+  trimestres en orden; reanuda y rehace lo construido fuera de orden). El 28-oct quedó A MEDIAS: Claude Code mató el
+  proceso por poca memoria del PC a las 19:00 (Eco hasta 26-abr, Hilo hasta 14-jun, Prima con 9 semanas; el resto sin
+  tocar). Tests: test_cell_truncated_week, test_weekly_rebuild, test_cell_coverage (61 de célula en verde).
 - **El MCP de EcoDB tiene DOS caminos:** cada sesión lo arranca desde el repo por stdio (carga el código AL
   ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
   reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
