@@ -169,6 +169,29 @@ def _reflection_member_ids(memories):
     return [m['id'] for m in top]
 
 
+async def _weekly_done(conn, agent_id, week_start, week_end) -> bool:
+    """#702 (28-oct, Pepe: «solucionemos de una vez el problema de la memoria, aunque implique rehacer todo»):
+    a week is done by its OUTPUT, like the higher levels (day 101), not by an old run record. Done = a run in
+    progress, an active weekly cluster inside the week (the #393 halves count), or an empty week already run
+    (completed with 0 items and no split). A week whose clusters were superseded to rebuild it runs again;
+    before, any completed run blocked it for ever, and the split marker's whole-week run did too."""
+    if await conn.fetchval("""
+        SELECT 1 FROM cell_runs WHERE agent_id=$1 AND cell_type='consolidation' AND status='running'
+          AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3 LIMIT 1
+    """, agent_id, str(week_start), str(week_end)):
+        return True
+    if await conn.fetchval("""
+        SELECT 1 FROM memory_clusters WHERE agent_id=$1 AND level='weekly' AND status='active'
+          AND period_start >= $2 AND period_end <= $3 LIMIT 1
+    """, agent_id, week_start, week_end):
+        return True
+    return bool(await conn.fetchval("""
+        SELECT 1 FROM cell_runs WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
+          AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3
+          AND COALESCE(items_created, 0) = 0 AND NOT (metrics ? 'split_into') LIMIT 1
+    """, agent_id, str(week_start), str(week_end)))
+
+
 async def _mark_split_complete(conn, agent_id, p_start, mid, p_end):
     """#393: a week whose JSON failed is split in two halves, and each half completes with ITS period.
     _check_idempotency looks for the whole week's exact period, never finds it, and the catch-up relaunched
@@ -1392,7 +1415,7 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             log.info("Lock held for agent %d %s-%s, skipping", agent_id, week_start, week_end)
             return None
         try:
-            if await _check_idempotency(conn, agent_id, 'consolidation', week_start, week_end):
+            if await _weekly_done(conn, agent_id, week_start, week_end):
                 log.info("Already consolidated agent %d %s-%s", agent_id, week_start, week_end)
                 # Thematic clustering done — but the unified weekly artifact
                 # may still be missing (backfill path for already-closed weeks).
@@ -1453,25 +1476,30 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 week_start - timedelta(days=3),
                 week_end + timedelta(days=3))
 
+            # #702: nothing from AFTER the week goes into its context. Rebuilding March used to feed it
+            # October's narratives, calibration and voice samples (the query had no date bound); the
+            # higher levels already had it (period_end < p_start).
+            _after_week = datetime.combine(week_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
             calibration_mems = await conn.fetch("""
                 SELECT content FROM memories
-                WHERE agent_id=$1 AND 'calibration' = ANY(tags)
+                WHERE agent_id=$1 AND 'calibration' = ANY(tags) AND created_at < $2
                 ORDER BY weight DESC, created_at DESC LIMIT 5
-            """, agent_id)
+            """, agent_id, _after_week)
 
             voice_samples = await conn.fetch("""
                 SELECT content FROM memories
                 WHERE agent_id=$1 AND type='momento' AND weight >= 0.7
-                  AND length(content) > 200
+                  AND length(content) > 200 AND created_at < $2
                 ORDER BY weight DESC, created_at DESC LIMIT 3
-            """, agent_id)
+            """, agent_id, _after_week)
 
             prev_narratives = await conn.fetch("""
                 SELECT label, narrative, period_start, period_end
                 FROM memory_clusters
                 WHERE agent_id=$1 AND status='active' AND narrative IS NOT NULL
+                  AND period_end < $2
                 ORDER BY period_end DESC LIMIT 3
-            """, agent_id)
+            """, agent_id, week_start)
 
             cross_agent = await conn.fetch("""
                 SELECT a.identifier, mc.label
