@@ -940,6 +940,22 @@ Recibes los clusters tematicos que TU misma celula produjo para UNA semana — c
 Return JSON: {{"label": "2-7 words personal", "narrative": "primera persona, 400-600 palabras, una sola narrativa semanal tejida", "detail": "2-3 lineas factuales para indexado"}}"""
 
 
+async def _week_rollup_template(conn, agent_id):
+    """#701 (4), Prima 26-oct: the week rollup is a second prompt inside the weekly run, so
+    the weekly config's prompt_template_id does not reach it. An agent can override it with
+    `config.week_rollup_template_id` in its weekly consolidation row; without it, the shared
+    template by name, as before."""
+    cfg = await _load_cell_config(conn, agent_id, 'consolidation', 'weekly')
+    tid = (cfg.get("config") or {}).get("week_rollup_template_id")
+    if tid:
+        own = await conn.fetchval("SELECT content FROM cell_prompt_templates WHERE id=$1", int(tid))
+        if own:
+            return own
+        log.warning("week rollup template %s of agent %d not found: using the shared one", tid, agent_id)
+    return await conn.fetchval(
+        "SELECT content FROM cell_prompt_templates WHERE name='CellAgent Week Rollup'")
+
+
 async def _label_week_rollup(clusters, agent_id, conn):
     ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
     identity = await conn.fetch("""
@@ -949,8 +965,7 @@ async def _label_week_rollup(clusters, agent_id, conn):
     identity_text = "\n---\n".join(r["content"] for r in identity) if identity else "(no identity)"
     style = _STYLE_NOTES.get(ident, "")
 
-    template = await conn.fetchval(
-        "SELECT content FROM cell_prompt_templates WHERE name='CellAgent Week Rollup'")
+    template = await _week_rollup_template(conn, agent_id)
     system_prompt = _safe_format(
         template or _WEEK_ROLLUP_FALLBACK,
         agent_identifier=ident,
@@ -1622,45 +1637,113 @@ async def _embed_for_memory(text):
 
 
 def _last_week_of_period(p_end):
-    """#701: (monday, sunday) of the last ISO week whose Thursday falls on or before
-    p_end, i.e. the last week that feeds the period ending on p_end. It may end up
-    to 3 days after p_end (a month ending on a Thursday ends its week on the 3rd)."""
+    """#701 (decision 76): (monday, sunday) of the ISO week that CONTAINS p_end — the last
+    week that touches the period, so the last one its monthly needs. It ends up to 6 days
+    after p_end (a month ending on a Monday waits for the Sunday after)."""
     monday = p_end - timedelta(days=p_end.weekday())
-    if monday + timedelta(days=3) > p_end:
-        monday -= timedelta(days=7)
     return monday, monday + timedelta(days=6)
 
 
-async def _last_week_done(conn, agent_id, p_end):
-    """#701 guard: the weekly consolidation of the period's last week has COMPLETED.
-    It looks at the run, not at clusters: a week with fewer than 2 own memories
-    completes its run with no cluster and must still count as done (Prima, 23-oct)."""
-    w_start, w_end = _last_week_of_period(p_end)
+def _last_source_period(source_level, p_end):
+    """#701: the period of the LAST source a level needs before it may be sealed: the week
+    containing the month's last day, the monthly of the quarter's last month, the
+    quarterly ending the year (Q4)."""
+    if source_level == 'weekly':
+        return _last_week_of_period(p_end)
+    if source_level == 'monthly':
+        return p_end.replace(day=1), p_end
+    if source_level == 'quarterly':
+        return p_end.replace(month=10, day=1), p_end
+    raise ValueError(f"unknown source level: {source_level}")
+
+
+async def _run_completed(conn, agent_id, p_start, p_end):
+    """A consolidation run for exactly [p_start, p_end] has COMPLETED (any level: the period
+    tells them apart)."""
     return await conn.fetchval("""
         SELECT 1 FROM cell_runs
         WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
           AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3
         LIMIT 1
-    """, agent_id, str(w_start), str(w_end)) is not None
+    """, agent_id, str(p_start), str(p_end)) is not None
+
+
+async def _source_done(conn, agent_id, source_level, p_end):
+    """#701 guard: the consolidation of the level's last source has COMPLETED. It looks at
+    the run, not at clusters: a week with fewer than 2 own memories (or a month with fewer
+    than 2 weeklies) completes its run with no cluster and must still count as done
+    (Prima, 23-oct)."""
+    return await _run_completed(conn, agent_id, *_last_source_period(source_level, p_end))
+
+
+def _periods_closed_by(level, p_start, p_end):
+    """#701 (decision 76, «secuenciarlos»): the upper periods whose LAST source is the one
+    that just finished: a week containing a month's last day closes that month; the monthly
+    of a quarter's last month closes the quarter; the Q4 quarterly closes the year.
+    [(upper_level, start, end)], at most one level up — the chain climbs one step per run."""
+    if level == 'weekly':
+        out = []
+        d = p_start
+        while d <= p_end:
+            if (d + timedelta(days=1)).day == 1:
+                out.append(('monthly', d.replace(day=1), d))
+            d += timedelta(days=1)
+        return out
+    if level == 'monthly' and p_end.month in (3, 6, 9, 12):
+        return [('quarterly', p_end.replace(month=p_end.month - 2, day=1), p_end)]
+    if level == 'quarterly' and p_end.month == 12:
+        return [('yearly', date(p_end.year, 1, 1), p_end)]
+    return []
+
+
+async def _upper_config_enabled(conn, agent_id, level):
+    return await conn.fetchval("""
+        SELECT 1 FROM cell_task_configs
+        WHERE agent_id=$1 AND cell_type='consolidation' AND level=$2 AND enabled=true
+    """, agent_id, level) is not None
+
+
+async def _cascade_up(pool, agent_id, level, p_start, p_end):
+    """#701: when a consolidation finishes, run the upper levels that were waiting for it, with
+    their OWN period and their own config (model, template), instead of waiting for next
+    month's cron. Only levels the agent has enabled; it climbs while each step seals."""
+    for up_level, up_start, up_end in _periods_closed_by(level, p_start, p_end):
+        async with pool.acquire() as conn:
+            if not await _upper_config_enabled(conn, agent_id, up_level):
+                continue
+        log.info("Cascade: %s agent=%s %s..%s after %s %s..%s",
+                 up_level, agent_id, up_start, up_end, level, p_start, p_end)
+        run_ctx = await _resolve_run_context(pool, agent_id, 'consolidation', up_level)
+        token = _active_cell.set(run_ctx) if run_ctx else None
+        try:
+            out = await _BUILTIN_DISPATCH[('consolidation', up_level)](
+                pool, agent_id, None, up_start, up_end)
+        except Exception:
+            log.exception("Cascade %s agent %d %s..%s failed", up_level, agent_id, up_start, up_end)
+            continue
+        finally:
+            if token is not None:
+                _active_cell.reset(token)
+        if out is not None:
+            await _cascade_up(pool, agent_id, up_level, up_start, up_end)
 
 
 async def _select_higher_sources(conn, agent_id, source_level, p_start, p_end):
     """Active clusters of `source_level` that feed the period [p_start, p_end].
 
-    #701: a weekly belongs to the month of the THURSDAY of its ISO week (the ISO
-    rule), so a week that crosses a month (or year) boundary lands in exactly one
-    month. Before, the filter was containment (period_start >= p_start AND
-    period_end <= p_end) and a crossing week fitted in no month: orphaned forever.
-    The Thursday comes from the ISO week of period_start, so the #393 half-weeks
-    (e.g. Fri-Sun) go with their week. Monthly and quarterly sources are aligned
-    with their parent periods, so containment stays for them.
+    #701, decision 76 (Pepe, 26-oct): a monthly takes EVERY week that shares at least one
+    day with the month, by both edges — a boundary week feeds TWO monthlies on purpose
+    («gradiente temporal de continuidad»). Before, the filter was containment and a crossing
+    week fitted in no month: orphaned forever. Overlap also takes the #393 half-weeks.
+    Monthly and quarterly sources are aligned with their parent periods, so containment
+    stays for them (a quarterly takes its 3 monthlies; a yearly its 4 quarterlies).
 
     Lineage filter: skip sources already absorbed by an active same-level
     cluster (thematic weeklies under a week rollup), or the monthly would eat
     the same week twice.
     """
     if source_level == 'weekly':
-        in_period = "(date_trunc('week', mc.period_start)::date + 3) BETWEEN $3 AND $4"
+        in_period = "mc.period_start <= $4 AND mc.period_end >= $3"
     else:
         in_period = "mc.period_start >= $3 AND mc.period_end <= $4"
     return await conn.fetch(f"""
@@ -1685,18 +1768,26 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
                                         p_start, p_end, cluster_level=level):
                 return None
 
-            # #701: never seal a monthly before its last week has been consolidated —
-            # idempotency would then keep that week out forever. Not sealing means the
-            # (daily, idempotent) cron tries again the next day.
-            if source_level == 'weekly' and not await _last_week_done(conn, agent_id, p_end):
-                w_start, w_end = _last_week_of_period(p_end)
-                log.warning("monthly agent %d %s..%s NOT built: last week %s..%s not consolidated yet",
-                            agent_id, p_start, p_end, w_start, w_end)
+            # #701: never seal a level before its last source has been consolidated —
+            # idempotency would then keep that source out forever (L111). Not sealing means
+            # the cascade (_cascade_up, when the source finishes) or the retry sweep builds it.
+            if not await _source_done(conn, agent_id, source_level, p_end):
+                s_start, s_end = _last_source_period(source_level, p_end)
+                log.warning("%s agent %d %s..%s NOT built: last %s %s..%s not done yet",
+                            level, agent_id, p_start, p_end, source_level, s_start, s_end)
                 return None
 
             sources = await _select_higher_sources(conn, agent_id, source_level, p_start, p_end)
 
             if len(sources) < min_sources:
+                # #701: all its sources exist and they are too few: the period is DONE with 0
+                # pieces, or the level above would wait forever for a run that never comes.
+                # Recorded once (a second pass finds it and leaves it).
+                if not await _run_completed(conn, agent_id, p_start, p_end):
+                    run_id = await _create_run(conn, 'consolidation', agent_id, p_start, p_end)
+                    await conn.execute("UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1",
+                                       run_id, json.dumps({"too_few_sources": len(sources)}))
+                    await _complete_run(conn, run_id, 0)
                 return None
 
             run_id = await _create_run(conn, 'consolidation', agent_id, p_start, p_end)
@@ -2175,13 +2266,24 @@ async def _run_from_config(pool, cfg_row):
             p_start, p_end = _default_period(level, today)
         run_ctx = await _resolve_run_context(pool, agent_id, cell_type, level)
         token = _active_cell.set(run_ctx) if run_ctx else None
+        ok = False
         try:
             await handler(pool, agent_id, cfg_row, p_start, p_end)
+            ok = True
         except Exception:
             log.exception("Cell %s/%s agent %d failed", cell_type, level, agent_id)
         finally:
             if token is not None:
                 _active_cell.reset(token)
+        # #701: here and not inside the run functions, because here the period is the WHOLE
+        # week even when the run split it in halves (#393) — the half that holds the month's
+        # last day can finish before the other one. Also when the run was already done
+        # (idempotent): an upper level that missed its cascade (restart) gets it now.
+        if ok and cell_type == "consolidation" and level:
+            try:
+                await _cascade_up(pool, agent_id, level, p_start, p_end)
+            except Exception:
+                log.exception("Cascade after %s agent %d failed", level, agent_id)
     else:
         log.warning("No built-in handler for %s/%s — generic handler not yet available", cell_type, level)
 

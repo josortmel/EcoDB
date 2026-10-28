@@ -328,13 +328,24 @@ docker compose restart mcp
   mirar si hay runs dentro de ecodb-cell/worker y avisar en la sala** (el 23-oct se cortó una prueba de Prima).
   Política de imágenes desde el 23-oct (#707, Pepe): la actual + UNA anterior + prevo. El almacén es containerd:
   quitar la etiqueta de un padre no rompe a sus hijas.
-- **Pendiente de desplegar el 26-oct (decisión 76 de Pepe):** en main, sin desplegar: fe3170a (#701, cada semana al
-  mes de su jueves, guarda de la última semana, aviso de cobertura), ab7fcca (#716, sin deepseek-chat por defecto;
-  cada run guarda `responded_models` y `system_fingerprints`: DeepSeek devuelve el ALIAS en `model`, así que la
-  versión solo se ve en el fingerprint) y 49fe607 (#717, las memorias de la célula con embedding y
-  `scripts/backfill_embeddings.py`, en seco por defecto; 97 por rellenar). Las tres van en cell_worker.py, así que
-  se despliegan juntas. La #701 NO se despliega sin mover antes los cron del mensual a los días 5-10: la guarda no
-  deja cerrar el mensual de octubre el 1-nov.
+- **Pendiente de desplegar (antes del dom 1-nov):** en main, sin desplegar: ab7fcca (#716, sin deepseek-chat por
+  defecto; cada run guarda `responded_models` y `system_fingerprints`: DeepSeek devuelve el ALIAS en `model`, así que
+  la versión solo se ve en el fingerprint), 49fe607 (#717, las memorias de la célula con embedding y
+  `scripts/backfill_embeddings.py`, en seco por defecto; 97 por rellenar) y la #701 tal como la dejó la **decisión 76
+  de Pepe (26-oct; código del 28-oct, sustituye a la regla del jueves de fe3170a):** (1) el mensual coge TODA semana que toque el mes, por
+  solapamiento (`period_start <= fin AND period_end >= inicio`): una semana de borde entra en DOS mensuales a propósito;
+  trimestral y anual siguen por contención; (2) ningún nivel se sella sin su ÚLTIMA fuente hecha (`_source_done`: la
+  semana que CONTIENE el último día del mes, el mensual del último mes del trimestre, el trimestral de diciembre), y un
+  periodo con la fuente hecha pero <2 fuentes queda como run completado con 0 piezas (si no, el de arriba esperaría para
+  siempre); (3) **cadena** (`_cascade_up`, llamada desde `_run_from_config` con la semana ENTERA, también cuando el run ya
+  estaba hecho): una semana que contiene un fin de mes lanza ese mensual con su propia config; un mensual de fin de
+  trimestre, el trimestral; el Q4, el anual. Los cron se quedan (día 1, 2 y 3): el del día 1 encuentra la guarda y no
+  sella; el mensual lo construye la cadena cuando termina la última semana (lunes 09:00 o 03:00, según el agente);
+  (4) override por agente de la plantilla del rollup semanal: `config.week_rollup_template_id` en la fila
+  consolidation/weekly del agente; sin él, la de siempre por nombre. Las tres van en cell_worker.py: se despliegan juntas.
+  Medido el 28-oct (solo lectura): 269 semanales de arriba; 72 fuera de todo mensual con la contención; con la regla
+  nueva 22 = 18 de octubre (su mensual aún no existe) + 4 de meses que nunca tuvieron mensual (Faro 1-7 jun, Helena
+  15-21 jun y 6-12 jul, Lienzo 22-28 abr). Tests: `api/tests/test_week_month_assignment.py` (29).
 - **El MCP de EcoDB tiene DOS caminos:** cada sesión lo arranca desde el repo por stdio (carga el código AL
   ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
   reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
