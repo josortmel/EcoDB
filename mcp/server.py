@@ -1752,7 +1752,7 @@ def narrate_cluster(cluster_id: str, narrative: str) -> dict:
 
     Args:
       cluster_id: UUID del cluster.
-      narrative: texto de la narrativa (1-5000 chars).
+      narrative: texto de la narrativa (1-32000 chars).
     """
     if not _UUID_RE.match(cluster_id):
         return _err(RuntimeError("cluster_id must be a valid UUID"))

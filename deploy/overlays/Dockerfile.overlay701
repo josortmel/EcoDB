@@ -1,6 +1,6 @@
 # #701 (decisión 76: semanas completas en el mensual, guarda por nivel, cadena hacia arriba, override del rollup)
 # + #716 (sin deepseek-chat por defecto; el run guarda responded_models/system_fingerprints)
-# + #717 (las memorias de la célula con embedding). Imagen viva b32663fb (0.25.0 = 0.25.0-569) + los 3 ficheros.
+# + #717 (las memorias de la célula con embedding) + #603 (narrate hasta 32 000 caracteres, clusters.py). Imagen viva b32663fb (0.25.0 = 0.25.0-569) + los 3 ficheros.
 # llm_provider.py difiere de la imagen SOLO en fin de línea (medido el 28-oct): no viaja.
 FROM ecodb-api:0.25.0-pre701
-COPY --chown=apiuser:apiuser api/cell_worker.py api/cell_configs.py api/settings.py ./
+COPY --chown=apiuser:apiuser api/cell_worker.py api/cell_configs.py api/settings.py api/clusters.py ./

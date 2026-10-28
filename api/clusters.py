@@ -82,7 +82,9 @@ class ClusterSourcesResponse(BaseModel):
 
 class NarrateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    narrative: str = Field(..., min_length=1, max_length=5000)
+    # #603: los mensuales/trimestrales de la célula pasan de 5000 (medido 28-oct: hasta 22 256);
+    # el tope es el de las plantillas (cell_prompt_templates_content_length).
+    narrative: str = Field(..., min_length=1, max_length=32000)
 
 
 class ClusterStatusBody(BaseModel):
