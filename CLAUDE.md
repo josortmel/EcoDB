@@ -346,6 +346,18 @@ docker compose restart mcp
   Medido el 28-oct (solo lectura): 269 semanales de arriba; 72 fuera de todo mensual con la contención; con la regla
   nueva 22 = 18 de octubre (su mensual aún no existe) + 4 de meses que nunca tuvieron mensual (Faro 1-7 jun, Helena
   15-21 jun y 6-12 jul, Lienzo 22-28 abr). Tests: `api/tests/test_week_month_assignment.py` (29).
+- **28-oct (Hilo), en main sin desplegar, van todos en #784 (jue 29):** #603 (2d40b04) `narrate` admite hasta 32 000
+  caracteres (medido: trimestrales de hasta 22 256); #792 (5c0d453) `parsers.py` quita el decodificador FlashPix de
+  Pillow al importarse (GHSA-5x8w crítico, Pillow ≤ 12.3.0; en la api estaba registrado porque hay olefile; en
+  embeddings no). La capa es `deploy/overlays/Dockerfile.overlay701` (5 módulos: cell_worker, cell_configs, settings,
+  clusters, parsers). **#492 (fcec1bc) ya está vivo por stdio**: un argumento que una tool no declara es ERROR que lo
+  nombra (antes se descartaba en silencio y `search(agent=…)` buscaba sin filtro); el contenedor ecodb-mcp lo coge con
+  su capa en #784. **La cadena que fabrica producción y el inventario de las imágenes vivas están en git:**
+  `deploy/CADENA.md`, `deploy/overlays/`, `deploy/inventario/` (Python reproducible: 174/174 pins = la viva; apt no).
+  **Trampa de compose:** `docker-compose.yml` fija `container_name` y el proyecto se llama `ecodb` por la carpeta: un
+  segundo EcoDB en el mismo Docker (o un clon en una carpeta `EcoDB`) recrea los contenedores de producción.
+  **Tests:** la imagen de la api no trae `respx` ni `mcp`; los tests que los importan dan error de colección en vieja y
+  nueva por igual (no es «sin regresión», es «no medido»): instalar respx en el run y correr los de mcp en el anfitrión.
 - **El MCP de EcoDB tiene DOS caminos:** cada sesión lo arranca desde el repo por stdio (carga el código AL
   ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
   reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
