@@ -1,0 +1,5 @@
+# #386 fase 1: ecodb-mcp:1.8.0 + mcp 1.29.1 (parche de seguridad de la rama 1.x).
+FROM ecodb-mcp:1.8.0-pre386
+USER root
+RUN pip install --no-cache-dir "mcp[cli]==1.29.1"
+USER mcpuser

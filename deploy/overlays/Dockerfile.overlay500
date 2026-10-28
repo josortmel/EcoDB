@@ -1,0 +1,3 @@
+# #393 + #500: imagen viva antes del #393 (0.25.0-pre393 = c725e774) + cell_worker.py de 7d9bb0e.
+FROM ecodb-api:0.25.0-pre393
+COPY --chown=apiuser:apiuser api/cell_worker.py ./

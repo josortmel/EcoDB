@@ -1,0 +1,5 @@
+# #569: imagen viva 65fbe310 (0.25.0 = 0.25.0-605) + graph.py y migrations.py de 7ebe953 + la migración 5.4.1
+# (columnas de revisión de triples, IF NOT EXISTS: en producción no cambia nada).
+FROM ecodb-api:0.25.0-pre569
+COPY --chown=apiuser:apiuser api/graph.py api/migrations.py ./
+COPY --chown=apiuser:apiuser sql/migrate_5.4.1_triple_review_columns.sql ./sql/

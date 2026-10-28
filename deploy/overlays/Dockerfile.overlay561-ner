@@ -1,0 +1,6 @@
+# #561 tanda 1 (16-oct): parches que no tocan el modelo, versión mínima que cierra los avisos (osv_min.py).
+# ner: setuptools se queda en 81 (torch 2.12.1+cpu exige <82); sus 2 avisos van con torch 2.13.
+FROM ecodb-ner:1.0.0-pre561
+USER root
+RUN pip install --no-cache-dir fastapi==0.141.0 starlette==1.7.0 anyio==4.14.2 pip==26.2.0
+USER neruser

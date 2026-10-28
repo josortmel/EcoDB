@@ -1,0 +1,4 @@
+# #513: reconstruye la imagen viva (e9578fd8 = pre494 + los 4 módulos del #478, que Docker borró al perder la etiqueta)
+# y añade graph.py de f0debe1 (search_nodes solo nodos activos). Base: 0.25.0-pre494 (92459ef1), la de producción antes del #478.
+FROM ecodb-api:0.25.0-pre494
+COPY --chown=apiuser:apiuser api/gliner_service.py api/graph.py api/main.py api/migrations.py ./

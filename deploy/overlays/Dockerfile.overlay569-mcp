@@ -1,0 +1,4 @@
+# #569 (26-oct): imagen viva ecodb-mcp:1.8.0 (1d436f8c) + mcp/server.py de 7ebe953 (devuelve pedido/guardado y manda
+# original_predicate). Solo cambia server.py; requirements igual. Volver atrás: retaguear 1.8.0-pre569 y recrear mcp.
+FROM ecodb-mcp:1.8.0
+COPY --chown=mcpuser:mcpuser mcp/server.py /app/server.py

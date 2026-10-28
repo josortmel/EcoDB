@@ -1,0 +1,5 @@
+# #494: overlay over the running image (ecodb-api:0.25.0-pre494 = 92459ef1). Only the 4 modules changed
+# by #478 (merge 50aa8a8); the other 42 modules were compared md5 (CRLF-normalised) and are identical.
+# Avoids a cold rebuild (no layer cache, re-downloads CUDA wheels, apt drift).
+FROM ecodb-api:0.25.0-pre494
+COPY --chown=apiuser:apiuser api/gliner_service.py api/graph.py api/main.py api/migrations.py ./

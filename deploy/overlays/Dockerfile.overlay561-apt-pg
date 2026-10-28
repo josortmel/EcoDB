@@ -1,0 +1,4 @@
+# #561 apt (16-oct): actualizaciones de la distribución pendientes (apt list --upgradable), encima de la imagen de la tanda 1.
+FROM ecodb-postgres:1.0.0-pre561
+USER root
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y upgrade && rm -rf /var/lib/apt/lists/*

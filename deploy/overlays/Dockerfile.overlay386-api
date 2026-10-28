@@ -1,0 +1,4 @@
+# #386 fase 1: imagen viva (0.25.0-pre386 = 9ba0bad2) + solo los cuatro paquetes con avisos.
+# Sin reinstalar torch/transformers (regla: no re-descargar lo que ya está).
+FROM ecodb-api:0.25.0-pre386
+RUN pip install --no-cache-dir fastapi==0.141.0 starlette==1.7.0 PyJWT==2.15.1 python-multipart==0.0.32

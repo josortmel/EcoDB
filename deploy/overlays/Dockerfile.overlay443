@@ -1,0 +1,3 @@
+# #443: imagen viva 0e10528f (0.25.0 tras #386 fase 1) + graph.py de f01cdac (stop_entities en save_memory).
+FROM ecodb-api:0.25.0-pre443
+COPY --chown=apiuser:apiuser api/graph.py ./

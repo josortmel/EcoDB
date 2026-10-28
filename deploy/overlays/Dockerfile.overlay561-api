@@ -1,0 +1,4 @@
+# #561 tanda 1 (16-oct): parches que no tocan el modelo, versión mínima que cierra los avisos (osv_min.py).
+FROM ecodb-api:0.25.0-pre561
+USER root
+RUN pip install --no-cache-dir urllib3==2.8.0 langgraph-sdk==0.4.4 pip==26.2.0

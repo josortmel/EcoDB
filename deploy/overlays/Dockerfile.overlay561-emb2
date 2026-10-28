@@ -1,0 +1,5 @@
+# #561 tanda 2 (16-oct): pillow 10.2.0 -> 12.3.0 (30 avisos; la misma que la api). Encima de la tanda 1.
+FROM ecodb-embeddings:0.2.5-561
+USER root
+RUN pip install --no-cache-dir pillow==12.3.0
+USER apiuser

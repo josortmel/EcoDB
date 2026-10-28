@@ -1,0 +1,5 @@
+# #386 fase 1 (lo que faltaba): ecodb-mcp 1.29.1 + PyJWT 2.15.1 (la 2.13.0 tenía 28 avisos). Base: 1.8.0-386.
+FROM ecodb-mcp:1.8.0-386
+USER root
+RUN pip install --no-cache-dir PyJWT==2.15.1
+USER mcpuser

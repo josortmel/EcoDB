@@ -1,0 +1,4 @@
+# #393: imagen viva 0.25.0 (c725e774) + cell_worker.py de d0d5af3 (semanas partidas cuentan como hechas;
+# los miembros de «Arcos y puntos ciegos» salen de la semana). Base etiquetada como 0.25.0-pre393.
+FROM ecodb-api:0.25.0-pre393
+COPY --chown=apiuser:apiuser api/cell_worker.py ./

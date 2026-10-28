@@ -1,0 +1,5 @@
+# #561 tanda 1 (16-oct): parches que no tocan el modelo, versión mínima que cierra los avisos (osv_min.py).
+FROM ecodb-mcp:1.8.0-pre561
+USER root
+RUN pip install --no-cache-dir mcp==1.30.0 setuptools==84.0.0 pip==26.2.0
+USER mcpuser

@@ -1,0 +1,3 @@
+# #605: imagen viva e1b51888 (0.25.0 = 0.25.0-561apt) + classifier.py de 5bc08fa (classify_with_llm dice su motivo).
+FROM ecodb-api:0.25.0-pre605
+COPY --chown=apiuser:apiuser api/classifier.py ./
