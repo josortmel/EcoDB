@@ -47,6 +47,20 @@ _URL_SCHEME_RE = _re.compile(r'^(https?|ftp|file|rtsp|rtmp)://', _re.IGNORECASE)
 _UUID_RE = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
 from mcp.server.fastmcp import FastMCP, Image
 
+# #492 (Prima, 13-oct; el mismo fallo que el #339 de FarOS): FastMCP valida los argumentos de cada
+# tool con un modelo pydantic que IGNORA lo que sobra: read_memory(memory_id=…, campo_inventado=…)
+# devolvía la memoria normal y un filtro mal escrito en search («agent» por «agent_identifier»)
+# buscaba SIN filtro. Con extra="forbid", un argumento no declarado falla nombrándolo. Va ANTES de
+# registrar las tools: cada modelo de argumentos hereda esta configuración al crearse.
+# ArgModelBase es interno de mcp 1.x. Si una versión lo mueve, no se tumba el servidor: se avisa por
+# stderr (stdout es el protocolo en stdio) y se vuelve a lo de antes. Lo caza test_mcp_unknown_args.
+try:
+    from mcp.server.fastmcp.utilities import func_metadata as _fm
+    _fm.ArgModelBase.model_config["extra"] = "forbid"
+except (ImportError, AttributeError, TypeError) as _exc:
+    print(f"[ecodb-mcp] AVISO #492: no se pudo prohibir argumentos desconocidos ({_exc!r}); "
+          "FastMCP los descartará en silencio", file=sys.stderr)
+
 
 # ---------------------------------------------------------------------------
 # Configuracion
