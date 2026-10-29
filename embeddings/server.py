@@ -119,6 +119,20 @@ if EMBEDDING_BACKEND == "cloud":
 
 # Globals — el modelo se carga UNA vez al lifespan startup (solo backend=local).
 _model = None
+
+
+# #547 / L47: PyTorch keeps freed blocks reserved, so the embedder grew ~3.9 GB of cache over
+# a day on the GPU it shares with the house (16-oct). Hand it back after a request when the
+# reserved-but-unused part passes the slack; after a CUDA OOM this is also what lets it recover.
+_CACHE_SLACK_BYTES = int(os.environ.get("EMBED_CACHE_SLACK_MIB", "256")) * 1024 ** 2
+
+
+def _release_cache() -> None:
+    if torch.cuda.is_available() and (
+            torch.cuda.memory_reserved() - torch.cuda.memory_allocated() > _CACHE_SLACK_BYTES):
+        torch.cuda.empty_cache()
+
+
 _health_cache: dict = {"result": None, "checked_at": 0.0}
 _health_lock = asyncio.Lock()
 _health_logger = logging.getLogger("ecodb.embeddings.health")
@@ -436,6 +450,8 @@ async def embed_text(body: EmbedTextRequest) -> EmbedResponse:
         )
     except Exception as e:
         raise HTTPException(500, f"embedding failed: {type(e).__name__}")
+    finally:
+        _release_cache()
 
     if hasattr(embeddings, "tolist"):
         result_list = embeddings.tolist()
@@ -491,6 +507,8 @@ async def embed_image(body: EmbedImageRequest) -> EmbedResponse:
         )
     except Exception as e:
         raise HTTPException(500, f"embedding failed: {type(e).__name__}")
+    finally:
+        _release_cache()
 
     if hasattr(embeddings, "tolist"):
         result_list = embeddings.tolist()

@@ -1,0 +1,6 @@
+# #547 / L47 (29-oct): the embedder hands back its GPU cache after each request when the
+# reserved-but-unused part passes EMBED_CACHE_SLACK_MIB (256 by default). Only server.py changes.
+# Before building: docker tag ecodb-embeddings:0.2.5 ecodb-embeddings:0.2.5-pre547 (rollback = retag it back).
+# Build from the repo root: docker build -f deploy/overlays/Dockerfile.overlay547-emb -t ecodb-embeddings:0.2.5 .
+FROM ecodb-embeddings:0.2.5-pre547
+COPY --chown=apiuser:apiuser embeddings/server.py /app/server.py

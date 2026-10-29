@@ -1,0 +1,39 @@
+# docker-compose.autoheal.yml — OVERLAY. NO se aplica solo.
+#
+# Añade auto-reinicio de contenedores que Docker marca `unhealthy`
+# (willfarrell/autoheal). Cierra el action item #1 del post-mortem del
+# 2026-08-21 (caída de embeddings, día 170): teníamos healthcheck
+# (detección) sin acción — `restart: unless-stopped` NO reinicia por
+# `unhealthy`, solo por EXIT del proceso.
+#
+# APLICAR (con Pepe, en baja carga — recrea embeddings ~180s de reload):
+#   docker compose -f docker-compose.yml -f docker-compose.autoheal.yml up -d
+#
+# Ver runbook completo (verificación con unhealthy controlado, rollback,
+# caveats de Docker Desktop en Windows): AUTOHEAL_DEPLOY.md
+#
+# Alcance QUIRÚRGICO: solo embeddings (el fallo probado). NO `all`.
+# Extender al resto del stack = action item #5, aún sin aprobar.
+
+services:
+  # Merge: añade el label opt-in al servicio ya definido en docker-compose.yml.
+  # Aplicarlo recrea el contenedor embeddings una vez (breve caída de save/search).
+  embeddings:
+    labels:
+      autoheal: "true"
+
+  autoheal:
+    # Fijada por digest (#547, 29-oct): la `latest` que ya está en disco (creada 2026-08-21).
+    # Las etiquetas con versión se quedaron en 1.2.0 (2021) y `latest` se republicó el 29-oct.
+    image: willfarrell/autoheal@sha256:147ed822bf5f787f638687c66bb3591b64d73fc4a1640da64c5442608d139878
+    container_name: ecodb-autoheal
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal      # solo vigila contenedores con label autoheal=true
+      AUTOHEAL_INTERVAL: "10"                  # comprueba estado de salud cada 10s
+      AUTOHEAL_START_PERIOD: "60"              # gracia tras arrancar autoheal (el start_period 180s del healthcheck de embeddings ya protege el model-load)
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "30"      # margen de parada grácil (GPU)
+      # WEBHOOK_URL: ""                        # action item #2 (alerting/MTTD): apuntar a un receptor que avise a la familia al reiniciar
+    volumes:
+      # autoheal controla Docker por el socket (no necesita red de la app).
+      - /var/run/docker.sock:/var/run/docker.sock
