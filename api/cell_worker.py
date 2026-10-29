@@ -7,6 +7,7 @@ Standalone Docker process. 3 cells in one service:
 
 Monthly/quarterly/yearly consolidation stacks on top of weeklies.
 """
+import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 import asyncio
 import hashlib
 import json

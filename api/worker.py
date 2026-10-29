@@ -5,6 +5,7 @@ Processes documents: parse → chunk → GLiNER → embed → graph link.
 Entrypoint: python worker.py
 Docker: docker compose --profile with-ingestion up
 """
+import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 import asyncio
 import hashlib
 import json

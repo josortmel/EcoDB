@@ -9,6 +9,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+import os
+import subprocess
+
+import pytest
+
+API_DIR = Path(__file__).resolve().parent.parent
+
+
+@pytest.mark.parametrize("entry", ["main", "worker", "cell_worker"])
+def test_cada_entrada_quita_flashpix_al_arrancar_sin_tocar_parsers(entry):
+    """#811: each container's entry point removes FPX on its own, in a fresh process, before any
+    document reaches parsers (Lienzo's note verifying #792)."""
+    code = (f"import {entry}, sys; from PIL import Image; Image.init(); "
+            "print('FPX' in Image.OPEN, 'FPX' in Image.ID, 'parsers' in sys.modules)")
+    env = {**os.environ, "DATABASE_URL": os.environ.get("DATABASE_URL", "postgresql://x@127.0.0.1:1/x")}
+    out = subprocess.run([sys.executable, "-c", code], cwd=API_DIR, capture_output=True,
+                         text=True, timeout=120, env=env)  # importing never connects
+    assert out.returncode == 0, out.stderr[-2000:]
+    fpx_open, fpx_id, _parsers = out.stdout.split()[-3:]
+    assert (fpx_open, fpx_id) == ("False", "False")
+
+
 def test_al_importar_parsers_flashpix_no_se_decodifica():
     import parsers  # noqa: F401
     from PIL import Image

@@ -22,6 +22,7 @@ Pendiente (deuda anotada):
 - VS6 → pip-compile --generate-hashes antes de imagen de produccion.
 - VS9 → rate limiting (slowapi) antes de VPS.
 """
+import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response

@@ -8,22 +8,7 @@ from dataclasses import dataclass, field
 log = logging.getLogger("ecodb.parsers")
 
 
-def _pillow_sin_flashpix():
-    """#792: GHSA-5x8w-8jj5-q52h (crítico) — Pillow <= 12.3.0 desborda al decodificar el JPEG de un
-    FlashPix y permite ejecutar código; el arreglo es Pillow 13 (mayor). Aquí entran los documentos que
-    se registran (docling abre sus imágenes) y olefile está instalado, así que FPX estaba registrado.
-    Se carga todo una vez (init) y se quita FPX: init() no vuelve a cargar plugins después."""
-    try:
-        from PIL import Image
-    except ImportError:
-        return
-    Image.init()
-    Image.OPEN.pop("FPX", None)
-    if "FPX" in Image.ID:
-        Image.ID.remove("FPX")
-
-
-_pillow_sin_flashpix()
+import pillow_guard  # noqa: E402,F401  — #792: documents opened here never see FlashPix
 
 MAX_AUDIO_DURATION_SEC = int(os.environ.get("MAX_AUDIO_DURATION_SEC", "3600"))
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
