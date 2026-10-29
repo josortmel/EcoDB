@@ -1295,6 +1295,10 @@ async def _fetch_for_replay(conn, memory_id: UUID, actor_id: int):
            WHERE m.id = $1""", memory_id)
     if row is not None and int(row["user_id"]) != actor_id:
         raise HTTPException(409, "memory id already in use")
+    # #836: a re-send from the MCP queue after the memory was deleted must not bring it back.
+    if row is None and await conn.fetchval(
+            "SELECT 1 FROM trash WHERE id = $1 AND original_table = 'memories'", memory_id):
+        raise HTTPException(409, "memory was deleted; not recreating it")
     return row
 
 

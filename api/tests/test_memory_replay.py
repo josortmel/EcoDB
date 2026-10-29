@@ -113,3 +113,23 @@ def test_client_id_of_another_owner_is_409(client, jwt, monkeypatch):
     _sql("INSERT INTO memories (id, user_id, workspace_id, project_id, type, content, embedding) "
          "VALUES ($1, 30, 1, 1, 'observacion', $2, $3::vector)", mid, PREFIX + "other", FAKE_VEC)
     assert _post(client, jwt, client_id=str(mid)).status_code == 409
+
+
+def test_resend_of_a_deleted_memory_is_409_and_not_recreated(client, jwt, monkeypatch):
+    """#836: the MCP can die between a successful POST and unlinking the queued file; the next start
+    re-sends it. Harmless thanks to client_id, EXCEPT when the memory was deleted in between: the
+    re-send created it again with the same id (seen in the 29-oct outage test). A deleted id is in
+    trash, and a re-send of it is now a 409; the MCP moves it to failed/ and says so."""
+    monkeypatch.setattr(memories, "embed_text", _fake_embed)
+    mid = uuid.uuid4()
+    first = _post(client, jwt, client_id=str(mid))
+    assert first.status_code == 201, first.text
+    gone = client.delete(f"/memories/{mid}", headers={"Authorization": f"Bearer {jwt}"})
+    assert gone.status_code in (200, 204), gone.text
+    again = client.post("/memories", headers={"Authorization": f"Bearer {jwt}"},
+                        json={"type": "observacion", "content": first.json()["content"],
+                              "workspace_id": 1, "project_id": 1, "client_id": str(mid)})
+    assert again.status_code == 409, again.text
+    assert "deleted" in again.json()["detail"]
+    assert _sql("SELECT count(*) AS n FROM memories WHERE id = $1", mid)[0]["n"] == 0
+    _sql("DELETE FROM trash WHERE id = $1", mid)
