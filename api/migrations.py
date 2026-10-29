@@ -39,6 +39,8 @@ MIGRATIONS: list[tuple[str, str]] = [
     ("5.4.0_unaccent_nodes", "sql/migrate_5.4.0_unaccent_nodes.sql"),
     # #569: columnas de revisión del mapeo de predicados (producción ya las tenía, sin migración).
     ("5.4.1_triple_review_columns", "sql/migrate_5.4.1_triple_review_columns.sql"),
+    # #816: lo que gana embedding (célula, backfill, PUT) entra en memory_embeddings, que es lo que lee search.
+    ("5.5.0_sync_text_embedding", "sql/migrate_5.5.0_sync_text_embedding.sql"),
 ]
 
 _LOCK_KEY = 728_1990

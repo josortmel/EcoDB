@@ -1231,6 +1231,9 @@ async def _distill_skill(task_type, cases_content):
 
 MAX_NEW_TENSIONS_PER_RUN = 1
 TENSION_COOLDOWN_DAYS = 30
+# #816: only the week that just closed gets a tension. Rebuilding old weeks (the #702 regeneration)
+# wrote one per rebuilt week, all dated today: 101 that crowded every boot's recent days.
+TENSION_LIVE_WEEK_DAYS = 8
 
 
 async def _check_tension_cooldown(conn, agent_id, observed_trait):
@@ -1244,11 +1247,24 @@ async def _check_tension_cooldown(conn, agent_id, observed_trait):
     return recent is not None
 
 
-async def _detect_identity_tensions(conn, agent_id, ws_id, identity_fragments, memories):
+async def _detect_identity_tensions(conn, agent_id, ws_id, identity_fragments, memories,
+                                    week_start=None, week_end=None):
     """Compare observed behavior (from memories) vs declared identity (from fragments).
-    Creates at most MAX_NEW_TENSIONS_PER_RUN tension memories."""
+    Creates at most MAX_NEW_TENSIONS_PER_RUN tension memories.
+    #816: with a week, only a recently closed one, and never a second one for the same week."""
     if not identity_fragments:
         return 0
+    if week_end is not None:
+        w_end = week_end.date() if isinstance(week_end, datetime) else week_end
+        if w_end < date.today() - timedelta(days=TENSION_LIVE_WEEK_DAYS):
+            log.info("Agent %d %s-%s is a rebuilt week: no identity tension", agent_id, week_start, week_end)
+            return 0
+        if await conn.fetchval("""
+            SELECT 1 FROM memories
+            WHERE agent_id=$1 AND 'identity_tension' = ANY(tags) AND metadata->>'week_start' = $2
+            LIMIT 1
+        """, agent_id, str(week_start)):
+            return 0
 
     def _sanitize_for_prompt(text):
         return text.replace("```", "'''").replace("<", "&lt;").replace(">", "&gt;")
@@ -1336,6 +1352,7 @@ Rules:
                 "tension_type": t_type,
                 "evidence_memory_ids": evidence_ids,
                 "tension_status": "open",
+                **({"week_start": str(week_start), "week_end": str(week_end)} if week_start else {}),
             }),
             await _embed_for_memory(content))
         created += 1
@@ -1658,7 +1675,7 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                         week_start, week_end, _reflection_member_ids(memories))
 
             tension_count = await _detect_identity_tensions(
-                conn, agent_id, ws_id, identity, memories)
+                conn, agent_id, ws_id, identity, memories, week_start, week_end)
             if tension_count:
                 log.info("Agent %d: %d identity tensions created", agent_id, tension_count)
 
