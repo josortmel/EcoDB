@@ -383,14 +383,14 @@ docker compose restart mcp
   tocar). Tests: test_cell_truncated_week, test_weekly_rebuild, test_cell_coverage (61 de célula en verde).
 - **29-oct (Hilo): lote en main, SIN desplegar hasta #817 (13:00 con ventana de Pepe); verificado por Prima.**
   Commits (autor ya con `261964387+josortmel@users.noreply.github.com`; el 29 los reescribí, refs con los hashes viejos:
-  `backup-hilo-29oct-preautor`): 41e6e47 (#547 api `client_id`/`occurred_at`: reenvío idempotente ANTES de embeber,
-  id de otro dueño = 409, hora como mucho 7 días atrás), 1a58e6e + e6d4632 (#811 `api/pillow_guard.py` importado PRIMERO
-  por main, worker y cell_worker; `api/Dockerfile` lo copia), 3a4e357 (#813 rollup sin narrativa o sin label → reintento,
-  nunca se guarda vacío), 200a294 (#816: tensiones solo de la semana cerrada en los últimos 8 días, una por semana;
-  migración `5.5.0_sync_text_embedding`), bb5bead (autoheal fijado por DIGEST + `_release_cache` en embeddings).
+  `backup-hilo-29oct-preautor`): 32b8399 (#547 api `client_id`/`occurred_at`: reenvío idempotente ANTES de embeber,
+  id de otro dueño = 409, hora como mucho 7 días atrás), 180d420 + bfcca0c (#811 `api/pillow_guard.py` importado PRIMERO
+  por main, worker y cell_worker; `api/Dockerfile` lo copia), 3196459 (#813 rollup sin narrativa o sin label → reintento,
+  nunca se guarda vacío), 48b0e44 (#816: tensiones solo de la semana cerrada en los últimos 8 días, una por semana;
+  migración `5.5.0_sync_text_embedding`), dc648bb (autoheal fijado por DIGEST + `_release_cache` en embeddings).
   Imagen candidata `ecodb-api:0.25.0-829` (capa `deploy/overlays/Dockerfile.overlay829`; vuelta atrás `0.25.0-pre829`).
   La cola de save_memory del MCP está en la RAMA `hilo-547-spool` (worktree `../EcoDB_wt547`), no en main: las sesiones
-  cargan `mcp/server.py` del árbol, y la cola necesita la api de 41e6e47. Se fusiona después de desplegar la api.
+  cargan `mcp/server.py` del árbol, y la cola necesita la api de 32b8399. Se fusiona después de desplegar la api.
   **Trampas de hoy, para quien venga:**
   (1) **La búsqueda lee `memory_embeddings`, NO `memories.embedding`.** Lo único que copiaba uno en otro era
   `migrate_3_0h_multimodal.sql`, que se re-ejecuta al arrancar la api (#812): lo de la célula y el backfill solo se volvía
@@ -409,14 +409,14 @@ docker compose restart mcp
   iguales, el otro solo cambia saltos de línea; el PDF cambia maquetación, no contenido. OSV 29 → 0.
   (7) **related_clusters (#372, cerrado con Prima):** el centroide no encuentra momentos; la narrativa entera los diluye;
   por párrafos sí, con sesgo de longitud. Rediseño en #819 (Prima, 5-nov) con golden set de routing v4 a ciegas.
-- **29-oct, tarde (Hilo): el lote de arriba ya está DESPLEGADO (#817) y la cola del MCP fusionada en main (2a25688).**
+- **29-oct, tarde (Hilo): el lote de arriba ya está DESPLEGADO (#817) y la cola del MCP fusionada en main (31e8c71).**
   Nuevo en main, SIN desplegar (va el 30-oct 13:00 en una capa con cell_worker + memories, y ecodb-mcp con el server.py
   de main, #836):
-  f1c6653 (#844): una plantilla con `{decisiones_en_vigor}` recibe las memorias decision/acuerdo del periodo (fecha, id
+  ab0e5af (#844): una plantilla con `{decisiones_en_vigor}` recibe las memorias decision/acuerdo del periodo (fecha, id
   corto, autor; fuera las que tienen `metadata.superseded_by`). Sin el marcador, el prompt es idéntico y no hay consulta.
   Plantillas v3 creadas SIN asociar: 3447 mensual, 3448 trimestral, 3449 rollup. Activarlas es #846, que espera la marca
   de «sustituida» (#847, diseño de Prima). Probado en copia (#845, `Hilo/Documentacion/exp845/`).
-  8bddb1d (#836): un reenvío de la cola con el id de una memoria BORRADA (está en `trash`) da 409 y no la resucita.
+  ce18cbb (#836): un reenvío de la cola con el id de una memoria BORRADA (está en `trash`) da 409 y no la resucita.
   **Trampas de la tarde:**
   (8) **`memories.type` es el enum `memory_type`:** `m.type = ANY($1::text[])` lo rechaza Postgres; va `m.type::text`.
   El test con conexión falsa no lo vio: toda consulta SQL nueva lleva al menos un test contra `ecodb-test-pg` (fixture
