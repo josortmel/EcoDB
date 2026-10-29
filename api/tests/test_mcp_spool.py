@@ -98,21 +98,38 @@ def test_other_errors_are_not_queued(mod, api):
     assert "error" in r and not mod.SPOOL_DIR.exists()
 
 
-def test_a_claim_left_by_a_dead_process_is_retried(mod, api):
+def test_a_lock_left_by_a_dead_process_is_cleared_and_retried(mod, api):
     api.post("/memories").respond(503, json={"detail": "down"})
     r = mod.save_memory(content="pytest spool", type="observacion")
-    f = mod.SPOOL_DIR / f"{r['id']}.json"
-    claim = f.with_suffix(".sending")
-    os.rename(f, claim)
+    lock = mod.SPOOL_DIR / f"{r['id']}.lock"
+    lock.write_text("")
     old = time.time() - 3600
-    os.utime(claim, (old, old))
+    os.utime(lock, (old, old))
     api.post("/memories").mock(side_effect=lambda req: respx.MockResponse(201, json=_created(req)))
     assert mod._spool_flush()["sent"] == 1
+    assert list(mod.SPOOL_DIR.glob("*")) == []
 
 
-def test_a_fresh_claim_of_another_session_is_left_alone(mod, api):
+def test_a_fresh_lock_of_another_session_is_left_alone(mod, api):
+    api.post("/memories").respond(503, json={"detail": "down"})
+    r = mod.save_memory(content="pytest spool", type="observacion")
+    (mod.SPOOL_DIR / f"{r['id']}.lock").write_text("")
+    assert mod._spool_flush() == {"sent": 0, "kept": 0, "failed": 0}
+    assert (mod.SPOOL_DIR / f"{r['id']}.json").exists()
+
+
+def test_a_file_another_session_already_sent_is_not_a_failure(mod, api):
+    """The race measured on 29-oct: we listed the file, another session sent and removed it
+    before our lock. That must be a skip, never an entry in failed/."""
     api.post("/memories").respond(503, json={"detail": "down"})
     r = mod.save_memory(content="pytest spool", type="observacion")
     f = mod.SPOOL_DIR / f"{r['id']}.json"
-    os.rename(f, f.with_suffix(".sending"))
+    real_claim = mod._spool_claim
+
+    def claim_after_other_session_sent(path):
+        path.unlink()  # the other session finished it
+        return real_claim(path)
+
+    mod._spool_claim = claim_after_other_session_sent
     assert mod._spool_flush() == {"sent": 0, "kept": 0, "failed": 0}
+    assert not (mod.SPOOL_DIR / "failed").exists() and not f.with_suffix(".lock").exists()

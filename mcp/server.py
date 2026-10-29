@@ -335,10 +335,12 @@ def _err(exc: Exception) -> dict:
 # ---------------------------------------------------------------------------
 # The API keeps its invariant (no embedding, no memory), so a save during an outage used to be
 # lost. Now it is written to a spool file with the id and time it is given right away, and sent
-# later by whichever MCP process gets there first (claim = atomic rename .json -> .sending).
+# later by whichever MCP process gets there first (claim = exclusive create of <id>.lock).
 # The API accepts client_id/occurred_at and treats a repeated id as a no-op, so a double send is
 # harmless. A send that fails for any reason other than an outage goes to failed/ and every
 # save_memory reports it until someone looks (a silent queue is failing without noise).
+# The API accepts occurred_at at most 7 days back: a queue stuck longer than that lands in failed/
+# (and is reported), it is never sent with a false date.
 
 SPOOL_DIR = Path(os.environ.get("ECODB_SPOOL_DIR") or (
     Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "ecodb-mcp" / "spool"))
@@ -366,7 +368,7 @@ def _spool_put(mem_id: str, payload: dict, file_real: Optional[str]) -> None:
 def _spool_status() -> dict:
     if not SPOOL_DIR.is_dir():
         return {}
-    pending = len(list(SPOOL_DIR.glob("*.json"))) + len(list(SPOOL_DIR.glob("*.sending")))
+    pending = len(list(SPOOL_DIR.glob("*.json")))
     failed_dir = SPOOL_DIR / "failed"
     failed = len(list(failed_dir.glob("*.json"))) if failed_dir.is_dir() else 0
     if not pending and not failed:
@@ -378,54 +380,68 @@ def _spool_status() -> dict:
     return out
 
 
+def _spool_claim(f: Path) -> Optional[Path]:
+    """Claim a queued file by creating its .lock exclusively (CreateFile CREATE_NEW on Windows).
+    NOT a rename: on Windows two processes can both «successfully» rename the same open file
+    (measured 29-oct: ~190 of 300 files double-claimed by 4 processes; with O_EXCL, 0 of 1500)."""
+    lock = f.with_suffix(".lock")
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return None
+    if not f.exists():  # another session finished it between our glob and our lock
+        lock.unlink(missing_ok=True)
+        return None
+    return lock
+
+
 def _spool_flush() -> dict:
     """Send every queued save once. Returns counts; never raises."""
     sent = kept = failed = 0
     if not SPOOL_DIR.is_dir():
         return {"sent": 0, "kept": 0, "failed": 0}
     now = time.time()
-    for claim in SPOOL_DIR.glob("*.sending"):  # a process died mid-send
+    for lock in SPOOL_DIR.glob("*.lock"):  # a process died mid-send: free it for the next pass
         try:
-            if now - claim.stat().st_mtime > _SPOOL_STALE_CLAIM_SECONDS:
-                os.replace(claim, claim.with_suffix(".json"))
+            if now - lock.stat().st_mtime > _SPOOL_STALE_CLAIM_SECONDS:
+                lock.unlink()
         except OSError:
             pass
     for f in sorted(SPOOL_DIR.glob("*.json")):
-        claim = f.with_suffix(".sending")
-        try:
-            os.rename(f, claim)  # atomic; fails if another session claimed it
-        except OSError:
+        lock = _spool_claim(f)
+        if lock is None:
             continue
         try:
-            rec = json.loads(claim.read_text(encoding="utf-8"))
+            rec = json.loads(f.read_text(encoding="utf-8"))
             data = _api_call("POST", "/memories", json=rec["payload"])
             if rec.get("file_real"):
                 _attach_media(data, rec["file_real"])
-            claim.unlink()
+            f.unlink()
             sent += 1
         except Exception as e:  # noqa: BLE001 — one bad file must not stop the rest
             if _is_outage(e):
-                os.replace(claim, f)
                 kept += 1
                 continue
             failed_dir = SPOOL_DIR / "failed"
             failed_dir.mkdir(exist_ok=True)
             try:
-                rec = json.loads(claim.read_text(encoding="utf-8"))
+                rec = json.loads(f.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
                 rec = {"unreadable": True}
             rec["error"] = str(e)
             rec["failed_at"] = datetime.now(timezone.utc).isoformat()
             (failed_dir / f.name).write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
-            claim.unlink()
+            f.unlink(missing_ok=True)
             failed += 1
+        finally:
+            lock.unlink(missing_ok=True)
     return {"sent": sent, "kept": kept, "failed": failed}
 
 
 def _spool_worker() -> None:
     while True:
         try:
-            if SPOOL_DIR.is_dir() and (any(SPOOL_DIR.glob("*.json")) or any(SPOOL_DIR.glob("*.sending"))):
+            if SPOOL_DIR.is_dir() and any(SPOOL_DIR.glob("*.json")):
                 res = _spool_flush()
                 if res["sent"] or res["failed"]:
                     print(f"[ecodb-mcp] spool: {res}", file=sys.stderr)
