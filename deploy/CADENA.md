@@ -19,8 +19,11 @@ la imagen viva con esa etiqueta (`docker tag ecodb-api:0.25.0 ecodb-api:0.25.0-p
 | 2 | `overlay443` | `pre443` (0e10528f) | dc59dd20 | `graph.py` de f01cdac |
 | 3 | `overlay561-api` + `overlay561-apt-api` | `pre561` (dc59dd20) | e1b51888 | pip (urllib3 2.8.0, langgraph-sdk 0.4.4, pip 26.2) + `apt upgrade` |
 | 4 | `overlay605` | `pre605` (e1b51888) | 65fbe310 | `classifier.py` de 5bc08fa |
-| 5 | `overlay569` | `pre569` (65fbe310) | **b32663fb = viva el 28-oct** | `graph.py`, `migrations.py` de 7ebe953 + `sql/migrate_5.4.1_…` |
-| 6 | `overlay701` | `pre701` (b32663fb) | pendiente (#784) | `cell_worker.py`, `cell_configs.py`, `settings.py` de 6b08a5c (#701/#716/#717) |
+| 5 | `overlay569` | `pre569` (65fbe310) | b32663fb (viva hasta el 28-oct 18:3x) | `graph.py`, `migrations.py` de 7ebe953 + `sql/migrate_5.4.1_…` |
+| 6 | `overlay701` | `pre701` (b32663fb) | **f6c2e243 = viva desde el 28-oct** (`0.25.0` = `0.25.0-702b`) | `cell_worker.py`, `cell_configs.py`, `settings.py`, `clusters.py`, `parsers.py` de **c3650d3** (#701/#716/#717/#603/#792 + #808/#702). La misma capa se construyó tres veces sobre `pre701` con el código de cada momento: `-701` (1fe45a0c, #808), `-702` (9eb34b80, 3e37e74), `-702b` (f6c2e243, c3650d3); no se apilan. |
+
+Inventario del 29-oct (#784): `pip list` y `dpkg-query` de `ecodb-api:0.25.0` y `ecodb-mcp:1.8.0` = los ficheros de
+`deploy/inventario/` sin una sola diferencia (api 303 apt / 176 pip, mcp 87 / 40): las capas del 28 solo traen `.py`.
 
 ## ecodb-mcp:1.8.0
 
@@ -29,7 +32,8 @@ la imagen viva con esa etiqueta (`docker tag ecodb-api:0.25.0 ecodb-api:0.25.0-p
 | 0 | — | — | `1.8.0-prevo` | base |
 | 1 | `overlay386-mcp`, `overlay386-mcp2` | `pre386` / `386` | 1a22c1a9 | mcp 1.29.1, PyJWT 2.15.1 |
 | 2 | `overlay561-mcp` + `overlay561-apt-mcp` | `pre561` / `561` | 1d436f8c | mcp 1.30.0 (GHSA-84m7-p3x7-pcfv) + `apt upgrade` |
-| 3 | `overlay569-mcp` | `1.8.0` (1d436f8c) | **46fb40ea = viva el 28-oct** | `mcp/server.py` de 7ebe953 |
+| 3 | `overlay569-mcp` | `1.8.0` (1d436f8c) | 46fb40ea (viva hasta el 28-oct) | `mcp/server.py` de 7ebe953 |
+| 4 | `overlay492-mcp` | `1.8.0-pre492` (46fb40ea) | **e42e6c38 = viva desde el 28-oct** | `mcp/server.py` de fcec1bc (#492) |
 
 Las de embeddings, ner y postgres (`overlay561-emb*`, `-ner`, `-apt-*`) son del 16-oct (#561) y siguen el mismo patrón.
 
