@@ -409,6 +409,24 @@ docker compose restart mcp
   iguales, el otro solo cambia saltos de línea; el PDF cambia maquetación, no contenido. OSV 29 → 0.
   (7) **related_clusters (#372, cerrado con Prima):** el centroide no encuentra momentos; la narrativa entera los diluye;
   por párrafos sí, con sesgo de longitud. Rediseño en #819 (Prima, 5-nov) con golden set de routing v4 a ciegas.
+- **29-oct, tarde (Hilo): el lote de arriba ya está DESPLEGADO (#817) y la cola del MCP fusionada en main (2a25688).**
+  Nuevo en main, SIN desplegar (va el 30-oct 13:00 en una capa con cell_worker + memories, y ecodb-mcp con el server.py
+  de main, #836):
+  f1c6653 (#844): una plantilla con `{decisiones_en_vigor}` recibe las memorias decision/acuerdo del periodo (fecha, id
+  corto, autor; fuera las que tienen `metadata.superseded_by`). Sin el marcador, el prompt es idéntico y no hay consulta.
+  Plantillas v3 creadas SIN asociar: 3447 mensual, 3448 trimestral, 3449 rollup. Activarlas es #846, que espera la marca
+  de «sustituida» (#847, diseño de Prima). Probado en copia (#845, `Hilo/Documentacion/exp845/`).
+  8bddb1d (#836): un reenvío de la cola con el id de una memoria BORRADA (está en `trash`) da 409 y no la resucita.
+  **Trampas de la tarde:**
+  (8) **`memories.type` es el enum `memory_type`:** `m.type = ANY($1::text[])` lo rechaza Postgres; va `m.type::text`.
+  El test con conexión falsa no lo vio: toda consulta SQL nueva lleva al menos un test contra `ecodb-test-pg` (fixture
+  `db_url`), aunque sea sin filas.
+  (9) **La plantilla trimestral tira POR DISEÑO lo que vive en un solo mes** («lo que parecía importante un mes y se
+  evaporó no entra»): toda decisión nacida en el último mes de un trimestre muere ahí (la Regla -1 del 30-sep). Antes de
+  culpar al modelo de una pérdida, se lee el prompt de la plantilla (`cell_prompt_templates`, asociadas en
+  `cell_task_configs`).
+  (10) **Los pesos de jina-embeddings-v4 (7,4 GB) no están en ninguna imagen ni volumen:** entran por bind mount de
+  `%USERPROFILE%/.cache/huggingface`. Una máquina limpia no los tiene (experimento «desde cero», #786/#787).
 - **El MCP de EcoDB tiene DOS caminos:** cada sesión lo arranca desde el repo por stdio (carga el código AL
   ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
   reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
