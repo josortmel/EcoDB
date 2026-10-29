@@ -1,0 +1,9 @@
+# 29-oct (#817): #547 api (client_id/occurred_at), #811 (pillow_guard first in every entry point),
+# #813 (rollup without narrative never stored), #816 (tensions only for the live week; migration
+# 5.5.0: trigger memory_embeddings + GRANT INSERT(embedding) to ecodb_cell).
+# Before building: docker tag ecodb-api:0.25.0 ecodb-api:0.25.0-pre829 (= f6c2e243 = 0.25.0-702b).
+# /app/sql is a read-only bind mount of ./sql in the api service, so the .sql is also copied here
+# for the worker and the cell, which don't mount it; migrations.py carries the new line.
+FROM ecodb-api:0.25.0-pre829
+COPY --chown=apiuser:apiuser api/memories.py api/pillow_guard.py api/parsers.py api/main.py api/worker.py api/cell_worker.py api/migrations.py ./
+COPY --chown=apiuser:apiuser sql/migrate_5.5.0_sync_text_embedding.sql ./sql/

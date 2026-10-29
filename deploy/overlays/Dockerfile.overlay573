@@ -1,0 +1,8 @@
+# #573 (#386 fase 2d): docling 2.120.3 -> 2.132.0 (29 avisos). Dependencias fijadas a versiones de al
+# menos dos semanas el 29-oct (el resolvedor libre cogía docling-parse 7.24.1, publicada el 28-oct):
+# docling-core 2.101.1 (8-oct), docling-ibm-models 4.0.3 (18-sep, mayor 3->4 que exige docling-slim),
+# docling-parse 7.22.3 (13-oct), langcodes 3.5.1 (nuevo, 2-dic-2025).
+FROM ecodb-api:0.25.0-829
+# The base image runs as root (the entrypoint drops to apiuser with gosu): no USER switch here.
+RUN pip install --no-cache-dir docling==2.132.0 docling-slim==2.132.0 docling-core==2.101.1 \
+    docling-ibm-models==4.0.3 docling-parse==7.22.3 langcodes==3.5.1
