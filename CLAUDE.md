@@ -381,6 +381,34 @@ docker compose restart mcp
   trimestres en orden; reanuda y rehace lo construido fuera de orden). El 28-oct quedó A MEDIAS: Claude Code mató el
   proceso por poca memoria del PC a las 19:00 (Eco hasta 26-abr, Hilo hasta 14-jun, Prima con 9 semanas; el resto sin
   tocar). Tests: test_cell_truncated_week, test_weekly_rebuild, test_cell_coverage (61 de célula en verde).
+- **29-oct (Hilo): lote en main, SIN desplegar hasta #817 (13:00 con ventana de Pepe); verificado por Prima.**
+  Commits (autor ya con `261964387+josortmel@users.noreply.github.com`; el 29 los reescribí, refs con los hashes viejos:
+  `backup-hilo-29oct-preautor`): 41e6e47 (#547 api `client_id`/`occurred_at`: reenvío idempotente ANTES de embeber,
+  id de otro dueño = 409, hora como mucho 7 días atrás), 1a58e6e + e6d4632 (#811 `api/pillow_guard.py` importado PRIMERO
+  por main, worker y cell_worker; `api/Dockerfile` lo copia), 3a4e357 (#813 rollup sin narrativa o sin label → reintento,
+  nunca se guarda vacío), 200a294 (#816: tensiones solo de la semana cerrada en los últimos 8 días, una por semana;
+  migración `5.5.0_sync_text_embedding`), bb5bead (autoheal fijado por DIGEST + `_release_cache` en embeddings).
+  Imagen candidata `ecodb-api:0.25.0-829` (capa `deploy/overlays/Dockerfile.overlay829`; vuelta atrás `0.25.0-pre829`).
+  La cola de save_memory del MCP está en la RAMA `hilo-547-spool` (worktree `../EcoDB_wt547`), no en main: las sesiones
+  cargan `mcp/server.py` del árbol, y la cola necesita la api de 41e6e47. Se fusiona después de desplegar la api.
+  **Trampas de hoy, para quien venga:**
+  (1) **La búsqueda lee `memory_embeddings`, NO `memories.embedding`.** Lo único que copiaba uno en otro era
+  `migrate_3_0h_multimodal.sql`, que se re-ejecuta al arrancar la api (#812): lo de la célula y el backfill solo se volvía
+  buscable tras un reinicio, por casualidad. Arreglo: trigger `trg_sync_text_embedding` (AFTER INSERT OR UPDATE OF
+  embedding, SECURITY DEFINER). **#812 NO se arregla antes de que esté desplegado este trigger.**
+  (2) **`ecodb_cell` no tenía INSERT sobre `memories.embedding`** desde #717: un semanal PROGRAMADO fallaba entero al
+  guardar su tensión (lo lanzado por la api, rol ecodb, iba bien; por eso la regeneración lo tapó). GRANT aplicado a mano
+  en producción el 29-oct 10:16 y metido en la 5.5.0. Lo que escribe la célula se prueba con `SET ROLE ecodb_cell`.
+  (3) **La imagen de la api corre como ROOT** (el entrypoint baja con gosu): una capa no debe acabar en `USER apiuser`.
+  (4) **Volúmenes de compose con prefijo de proyecto:** el de media es `ecodb_ecodb_media`; montar `ecodb_media` en un
+  `docker run` CREA un volumen vacío nuevo (me pasó; lo borré).
+  (5) **El worker no guarda la caché de Hugging Face** (/app/.cache no es volumen): cada recreación pierde los 506 MB
+  de modelos de docling para PDF y el siguiente PDF los baja de nuevo y tarda ~9 min en CPU (#822).
+  (6) **docling 2.132.0 (#573) con dependencias fijadas a ≥2 semanas** (`deploy/overlays/Dockerfile.overlay573`): el
+  resolvedor libre cogía docling-parse del día anterior. ibm-models 3→4 la exige docling-slim. Trozos medidos: 29/30 docx
+  iguales, el otro solo cambia saltos de línea; el PDF cambia maquetación, no contenido. OSV 29 → 0.
+  (7) **related_clusters (#372, cerrado con Prima):** el centroide no encuentra momentos; la narrativa entera los diluye;
+  por párrafos sí, con sesgo de longitud. Rediseño en #819 (Prima, 5-nov) con golden set de routing v4 a ciegas.
 - **El MCP de EcoDB tiene DOS caminos:** cada sesión lo arranca desde el repo por stdio (carga el código AL
   ARRANCAR) y además existe el contenedor `ecodb-mcp` (8091). Un cambio en mcp/server.py no está desplegado hasta
   reconstruir el contenedor Y avisar en la sala de que reinicien su MCP; la prueba se hace desde una sesión de verdad
