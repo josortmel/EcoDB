@@ -24,6 +24,12 @@ def test_cada_entrada_quita_flashpix_al_arrancar_sin_tocar_parsers(entry):
     code = (f"import {entry}, sys; from PIL import Image; Image.init(); "
             "print('FPX' in Image.OPEN, 'FPX' in Image.ID, 'parsers' in sys.modules)")
     env = {**os.environ, "DATABASE_URL": os.environ.get("DATABASE_URL", "postgresql://x@127.0.0.1:1/x")}
+    # Prima, 29-oct: on a Pillow that never registers FPX (her host) this would pass on the old
+    # code too and prove nothing. It only means something where FPX is there to remove.
+    probe = subprocess.run([sys.executable, "-c", "from PIL import Image; Image.init(); print('FPX' in Image.OPEN)"],
+                           capture_output=True, text=True, timeout=60)
+    if probe.stdout.strip() != "True":
+        pytest.skip("this Pillow doesn't register FlashPix: nothing to remove, nothing to prove")
     out = subprocess.run([sys.executable, "-c", code], cwd=API_DIR, capture_output=True,
                          text=True, timeout=120, env=env)  # importing never connects
     assert out.returncode == 0, out.stderr[-2000:]
