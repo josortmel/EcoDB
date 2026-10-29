@@ -1083,7 +1083,14 @@ async def _label_week_rollup(clusters, agent_id, conn):
         f"{clusters[0]['period_start']} a {clusters[0]['period_end']}:\n\n"
         + "\n\n---\n\n".join(cluster_texts))
     raw = await _llm_call(system_prompt, user_prompt)
-    return json.loads(raw)
+    data = json.loads(raw)
+    # #813: an answer without narrative or label was stored as an «unlabeled» rollup with no
+    # narrative, and the monthly lost that week. Raising makes _llm_retry ask again; if it never
+    # comes, _ensure_week_rollup inserts nothing and the next pass rebuilds it.
+    if not isinstance(data, dict) or not str(data.get("narrative") or "").strip() \
+            or not str(data.get("label") or "").strip():
+        raise ValueError("week rollup answer has no narrative or no label")
+    return data
 
 
 async def _ensure_week_rollup(conn, agent_id, week_start, week_end):
