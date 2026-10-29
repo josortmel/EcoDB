@@ -29,11 +29,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from asyncpg.exceptions import ForeignKeyViolationError
+from asyncpg.exceptions import ForeignKeyViolationError, UniqueViolationError
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -57,6 +57,7 @@ from settings import ENABLE_AUTO_LINK, ENABLE_POST_HOC_CLASSIFIER
 # + chunking), no entran como memoria literal.
 MAX_CONTENT_LEN = 16_000      # ~16KB, margen funcional sobre la GPU disponible
 MAX_TAGS = 50                 # max numero de tags por memoria
+OCCURRED_AT_MAX_AGE_DAYS = 7  # #547: how far back a queued save may date itself
 MAX_TAG_LEN = 200             # max chars por tag individual
 MAX_MEDIA_PATH_LEN = 1_024
 
@@ -112,6 +113,12 @@ class MemoryCreate(BaseModel):
     foresight_start: Optional[datetime] = None
     foresight_end: Optional[datetime] = None
     metadata: Optional[dict] = None
+    # #547: a save that the MCP queued during an embeddings outage is re-sent later with the id
+    # it already gave the agent and the time it really happened. Re-sending the same id is a no-op.
+    client_id: Optional[UUID] = Field(
+        None, description="Id chosen by the client; a repeated id from the same owner returns the existing memory.")
+    occurred_at: Optional[datetime] = Field(
+        None, description=f"When it happened (default now). Not in the future, at most {OCCURRED_AT_MAX_AGE_DAYS} days back.")
 
     @field_validator("content")
     @classmethod
@@ -392,6 +399,22 @@ async def create_memory(
                 if int(agent_row["user_id"]) != actor_id:
                     raise HTTPException(403, "cannot create memory for agent owned by another user")
             resolved_agent_id = agent_row["id"]
+
+        # #547: a re-sent queued save. Same id + same owner = already saved, return it
+        # (before embedding, so a replay costs nothing). Another owner's id = 409.
+        occurred_at = None
+        if body.occurred_at is not None:
+            occurred_at = (body.occurred_at if body.occurred_at.tzinfo
+                           else body.occurred_at.replace(tzinfo=timezone.utc))
+            now = datetime.now(timezone.utc)
+            if (occurred_at > now + timedelta(minutes=5)
+                    or occurred_at < now - timedelta(days=OCCURRED_AT_MAX_AGE_DAYS)):
+                raise HTTPException(
+                    422, f"occurred_at must be in the last {OCCURRED_AT_MAX_AGE_DAYS} days and not in the future")
+        if body.client_id is not None:
+            existing = await _fetch_for_replay(conn, body.client_id, actor_id)
+            if existing is not None:
+                return _row_to_response(existing)
     # Pool liberado aqui — la conexion vuelve al pool para otros endpoints.
 
     # FASE 2 — embed FUERA del pool. Si falla, lanzamos 503 sin tocar DB.
@@ -423,11 +446,13 @@ async def create_memory(
                 """
                 WITH inserted AS (
                   INSERT INTO memories
-                    (user_id, agent_id, workspace_id, project_id, type, content_type,
+                    (id, created_at,
+                     user_id, agent_id, workspace_id, project_id, type, content_type,
                      visibility, content, tags, weight, weight_base, media_path,
                      embedding, embedding_model,
                      foresight_start, foresight_end, metadata)
-                  VALUES ($1, $2, $3, $4, $5::memory_type, $6::content_modality,
+                  VALUES (COALESCE($18::uuid, gen_random_uuid()), COALESCE($19::timestamptz, now()),
+                          $1, $2, $3, $4, $5::memory_type, $6::content_modality,
                           $7::visibility, $8, $9, $10, $11, $12,
                           $13::vector, $14,
                           $15, $16, $17::jsonb)
@@ -443,7 +468,15 @@ async def create_memory(
                 embedding_literal, EMBEDDING_MODEL_TAG,
                 body.foresight_start, body.foresight_end,
                 json.dumps(body.metadata or {}),
+                body.client_id, occurred_at,
             )
+        except UniqueViolationError:
+            # #547: two senders of the same queued save raced past the replay check.
+            existing = (await _fetch_for_replay(conn, body.client_id, int(actor["sub"]))
+                        if body.client_id is not None else None)
+            if existing is None:
+                raise
+            return _row_to_response(existing)
         except ForeignKeyViolationError:
             # NV1-10 cierre Deuda #22 (2026-05-08): TOCTOU FASE1→FASE3. Si
             # workspace/project/user/agent fue borrado entre validacion y INSERT
@@ -1252,6 +1285,18 @@ async def preview_memory(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+async def _fetch_for_replay(conn, memory_id: UUID, actor_id: int):
+    """#547: the memory a re-sent save refers to, or None if it isn't there yet.
+    An id that belongs to another owner is a 409, never a silent hit."""
+    row = await conn.fetchrow(
+        """SELECT m.*, a.identifier AS agent_identifier
+           FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
+           WHERE m.id = $1""", memory_id)
+    if row is not None and int(row["user_id"]) != actor_id:
+        raise HTTPException(409, "memory id already in use")
+    return row
+
 
 def _row_to_response(row, agent_identifier=None) -> MemoryResponse:
     return MemoryResponse(
