@@ -917,6 +917,33 @@ def _cover_uncovered(memories, clusters):
     return clusters, added
 
 
+_DECISIONES_PLACEHOLDER = "{decisiones_en_vigor}"
+
+
+async def _decisiones_en_vigor(conn, agent_id, p_start, p_end):
+    """#844 (from #702): the period's decision/acuerdo memories, one line each with date, short id
+    and author, for templates that carry {decisiones_en_vigor}. The section is built from these and
+    not from what the model takes for a rule; a memory whose metadata has superseded_by is left out,
+    because an obsolete rule in the section does more harm than none (Prima, arXiv 2610.36308)."""
+    rows = await conn.fetch("""
+        SELECT m.id, m.created_at, m.content, m.metadata, a.identifier AS autor
+        FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
+        WHERE m.agent_id = $1 AND m.type::text = ANY($2::text[]) AND m.staleness <> 'archived'
+          AND m.created_at >= $3::date AND m.created_at < $4::date + 1
+        ORDER BY m.created_at
+    """, agent_id, ["decision", "acuerdo"], p_start, p_end)
+    lines = []
+    for r in rows:
+        meta = r["metadata"] or {}
+        if isinstance(meta, str):
+            meta = json.loads(meta)
+        if meta.get("superseded_by"):
+            continue
+        text = " ".join(str(r["content"]).split())[:400]
+        lines.append(f"- [{r['created_at']:%Y-%m-%d}] id {str(r['id'])[:8]} · {r['autor']} · {text}")
+    return "\n".join(lines) or "(ninguna decisión ni acuerdo guardado en este periodo)"
+
+
 async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
     ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
     identity = await conn.fetch("""
@@ -958,6 +985,10 @@ Si detectas patrones que aparecen en AMBOS periodos, escalalo: "esto no es un pu
 
     _ctx = _active_cell.get()
     if _ctx and _ctx.get("template"):
+        decisiones = ""
+        if _DECISIONES_PLACEHOLDER in _ctx["template"]:
+            decisiones = await _decisiones_en_vigor(
+                conn, agent_id, min(c["period_start"] for c in clusters), max(c["period_end"] for c in clusters))
         system_prompt = _safe_format(
             _ctx["template"],
             agent_identifier=ident,
@@ -965,6 +996,7 @@ Si detectas patrones que aparecen en AMBOS periodos, escalalo: "esto no es un pu
             identity_text=identity_text[:3000],
             style=style,
             prev_monthly_section=prev_monthly_section,
+            decisiones_en_vigor=decisiones,
         )
         user_prompt = f"Estas son tus narrativas {source_name} del {period_name}:\n\n" + "\n\n---\n\n".join(cluster_texts)
         raw = await _llm_call(system_prompt, user_prompt)
@@ -1056,11 +1088,16 @@ async def _label_week_rollup(clusters, agent_id, conn):
     style = _STYLE_NOTES.get(ident, "")
 
     template = await _week_rollup_template(conn, agent_id)
+    decisiones = ""
+    if template and _DECISIONES_PLACEHOLDER in template:
+        decisiones = await _decisiones_en_vigor(
+            conn, agent_id, clusters[0]["period_start"], clusters[0]["period_end"])
     system_prompt = _safe_format(
         template or _WEEK_ROLLUP_FALLBACK,
         agent_identifier=ident,
         identity_text=identity_text[:3000],
         style=style,
+        decisiones_en_vigor=decisiones,
     )
     cluster_texts = [
         f"=== {c['label']} ===\n{c.get('narrative') or c.get('detail') or '(sin narrativa)'}"
