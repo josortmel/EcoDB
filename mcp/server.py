@@ -34,7 +34,9 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -329,6 +331,126 @@ def _err(exc: Exception) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# #547 (L14): save_memory during an embeddings/API outage goes to a local queue
+# ---------------------------------------------------------------------------
+# The API keeps its invariant (no embedding, no memory), so a save during an outage used to be
+# lost. Now it is written to a spool file with the id and time it is given right away, and sent
+# later by whichever MCP process gets there first (claim = exclusive create of <id>.lock).
+# The API accepts client_id/occurred_at and treats a repeated id as a no-op, so a double send is
+# harmless. A send that fails for any reason other than an outage goes to failed/ and every
+# save_memory reports it until someone looks (a silent queue is failing without noise).
+# The API accepts occurred_at at most 7 days back: a queue stuck longer than that lands in failed/
+# (and is reported), it is never sent with a false date.
+
+SPOOL_DIR = Path(os.environ.get("ECODB_SPOOL_DIR") or (
+    Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "ecodb-mcp" / "spool"))
+SPOOL_RETRY_SECONDS = float(os.environ.get("ECODB_SPOOL_RETRY_SECONDS", "30"))
+_SPOOL_STALE_CLAIM_SECONDS = 600
+_OUTAGE_STATUSES = {502, 503, 504}
+
+
+def _is_outage(exc: Exception) -> bool:
+    status = getattr(exc, "http_status", None)
+    if status is not None:
+        return status in _OUTAGE_STATUSES
+    return "network error" in str(exc)
+
+
+def _spool_put(mem_id: str, payload: dict, file_real: Optional[str]) -> None:
+    SPOOL_DIR.mkdir(parents=True, exist_ok=True)
+    rec = {"id": mem_id, "payload": payload, "file_real": file_real,
+           "queued_at": datetime.now(timezone.utc).isoformat()}
+    tmp = SPOOL_DIR / f"{mem_id}.tmp"
+    tmp.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, SPOOL_DIR / f"{mem_id}.json")
+
+
+def _spool_status() -> dict:
+    if not SPOOL_DIR.is_dir():
+        return {}
+    pending = len(list(SPOOL_DIR.glob("*.json")))
+    failed_dir = SPOOL_DIR / "failed"
+    failed = len(list(failed_dir.glob("*.json"))) if failed_dir.is_dir() else 0
+    if not pending and not failed:
+        return {}
+    out = {"pending": pending, "failed": failed, "dir": str(SPOOL_DIR)}
+    if failed:
+        out["warning"] = (f"{failed} queued memories could NOT be saved; "
+                          f"read {failed_dir} (each file says why)")
+    return out
+
+
+def _spool_claim(f: Path) -> Optional[Path]:
+    """Claim a queued file by creating its .lock exclusively (CreateFile CREATE_NEW on Windows).
+    NOT a rename: on Windows two processes can both «successfully» rename the same open file
+    (measured 29-oct: ~190 of 300 files double-claimed by 4 processes; with O_EXCL, 0 of 1500)."""
+    lock = f.with_suffix(".lock")
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return None
+    if not f.exists():  # another session finished it between our glob and our lock
+        lock.unlink(missing_ok=True)
+        return None
+    return lock
+
+
+def _spool_flush() -> dict:
+    """Send every queued save once. Returns counts; never raises."""
+    sent = kept = failed = 0
+    if not SPOOL_DIR.is_dir():
+        return {"sent": 0, "kept": 0, "failed": 0}
+    now = time.time()
+    for lock in SPOOL_DIR.glob("*.lock"):  # a process died mid-send: free it for the next pass
+        try:
+            if now - lock.stat().st_mtime > _SPOOL_STALE_CLAIM_SECONDS:
+                lock.unlink()
+        except OSError:
+            pass
+    for f in sorted(SPOOL_DIR.glob("*.json")):
+        lock = _spool_claim(f)
+        if lock is None:
+            continue
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+            data = _api_call("POST", "/memories", json=rec["payload"])
+            if rec.get("file_real"):
+                _attach_media(data, rec["file_real"])
+            f.unlink()
+            sent += 1
+        except Exception as e:  # noqa: BLE001 — one bad file must not stop the rest
+            if _is_outage(e):
+                kept += 1
+                continue
+            failed_dir = SPOOL_DIR / "failed"
+            failed_dir.mkdir(exist_ok=True)
+            try:
+                rec = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                rec = {"unreadable": True}
+            rec["error"] = str(e)
+            rec["failed_at"] = datetime.now(timezone.utc).isoformat()
+            (failed_dir / f.name).write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+            f.unlink(missing_ok=True)
+            failed += 1
+        finally:
+            lock.unlink(missing_ok=True)
+    return {"sent": sent, "kept": kept, "failed": failed}
+
+
+def _spool_worker() -> None:
+    while True:
+        try:
+            if SPOOL_DIR.is_dir() and any(SPOOL_DIR.glob("*.json")):
+                res = _spool_flush()
+                if res["sent"] or res["failed"]:
+                    print(f"[ecodb-mcp] spool: {res}", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"[ecodb-mcp] spool worker error: {e}", file=sys.stderr)
+        time.sleep(SPOOL_RETRY_SECONDS)
+
+
+# ---------------------------------------------------------------------------
 # MCP server
 # ---------------------------------------------------------------------------
 
@@ -399,26 +521,25 @@ def save_memory(
     if image_base64 is not None:
         payload["image_base64"] = image_base64
     try:
-        data = _api_call("POST", "/memories", json=payload)
-        # Media storage: copiar archivo a carpeta estable o guardar ruta original
+        try:
+            data = _api_call("POST", "/memories", json=payload)
+        except RuntimeError as e:
+            if not _is_outage(e):
+                raise
+            # #547: outage → queue it with the id and time it gets NOW; the id is final.
+            mem_id = str(uuid.uuid4())
+            occurred_at = datetime.now(timezone.utc).isoformat()
+            _spool_put(mem_id, {**payload, "client_id": mem_id, "occurred_at": occurred_at},
+                       real if resolved_file_path is not None else None)
+            resp = {"status": "queued", "id": mem_id, "type": type, "created_at": occurred_at,
+                    "note": ("EcoDB can't save right now (" + str(e)[:160] + "). Saved to the local "
+                             "queue; it will be sent automatically with this id and this time.")}
+            spool = _spool_status()
+            if spool:
+                resp["spool"] = spool
+            return _ok(resp)
         if resolved_file_path is not None and real is not None:
-            file_ext = Path(real).suffix.lower() if real else ""
-            if file_ext in _NO_COPY_EXTENSIONS:
-                # Archivos con dependencias externas: guardar ruta original (no copiar)
-                stored_path = real
-            else:
-                # Archivos autocontenidos: copiar a media store
-                try:
-                    stored_path = _copy_to_media_store(real, data["id"])
-                except (RuntimeError, OSError, IOError) as _e:
-                    data["media_storage_warning"] = f"memory saved but file copy failed: {_e}"
-                    stored_path = None
-            if stored_path:
-                try:
-                    _api_call("PUT", f"/memories/{quote(data['id'], safe='')}", json={"media_path": stored_path})
-                    data["media_path"] = stored_path
-                except RuntimeError as _e:
-                    data["media_storage_warning"] = f"file copied to {stored_path} but DB update failed: {_e}"
+            _attach_media(data, real)
         resp = {
             "status": "ok",
             "id": data["id"],
@@ -430,9 +551,32 @@ def save_memory(
         }
         if data.get("media_path"):
             resp["media_path"] = data["media_path"]
+        spool = _spool_status()
+        if spool:
+            resp["spool"] = spool
         return _ok(resp)
     except RuntimeError as e:
         return _err(e)
+
+
+def _attach_media(data: dict, real: str) -> None:
+    """Media storage after a saved memory: copy the file to the media store (or keep the original
+    path for files with external dependencies) and record it. Warnings go into `data`."""
+    file_ext = Path(real).suffix.lower()
+    if file_ext in _NO_COPY_EXTENSIONS:
+        stored_path = real
+    else:
+        try:
+            stored_path = _copy_to_media_store(real, data["id"])
+        except (RuntimeError, OSError, IOError) as _e:
+            data["media_storage_warning"] = f"memory saved but file copy failed: {_e}"
+            stored_path = None
+    if stored_path:
+        try:
+            _api_call("PUT", f"/memories/{quote(data['id'], safe='')}", json={"media_path": stored_path})
+            data["media_path"] = stored_path
+        except RuntimeError as _e:
+            data["media_storage_warning"] = f"file copied to {stored_path} but DB update failed: {_e}"
 
 
 @mcp.tool()
@@ -1770,6 +1914,8 @@ def narrate_cluster(cluster_id: str, narrative: str) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # #547: send what earlier sessions queued, and keep retrying in the background.
+    threading.Thread(target=_spool_worker, name="ecodb-spool", daemon=True).start()
     if MCP_TRANSPORT in ("sse", "streamable-http"):
         # Server por red — escucha en MCP_HOST:MCP_PORT.
         mcp.run(transport=MCP_TRANSPORT)
