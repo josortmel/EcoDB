@@ -1,0 +1,5 @@
+# 30-oct: la misma capa de docling que overlay573 (#573, probada el 29-oct sobre 0.25.0-829), puesta encima de
+# overlay836 para desplegar las dos con un solo reinicio. Solo pip; versiones de ≥2 semanas.
+FROM ecodb-api:0.25.0-836
+RUN pip install --no-cache-dir docling==2.132.0 docling-slim==2.132.0 docling-core==2.101.1 \
+    docling-ibm-models==4.0.3 docling-parse==7.22.3 langcodes==3.5.1

@@ -20,7 +20,9 @@ la imagen viva con esa etiqueta (`docker tag ecodb-api:0.25.0 ecodb-api:0.25.0-p
 | 3 | `overlay561-api` + `overlay561-apt-api` | `pre561` (dc59dd20) | e1b51888 | pip (urllib3 2.8.0, langgraph-sdk 0.4.4, pip 26.2) + `apt upgrade` |
 | 4 | `overlay605` | `pre605` (e1b51888) | 65fbe310 | `classifier.py` de 5bc08fa |
 | 5 | `overlay569` | `pre569` (65fbe310) | b32663fb (viva hasta el 28-oct 18:3x) | `graph.py`, `migrations.py` de 7ebe953 + `sql/migrate_5.4.1_…` |
-| 6 | `overlay701` | `pre701` (b32663fb) | **f6c2e243 = viva desde el 28-oct** (`0.25.0` = `0.25.0-702b`) | `cell_worker.py`, `cell_configs.py`, `settings.py`, `clusters.py`, `parsers.py` de **c3650d3** (#701/#716/#717/#603/#792 + #808/#702). La misma capa se construyó tres veces sobre `pre701` con el código de cada momento: `-701` (1fe45a0c, #808), `-702` (9eb34b80, 3e37e74), `-702b` (f6c2e243, c3650d3); no se apilan. |
+| 6 | `overlay701` | `pre701` (b32663fb) | f6c2e243 (viva del 28-oct al 29-oct 12:55) (`0.25.0-702b`) | `cell_worker.py`, `cell_configs.py`, `settings.py`, `clusters.py`, `parsers.py` de **c3650d3** (#701/#716/#717/#603/#792 + #808/#702). La misma capa se construyó tres veces sobre `pre701` con el código de cada momento: `-701` (1fe45a0c, #808), `-702` (9eb34b80, 3e37e74), `-702b` (f6c2e243, c3650d3); no se apilan. |
+| 7 | `overlay829` | `pre829` (f6c2e243) | cbf2f0bb (viva del 29-oct 12:55 al 30-oct 13:34) (`0.25.0-829`) | #817: `memories.py`, `pillow_guard.py`, `parsers.py`, `main.py`, `worker.py`, `cell_worker.py`, `migrations.py` + `sql/migrate_5.5.0_…` (#547 api, #811, #813, #816) |
+| 8 | `overlay836` + `overlay573b` | `pre836` (cbf2f0bb) | **5bdac93e = viva desde el 30-oct 13:34** (`0.25.0-836-docling`; la intermedia `0.25.0-836` = 30bff31e) | `memories.py` de ce18cbb (#836: el reenvío de una memoria borrada es 409) y `cell_worker.py` de ab0e5af (#844, inerte hasta #846) — los dos ÚNICOS `.py` distintos de main, md5 sin `\r` —; encima pip docling 2.132.0, docling-slim 2.132.0, docling-core 2.101.1, docling-ibm-models 4.0.3, docling-parse 7.22.3, langcodes 3.5.1 (#573, la misma capa que `overlay573` probada el 29-oct). Un solo reinicio para las dos. |
 
 Inventario del 29-oct (#784): `pip list` y `dpkg-query` de `ecodb-api:0.25.0` y `ecodb-mcp:1.8.0` = los ficheros de
 `deploy/inventario/` sin una sola diferencia (api 303 apt / 176 pip, mcp 87 / 40): las capas del 28 solo traen `.py`.
@@ -33,7 +35,8 @@ Inventario del 29-oct (#784): `pip list` y `dpkg-query` de `ecodb-api:0.25.0` y 
 | 1 | `overlay386-mcp`, `overlay386-mcp2` | `pre386` / `386` | 1a22c1a9 | mcp 1.29.1, PyJWT 2.15.1 |
 | 2 | `overlay561-mcp` + `overlay561-apt-mcp` | `pre561` / `561` | 1d436f8c | mcp 1.30.0 (GHSA-84m7-p3x7-pcfv) + `apt upgrade` |
 | 3 | `overlay569-mcp` | `1.8.0` (1d436f8c) | 46fb40ea (viva hasta el 28-oct) | `mcp/server.py` de 7ebe953 |
-| 4 | `overlay492-mcp` | `1.8.0-pre492` (46fb40ea) | **e42e6c38 = viva desde el 28-oct** | `mcp/server.py` de fcec1bc (#492) |
+| 4 | `overlay492-mcp` | `1.8.0-pre492` (46fb40ea) | e42e6c38 (viva del 28-oct al 30-oct 13:34) | `mcp/server.py` de fcec1bc (#492) |
+| 5 | `overlay836-mcp` | `1.8.0-pre836` (e42e6c38) | **5c30a068 = viva desde el 30-oct 13:34** | `mcp/server.py` de main (#603 narrate 32000, #547 cola ante caídas; la cola vive dentro del contenedor, sin volumen) |
 
 Las de embeddings, ner y postgres (`overlay561-emb*`, `-ner`, `-apt-*`) son del 16-oct (#561) y siguen el mismo patrón.
 

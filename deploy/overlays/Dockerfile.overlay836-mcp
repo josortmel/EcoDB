@@ -1,0 +1,8 @@
+# 30-oct (#836, L119): el contenedor ecodb-mcp (SSE en el 8091) tenía el server.py de fcec1bc y el MCP por stdio
+# de la familia corre el de main. El de main trae #603 (narrate hasta 32000) y #547 (cola ante caídas). La cola
+# vive en /home/mcpuser/.cache/ecodb-mcp/spool dentro del contenedor: sin volumen, recrearlo pierde lo encolado
+# (pendiente: ponerla en un volumen si el 8091 se usa alguna vez para escribir). Solo cambia server.py; mismos
+# imports (threading y uuid, de la biblioteca estándar).
+# Antes de construir: docker tag ecodb-mcp:1.8.0 ecodb-mcp:1.8.0-pre836 (= e42e6c38). Volver atrás: retaguear y recrear mcp.
+FROM ecodb-mcp:1.8.0-pre836
+COPY --chown=mcpuser:mcpuser mcp/server.py /app/server.py

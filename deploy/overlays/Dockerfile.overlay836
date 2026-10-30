@@ -1,0 +1,8 @@
+# 30-oct (#836 + #844): memories.py de ce18cbb (un reenvío de la cola de una memoria que está en la papelera
+# es 409, no una resurrección) y cell_worker.py de ab0e5af (sección «Decisiones y reglas en vigor»: inerte
+# hasta #846, que activa las plantillas v3). Son los DOS únicos .py que difieren entre la viva (cbf2f0bb) y
+# main, comparados con md5 sin \r en los dos lados (la imagen mezcla LF y CRLF de capas hechas desde Windows).
+# Antes de construir: docker tag ecodb-api:0.25.0 ecodb-api:0.25.0-pre836 (= cbf2f0bb = 0.25.0-829).
+# Encima va la de docling (overlay573) con FROM ecodb-api:0.25.0-836: un solo reinicio para las dos.
+FROM ecodb-api:0.25.0-pre836
+COPY --chown=apiuser:apiuser api/memories.py api/cell_worker.py ./

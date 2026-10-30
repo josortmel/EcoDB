@@ -1,0 +1,9 @@
+# #745 (decisión 77 de Pepe): pgvector 0.8.2 → 0.8.7 (0.8.3/0.8.4 arreglan corrupción posible de HNSW al hacer
+# VACUUM; todos nuestros índices vectoriales son HNSW). La imagen base compila pgvector desde el código; el
+# paquete de PGDG pone el vector.so y los scripts de subida en las mismas rutas. Después, en la base:
+# ALTER EXTENSION vector UPDATE (el CHANGELOG no pide reindexar). Probado primero en una COPIA (30-oct).
+# Antes de construir: docker tag ecodb-postgres:1.0.0 ecodb-postgres:1.0.0-pre745 (= ab6c113f).
+FROM ecodb-postgres:1.0.0-pre745
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-16-pgvector=0.8.7-1.pgdg12+1 \
+    && rm -rf /var/lib/apt/lists/*
