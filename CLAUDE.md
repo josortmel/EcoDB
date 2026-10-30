@@ -475,6 +475,28 @@ docker compose restart mcp
   cambiaron. Tabla viejo → nuevo en EcoDB (memoria con tag 520); los viejos siguen en la rama local
   `backup/pre-rewrite-520-20261015`, que no se sube.
 
+## 30-oct-2026 (Hilo) — lo que hay que saber
+
+- **DESPLEGADO 13:34, un solo reinicio:** `ecodb-api:0.25.0` = **5bdac93e** (api, worker, cell) = `overlay836`
+  (`memories.py` de ce18cbb: reenvío de una memoria borrada → 409; `cell_worker.py` de ab0e5af, inerte hasta #846) +
+  `overlay573b` (docling 2.132.0 y compañía). `ecodb-mcp:1.8.0` = **5c30a068** (server.py de main). Vuelta atrás:
+  `0.25.0-pre836` (cbf2f0bb) y `1.8.0-pre836` (e42e6c38). `deploy/CADENA.md` pasos 7-8 y mcp 5. Commit **43a0fc0
+  SOLO LOCAL**: no se sube hasta después del experimento «desde cero» del domingo 1-nov (#785), para que la sesión
+  clone el mismo main que hoy. Tampoco los cambios sin commit de README/setup.* (perfiles de compose; autor no
+  encontrado, #789 los revisa y sube).
+- **Comparar la imagen viva con main: md5 SIN `\r` en los dos lados.** La imagen mezcla LF y CRLF de capas hechas desde
+  Windows; sin normalizar, salen 30-44 «diferencias» falsas. Normalizado salen las de verdad.
+- **192.168.65.254 (host-gateway de Docker Desktop) llega a la api, al postgres (5435) y al mcp de producción desde
+  CUALQUIER contenedor, sin flags** (memoria bf7fd803). Hallazgo de credenciales relacionado: FarOS #865 (el detalle
+  vive allí, no en este repo público).
+- **Las lecturas escriben:** `read_memory` suma access_count/last_accessed; `search` pone last_accessed y puede
+  despertar dormidas; `expand_scope=true` escribe audit_log.
+- **pgvector 0.8.7** probado en tres copias (#745, `deploy/overlays/Dockerfile.overlay745-pg`): mismos top-10, recall
+  igual, VACUUM HNSW limpio. Producción el mar 3-nov 11:45; la vuelta atrás exige backup (la extensión no baja sola).
+- **migrations.py (#812):** inventario hecho; el riesgo que queda son 7 `ON CONFLICT (name) DO UPDATE SET content` que
+  reescriben 67/68/69 y las semanales v2 en cada arranque (Escribano/Faro/Helena). Arreglo después del domingo.
+- **GPU del embebedor:** el PC se reinició el 30-oct 08:58; la medida de 24 h cuenta desde las 09:02 (sáb 31 20:00).
+
 ## Deuda técnica — deep hunt v0.9 (2026-06-01)
 
 ### Spec §7 — deferred by design
