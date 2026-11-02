@@ -1,0 +1,39 @@
+# docker-compose.alerting.yml — OVERLAY. NO se aplica solo.
+#
+# Añade el receptor de webhooks de autoheal (el ojo).
+# Cierra action item #2 del post-mortem del 2026-08-21.
+#
+# APLICAR (con Pepe, DESPUES de autoheal):
+#   docker compose -f docker-compose.yml \
+#     -f docker-compose.autoheal.yml \
+#     -f docker-compose.alerting.yml up -d
+#
+# REQUIERE en .env:
+#   TELEGRAM_BOT_TOKEN=   (de @BotFather)
+#   TELEGRAM_CHAT_ID=     (chat_id de Pepe)
+#   ECODB_API_KEY=        (ya existe en .env)
+
+services:
+  alerting:
+    build: ./alerting
+    container_name: ecodb-alerting
+    restart: unless-stopped
+    environment:
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+      ECODB_API_URL: "http://api:8080"
+      ECODB_API_KEY: "${ECODB_API_KEY:-}"
+    networks:
+      - ecodb
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  ecodb:
+    external: true
