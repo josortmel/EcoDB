@@ -386,7 +386,7 @@ For the complete architecture — authentication flow, data isolation model, adm
 ```bash
 git clone https://github.com/josortmel/EcoDB
 cd EcoDB
-./scripts/setup.sh          # generates .env, verifies dependencies
+./scripts/setup.sh          # generates .env (secrets, CELL_DB_PASSWORD, COMPOSE_PROFILES), verifies dependencies
 docker compose up --build -d # first boot builds images + downloads models (~35 GB)
 ```
 
@@ -411,11 +411,23 @@ docker exec ecodb-api python bootstrap_first_apikey.py
 docker compose restart mcp
 ```
 
-**Optional profiles:**
+**Profiles:**
+
+`worker` (ingestion) and `ecodb-cell` (metacognition) live behind Compose profiles. Enable them
+persistently by setting `COMPOSE_PROFILES` in `.env` (recommended — a plain `docker compose up -d`
+then starts them):
+
+```
+COMPOSE_PROFILES=with-ingestion,with-metacognition
+```
+
+`ecodb-cell` runs the **scheduled** memory consolidation (weekly→yearly clustering) that powers
+telescopic memory; without it only the manual `POST /api/v1/cells/trigger` runs, so the boot view
+freezes. Keep it on. Or enable a profile ad-hoc for a single command:
 
 ```bash
 docker compose --profile with-ingestion up --build -d    # PDF, DOCX, audio ingestion
-docker compose --profile with-llm up --build -d          # local LLM for classification
+docker compose --profile with-llm up --build -d          # local LLM (optional; API defaults to DeepSeek)
 ```
 
 ### Requirements

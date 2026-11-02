@@ -20,11 +20,11 @@ services:
       dockerfile: Dockerfile.postgres
     image: ecodb-postgres:1.0.0
     container_name: ecodb-postgres
-    command: -c ecodb.cell_password=${CELL_DB_PASSWORD:-ecodb_cell_dev_only}
+    command: -c ecodb.cell_password=${CELL_DB_PASSWORD:?set CELL_DB_PASSWORD in .env (scripts/setup generates it)}
     environment:
       POSTGRES_DB: ecodb
       POSTGRES_USER: ecodb
-      POSTGRES_PASSWORD: ${ECODB_DB_PASSWORD:-ecodb_test_pass}
+      POSTGRES_PASSWORD: ${ECODB_DB_PASSWORD:?set ECODB_DB_PASSWORD in .env (scripts/setup generates it)}
     ports:
       # Bind to localhost only — postgres should not be reachable from the network.
       # Auth is enforced at the API/JWT layer, not the DB layer.
@@ -105,7 +105,7 @@ services:
     container_name: ecodb-api
     environment:
       ENVIRONMENT: ${ECODB_ENV:-development}
-      DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:-ecodb_test_pass}@postgres:5432/ecodb
+      DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:?set ECODB_DB_PASSWORD in .env (scripts/setup generates it)}@postgres:5432/ecodb
       EMBEDDINGS_URL: http://embeddings:8090
       EMBEDDINGS_TIMEOUT: "60.0"
       JWT_SECRET: ${ECODB_JWT_SECRET}
@@ -221,7 +221,7 @@ services:
     container_name: ecodb-worker
     entrypoint: ["gosu", "apiuser", "python", "worker.py"]
     environment:
-      DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:-ecodb_test_pass}@postgres:5432/ecodb
+      DATABASE_URL: postgresql://ecodb:${ECODB_DB_PASSWORD:?set ECODB_DB_PASSWORD in .env (scripts/setup generates it)}@postgres:5432/ecodb
       EMBEDDINGS_URL: http://embeddings:8090
       ECODB_API_INTERNAL_URL: http://ecodb-api:8080
       MEDIA_STORE_DIR: /app/media
@@ -236,6 +236,9 @@ services:
       EMBED_BATCH_SIZE: "4"
     volumes:
       - ecodb_media:/app/media:ro
+      # #822: docling's layout models (~506 MB) live here; without a volume every recreate lost
+      # them and the next PDF re-downloaded them (network + ~9 min on CPU).
+      - worker_hf_cache:/app/.cache/huggingface
     healthcheck:
       test: ["CMD-SHELL", "cat /proc/1/cmdline 2>/dev/null | tr '\\0' ' ' | grep -q worker || exit 1"]
       interval: 30s
@@ -298,7 +301,7 @@ services:
     healthcheck:
       disable: true
     environment:
-      DATABASE_URL: postgresql://ecodb_cell:${CELL_DB_PASSWORD:-ecodb_cell_dev_only}@postgres:5432/ecodb
+      DATABASE_URL: postgresql://ecodb_cell:${CELL_DB_PASSWORD:?set CELL_DB_PASSWORD in .env (scripts/setup generates it)}@postgres:5432/ecodb
       CELL_LLM_PROVIDER: ${CELL_LLM_PROVIDER:-deepseek}
       CELL_LLM_URL: ${CELL_LLM_URL:-https://api.deepseek.com}
       CELL_LLM_KEY: ${CELL_LLM_KEY}
@@ -339,6 +342,7 @@ volumes:
   api_hf_cache:
   ecodb_media:
   hf_cache:
+  worker_hf_cache:
 
 networks:
   ecodb-net:
