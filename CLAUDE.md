@@ -14,6 +14,28 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
 - Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
+## 2-nov-2026 (Hilo) — secretos rotados, compose sin contraseñas públicas, caché del worker
+
+- **Secretos rotados en producción** tras el robo de datos del 31-oct (memoria 64315a65): contraseñas de `ecodb` y de
+  `ecodb_cell` (la de `ecodb_cell` era la por defecto del compose público: `CELL_DB_PASSWORD` no estaba en el .env),
+  JWT, pepper, `INTERNAL_BROADCAST_SECRET` y `ENCRYPTION_KEY`. Las 13 claves de API activas, desactivadas; nuevas: 1288
+  (familia, la de los MCP de las sesiones) y 1289 (contenedor mcp). Script: `Hilo/scripts_incidente/rotar_ecodb.ps1`.
+- **La api lee la clave de `Authorization: Bearer`**, no de `x-api-key` (ese es el de la célula hacia el proveedor LLM).
+  Probar una clave: `GET /auth/me` con Bearer.
+- **`ENCRYPTION_KEY` hoy no cifra nada**: `llm_provider_keys` tiene 0 filas; la célula lee `CELL_LLM_KEY` del entorno.
+  Por eso EcoDB no tiene ningún secreto irremplazable (diseño de reconstrucción con Prima: copia + frase del dueño).
+- **Compose (afd24b8):** sin valores por defecto para `ECODB_DB_PASSWORD` / `CELL_DB_PASSWORD` (`${VAR:?…}`): si faltan,
+  compose se niega a arrancar y dice cuál. `setup.sh/.ps1` generan las dos y escriben `COMPOSE_PROFILES`.
+- **Recrear solo lo necesario:** un `docker compose up -d` a secas recrea también `embeddings` (modelo de 7 GB).
+  Siempre `docker compose up -d --no-build --no-deps <servicios>`.
+- **Worker con volumen de caché (#822):** `worker_hf_cache` en `/app/.cache/huggingface` (su HF_HOME). Los modelos de
+  docling sobreviven a una recreación (PDF sin red tras recrear: 90 s frente a 858 s).
+- **Experimento desde cero (1-nov) cerrado (#789):** veredicto NO FUNCIONAL solo por el punto 3: en CPU, la api espera a
+  embeddings 60 s, el encode tarda 42-70 s, y `/search` devuelve **200 con lista vacía en silencio**. Puede pasar también
+  en producción con la GPU ocupada. Arreglos en el macro #909 (#910-#913).
+- **Mensuales (#848, medido):** la plantilla A2 (una imagen por semana con el título de su semanal) rescata lo «segundo de
+  su semana»; va a producción con #940 (plantilla, Prima) y #941 (comprobación en la célula, Hilo).
+
 ## Arquitectura — 6 servicios Docker
 
 ```
