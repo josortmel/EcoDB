@@ -520,16 +520,20 @@ def save_memory(
             return _err(RuntimeError(f"cannot read file_path: {_e}"))
     if image_base64 is not None:
         payload["image_base64"] = image_base64
+    # #892: the id is chosen BEFORE the first send. If the API saves it but answers after our
+    # timeout (1-nov: 64 s against 60), the queued re-send carries the same id and is a no-op,
+    # not a twin.
+    mem_id = str(uuid.uuid4())
+    occurred_at = datetime.now(timezone.utc).isoformat()
+    payload["client_id"] = mem_id
     try:
         try:
             data = _api_call("POST", "/memories", json=payload)
         except RuntimeError as e:
             if not _is_outage(e):
                 raise
-            # #547: outage → queue it with the id and time it gets NOW; the id is final.
-            mem_id = str(uuid.uuid4())
-            occurred_at = datetime.now(timezone.utc).isoformat()
-            _spool_put(mem_id, {**payload, "client_id": mem_id, "occurred_at": occurred_at},
+            # #547: outage (or our own timeout) → queue it with the same id and the time it was asked.
+            _spool_put(mem_id, {**payload, "occurred_at": occurred_at},
                        real if resolved_file_path is not None else None)
             resp = {"status": "queued", "id": mem_id, "type": type, "created_at": occurred_at,
                     "note": ("EcoDB can't save right now (" + str(e)[:160] + "). Saved to the local "

@@ -85,11 +85,28 @@ def test_a_non_outage_failure_goes_to_failed_and_is_reported(mod, api):
     assert ok["status"] == "ok" and ok["spool"]["failed"] == 1 and "could NOT be saved" in ok["spool"]["warning"]
 
 
-def test_normal_save_sends_no_client_id(mod, api):
+def test_normal_save_sends_its_client_id(mod, api):
+    """#892: the id goes on the FIRST send, so a re-send can only ever hit the same row."""
     api.post("/memories").mock(side_effect=lambda req: respx.MockResponse(201, json=_created(req)))
     r = mod.save_memory(content="pytest normal", type="observacion")
     assert r["status"] == "ok" and "spool" not in r
-    assert "client_id" not in _posts(api)[-1]
+    sent = _posts(api)[-1]
+    assert sent["client_id"] == r["id"] and "occurred_at" not in sent
+
+
+def test_a_timeout_after_the_server_saved_is_resent_with_the_same_id(mod, api):
+    """#892, seen 1-nov: the API took 64 s, the MCP gave up at 60 s and its queue re-sent the
+    save with a NEW id, so the API made a twin. Now both sends carry one id (the API's replay
+    check turns the second into a no-op)."""
+    import httpx
+    route = api.post("/memories")
+    route.side_effect = httpx.ReadTimeout("timed out")
+    r = mod.save_memory(content="pytest slow", type="observacion")
+    assert r["status"] == "queued"
+    route.side_effect = lambda req: respx.MockResponse(201, json=_created(req))
+    assert mod._spool_flush() == {"sent": 1, "kept": 0, "failed": 0}
+    first, resent = _posts(api)[-2:]
+    assert first["client_id"] == resent["client_id"] == r["id"]
 
 
 def test_other_errors_are_not_queued(mod, api):

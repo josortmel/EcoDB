@@ -27,6 +27,7 @@ Entity linking (memory_entity_links) activo via GLiNER multilingual desde Fase 3
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -694,19 +695,12 @@ async def create_memory(
             except Exception as _al_exc:
                 _al_log.warning("Auto-link failed for memory=%s: %r", str(row["id"]), _al_exc)
 
-    # B.5 Pass 2: LLM classifier OUTSIDE conn to avoid pool starvation during 30s call
+    # B.5 Pass 2: LLM classifier. #892: AFTER the response, not before it. On CPU it took ~55 s
+    # and the MCP gives up at 60 s; the tag is best-effort and nobody reads it from the response.
     if ENABLE_POST_HOC_CLASSIFIER and _classification_tag is None:
-        try:
-            from classifier import classify_with_llm
-            _cl2_result = await classify_with_llm(body.content)
-            if _cl2_result and _cl2_result["confidence"] >= 0.5:
-                _tag2 = f"classified:{_cl2_result['template_type']}"
-                async with pool.acquire() as _conn2:
-                    await _conn2.execute(
-                        "UPDATE memories SET tags = array_append(tags, $1) WHERE id = $2 AND NOT ($1 = ANY(tags))",
-                        _tag2, row["id"])
-        except Exception as _cl2_exc:
-            _logging.getLogger("ecodb.classifier").warning("Classification Pass2 failed: %r", _cl2_exc)
+        _task = asyncio.create_task(_classify_after_save(pool, row["id"], body.content))
+        _BACKGROUND_TASKS.add(_task)
+        _task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     _perf_log.info("create_memory TOTAL %.2fs", _time.time() - _t0)
     return _row_to_response(row)
@@ -1285,6 +1279,25 @@ async def preview_memory(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# #892: the LLM classifier runs here, after the response. Strong refs so the loop doesn't drop them.
+_BACKGROUND_TASKS: set = set()
+
+
+async def _classify_after_save(pool, memory_id, content: str) -> None:
+    try:
+        import classifier
+        result = await classifier.classify_with_llm(content)
+        if result and result["confidence"] >= 0.5:
+            tag = f"classified:{result['template_type']}"
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE memories SET tags = array_append(tags, $1) WHERE id = $2 AND NOT ($1 = ANY(tags))",
+                    tag, memory_id)
+    except Exception as exc:  # noqa: BLE001 — a missing tag must never surface as a failed save
+        import logging
+        logging.getLogger("ecodb.classifier").warning("Classification Pass2 failed: %r", exc)
+
 
 async def _fetch_for_replay(conn, memory_id: UUID, actor_id: int):
     """#547: the memory a re-sent save refers to, or None if it isn't there yet.
