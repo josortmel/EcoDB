@@ -31,8 +31,10 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - **Worker con volumen de caché (#822):** `worker_hf_cache` en `/app/.cache/huggingface` (su HF_HOME). Los modelos de
   docling sobreviven a una recreación (PDF sin red tras recrear: 90 s frente a 858 s).
 - **Experimento desde cero (1-nov) cerrado (#789):** veredicto NO FUNCIONAL solo por el punto 3: en CPU, la api espera a
-  embeddings 60 s, el encode tarda 42-70 s, y `/search` devuelve **200 con lista vacía en silencio**. Puede pasar también
-  en producción con la GPU ocupada. Arreglos en el macro #909 (#910-#913).
+  embeddings 60 s, el encode tarda 42-70 s, y `/search` devuelve **503** («embeddings service unavailable: …»).
+  CORREGIDO el 3-nov: aquí ponía «200 con lista vacía en silencio», y era falso; el vacío lo fabricó el comprobador
+  del experimento (`r.json().get("results", [])` sin mirar el código). Reproducido con el embebedor sin responder:
+  503 con su motivo al vencer el timeout. La api NO se calla; lo que falta es el timeout según el aparato. Macro #909.
 - **Mensuales (#848, medido):** la plantilla A2 (una imagen por semana con el título de su semanal) rescata lo «segundo de
   su semana»; va a producción con #940 (plantilla, Prima) y #941 (comprobación en la célula, Hilo).
 

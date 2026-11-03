@@ -1,0 +1,6 @@
+# 3-nov (#892): memories.py of hilo-892 (cfd9b4e): the LLM classifier (Pass 2) runs after the response, so a
+# save no longer waits ~55 s for qwen 3B on CPU. The only .py that differs from main (md5 without \r, all
+# of /app/*.py compared on 3-nov). The MCP half of #892 is mcp/server.py, which the sessions run from the repo.
+# Before building: docker tag ecodb-api:0.25.0 ecodb-api:0.25.0-pre892 (= 5bdac93e = 0.25.0-836-docling).
+FROM ecodb-api:0.25.0-pre892
+COPY --chown=apiuser:apiuser api/memories.py ./
