@@ -14,6 +14,12 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
 - Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
+## 5-nov-2026 (Hilo) — lo que hay que saber
+
+- **NO reconstruir `ecodb-embeddings` hasta #910:** `embeddings/requirements.txt` no fija versiones. La imagen viva lleva transformers 4.57.6 + peft 0.19.1; un rebuild trae peft 0.21.2, con el que los LoRA no cargan y la búsqueda devuelve basura sin error (experimento del 1-nov). Las versiones a fijar son las de producción, no 4.52.0/0.15.2.
+- **Rama `hilo-968` (worktree ../EcoDB-968, sin subir):** `restore.sh` con .sql.gz y `--recover`, guarda de variables, `docker-compose.cpu.yml`, setup sin preguntas. La para el gate #338 por `.env.example`: lo decide Pepe.
+- **`pg_hba` por 127.0.0.1 es trust:** una contraseña se prueba por la IP de la red del contenedor, no por localhost.
+
 ## 2-nov-2026 (Hilo) — secretos rotados, compose sin contraseñas públicas, caché del worker
 
 - **Secretos rotados en producción** tras el robo de datos del 31-oct (memoria 64315a65): contraseñas de `ecodb` y de
