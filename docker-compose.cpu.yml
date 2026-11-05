@@ -1,0 +1,8 @@
+# Sin GPU: scripts/setup --cpu lo añade por COMPOSE_FILE en el .env.
+# El modelo va en bf16 en CPU: unos 12 GB de RAM, y codificar un texto tarda de 40 a 70 s.
+services:
+  embeddings:
+    deploy: !reset {}
+  api:
+    environment:
+      EMBEDDINGS_TIMEOUT: "300.0"

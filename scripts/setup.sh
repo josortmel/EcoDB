@@ -10,6 +10,23 @@ info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
+# --non-interactive: nada de preguntas (la demo no se instala y un .env que exista se respeta).
+# --cpu: sin GPU, con docker-compose.cpu.yml.
+NON_INTERACTIVE=false
+CPU=false
+for arg in "$@"; do
+  case "$arg" in
+    --non-interactive) NON_INTERACTIVE=true ;;
+    --cpu) CPU=true ;;
+    *) error "Unknown option: $arg" ;;
+  esac
+done
+
+# ask "pregunta" respuesta_sin_preguntas: deja la respuesta en REPLY.
+ask() {
+  if $NON_INTERACTIVE; then REPLY="$2"; else read -p "$1 " -n 1 -r; echo; fi
+}
+
 info "Checking dependencies..."
 command -v docker >/dev/null 2>&1 || error "Docker is not installed."
 command -v openssl >/dev/null 2>&1 || error "openssl is not installed."
@@ -19,9 +36,9 @@ DOCKER_VER=$(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 info "Docker ${DOCKER_VER}"
 info "Compose $(docker compose version --short)"
 
-if ! command -v nvidia-smi >/dev/null 2>&1; then
-    warn "No NVIDIA GPU detected. EcoDB requires CUDA for embeddings."
-    read -p "Continue anyway? [y/N] " -n 1 -r; echo
+if ! $CPU && ! command -v nvidia-smi >/dev/null 2>&1; then
+    warn "No NVIDIA GPU detected. Use --cpu to run without one (~12 GB of RAM, slower search)."
+    ask "Continue anyway? [y/N]" n
     [[ $REPLY =~ ^[Yy]$ ]] || exit 1
 fi
 
@@ -33,13 +50,13 @@ else
 fi
 if [ "${AVAILABLE_GB:-0}" -lt 40 ]; then
     warn "Less than 40 GB free (${AVAILABLE_GB}G). First boot needs ~35 GB."
-    read -p "Continue anyway? [y/N] " -n 1 -r; echo
+    ask "Continue anyway? [y/N]" y
     [[ $REPLY =~ ^[Yy]$ ]] || exit 1
 fi
 
 if [ -f .env ]; then
     warn ".env already exists. Overwrite?"
-    read -p "This will reset all secrets. Continue? [y/N] " -n 1 -r; echo
+    ask "This will reset all secrets. Continue? [y/N]" n
     [[ $REPLY =~ ^[Yy]$ ]] || { info "Keeping existing .env."; exit 0; }
 fi
 
@@ -54,7 +71,7 @@ echo ""
 info "EcoDB can install a demo dataset on first boot."
 info "The demo includes example memories that teach you how the system works."
 echo ""
-read -p "Install demo dataset? [Y/n] " -n 1 -r; echo
+ask "Install demo dataset? [Y/n]" n
 if [[ ! $REPLY =~ ^[Nn]$ ]]; then
     USE_SEED=true
     info "Demo dataset will be loaded on first boot."
@@ -78,6 +95,12 @@ ECODB_API_KEY=
 EOF
 
 chmod 600 .env
+if $CPU; then
+    sep=":"; [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && sep=";"
+    echo "COMPOSE_PATH_SEPARATOR=${sep}" >> .env
+    echo "COMPOSE_FILE=docker-compose.yml${sep}docker-compose.cpu.yml" >> .env
+fi
+
 info ".env generated with random secrets."
 
 if ! grep -q "INTERNAL_BROADCAST_SECRET" .env 2>/dev/null; then

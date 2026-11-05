@@ -390,6 +390,12 @@ cd EcoDB
 docker compose up --build -d # first boot builds images + downloads models (~35 GB)
 ```
 
+Without a GPU, or from a script: `./scripts/setup.sh --non-interactive --cpu`. On CPU the model needs
+about 12 GB of RAM and encoding a text takes 40 to 70 seconds, so search is slow.
+
+The MCP only accepts `http://` for `ECODB_API_URL` on internal hosts (`localhost`, `127.0.0.1`,
+`host.docker.internal`, `ecodb-api`, `api`). Any other host needs `https://`.
+
 On **Windows**, run the setup step with PowerShell instead of `setup.sh`:
 
 ```powershell
