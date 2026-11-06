@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # al primer arranque del container. NO se incluye en la imagen para mantener
 # el tamaño manejable (sin modelo: ~3 GB; con modelo Jina v4: ~10 GB).
 
-COPY --chown=apiuser:apiuser server.py .
+COPY --chown=apiuser:apiuser server.py reference_check.py reference_vector.json ./
 
 # El cache de HuggingFace requiere acceso de escritura. apiuser necesita poder
 # leer/escribir en /home/apiuser/.cache o donde TRANSFORMERS_CACHE apunte.

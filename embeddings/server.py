@@ -47,6 +47,8 @@ from fastapi import FastAPI, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 
+from reference_check import check_reference
+
 API_VERSION = "0.2.3"
 MODEL_ID = os.environ.get("MODEL_NAME", "jinaai/jina-embeddings-v4")
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "512"))
@@ -56,6 +58,8 @@ MAX_BATCH_IMAGE = int(os.environ.get("MAX_BATCH_IMAGE", "8"))
 # NV2 fix (adv-seg) — limite de tamano por imagen para evitar OOM via base64
 # inflado. 10 MB de string base64 ~= 7.5 MB de imagen decodificada.
 MAX_IMAGE_REF_LEN = int(os.environ.get("MAX_IMAGE_REF_LEN", str(10 * 1024 * 1024)))
+# #910: below this the loaded model doesn't match the stored vectors. Broken LoRA gave ~0.2.
+REFERENCE_MIN_COSINE = float(os.environ.get("REFERENCE_MIN_COSINE", "0.9"))
 
 # Backend selector — local (PyTorch INT8 con GPU) o cloud (API Jina).
 # Cambio manual: admin modifica env var y reinicia. Sin mezcla automatica.
@@ -150,19 +154,34 @@ async def lifespan(app: FastAPI):
         yield
         return
 
-    print(f"[startup] backend=local → cargando modelo {MODEL_ID} con bitsandbytes INT8...", flush=True)
     t0 = time.time()
     try:
         from transformers import AutoModel, BitsAndBytesConfig
-        config = BitsAndBytesConfig(load_in_8bit=True)
-        _model = AutoModel.from_pretrained(
-            MODEL_ID,
-            revision=MODEL_REVISION,
-            trust_remote_code=True,
-            quantization_config=config,
-            device_map="auto",
-        )
+        if torch.cuda.is_available():
+            print(f"[startup] backend=local → cargando modelo {MODEL_ID} con bitsandbytes INT8...", flush=True)
+            config = BitsAndBytesConfig(load_in_8bit=True)
+            model = AutoModel.from_pretrained(
+                MODEL_ID,
+                revision=MODEL_REVISION,
+                trust_remote_code=True,
+                quantization_config=config,
+                device_map="auto",
+            )
+        else:
+            # bitsandbytes INT8 needs CUDA; on CPU the same weights go in bf16.
+            print(f"[startup] backend=local sin CUDA → cargando modelo {MODEL_ID} en bf16 en CPU...", flush=True)
+            model = AutoModel.from_pretrained(
+                MODEL_ID,
+                revision=MODEL_REVISION,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+            )
+            model.eval()
         print(f"[startup] modelo cargado en {time.time() - t0:.1f}s", flush=True)
+        score = check_reference(model, REFERENCE_MIN_COSINE)
+        print(f"[startup] vector de referencia: coseno {score:.4f}", flush=True)
+        _model = model
         if torch.cuda.is_available():
             mem_used_mib = torch.cuda.memory_allocated() // (1024 ** 2)
             print(f"[startup] VRAM usada tras carga: {mem_used_mib} MiB", flush=True)
