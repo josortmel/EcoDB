@@ -283,6 +283,10 @@ async def health():
         return {"status": "ok", "backend": "cloud", "model_functional": True}
     if _model is None:
         return JSONResponse({"status": "unhealthy", "error": "model not loaded"}, status_code=503)
+    if not torch.cuda.is_available():
+        # #911: encoding takes ~40 s on CPU, longer than the healthcheck allows. The reference
+        # check already proved the model at startup; the CUDA OOM this guards against can't happen.
+        return {"status": "ok", "backend": "local", "model_functional": True}
     now = time.time()
     # Fast path: cache hit (outside lock — avoids lock contention on warm path)
     if _health_cache["result"] is not None and now - _health_cache["checked_at"] < 60:
