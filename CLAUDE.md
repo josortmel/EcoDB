@@ -14,10 +14,11 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
 - Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
-## 5-nov-2026 (Hilo) — lo que hay que saber
+## 5 y 6-nov-2026 (Hilo) — lo que hay que saber
 
-- **NO reconstruir `ecodb-embeddings` hasta #910:** `embeddings/requirements.txt` no fija versiones. La imagen viva lleva transformers 4.57.6 + peft 0.19.1; un rebuild trae peft 0.21.2, con el que los LoRA no cargan y la búsqueda devuelve basura sin error (experimento del 1-nov). Las versiones a fijar son las de producción, no 4.52.0/0.15.2.
-- **Rama `hilo-968` (worktree ../EcoDB-968, sin subir):** `restore.sh` con .sql.gz y `--recover`, guarda de variables, `docker-compose.cpu.yml`, setup sin preguntas. La para el gate #338 por `.env.example`: lo decide Pepe.
+- **Embeddings (#910, en main 645e0d1):** versiones fijadas a las de producción (transformers 4.57.6, peft 0.19.1), rama CPU en bf16 y `reference_check.py`: al arrancar compara un vector conocido y, con coseno < 0,9, no sirve. Medido fuera de WSL: bf16 CPU 0,996-0,997 contra vectores guardados; peft 0.21.2, 0,29. La imagen viva sigue siendo la vieja: el rebuild está sin probar, lo cubre la repetición del experimento.
+- **Recuperación (#968, #912, en main):** `restore.sh` con .sql.gz y `--recover`, guarda de variables, `docker-compose.cpu.yml`, setup sin preguntas. El gate #338 ya admite el nombre exacto `.env.example`, con sus variables sensibles vacías o `<marcador>`.
+- **Medir el embedder en CPU, nunca en Docker con la casa en marcha:** WSL tiene tope de 12 GB y EcoDB usa ~8.
 - **`pg_hba` por 127.0.0.1 es trust:** una contraseña se prueba por la IP de la red del contenedor, no por localhost.
 
 ## 2-nov-2026 (Hilo) — secretos rotados, compose sin contraseñas públicas, caché del worker
