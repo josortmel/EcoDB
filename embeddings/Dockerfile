@@ -35,6 +35,7 @@ COPY --chown=apiuser:apiuser server.py .
 ENV HF_HOME=/cache/huggingface \
     TRANSFORMERS_CACHE=/cache/huggingface \
     HF_HUB_DISABLE_TELEMETRY=1 \
+    HF_HUB_DISABLE_XET=1 \
     TORCH_HOME=/cache/torch
 
 RUN mkdir -p /cache/huggingface /cache/torch && chown -R apiuser:apiuser /cache

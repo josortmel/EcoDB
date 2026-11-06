@@ -3,10 +3,15 @@ EcoDB setup for Windows (PowerShell). Equivalent of scripts/setup.sh.
 Generates .env with random secrets and prepares the first boot.
 
 Run from the repo root:
-    powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+    powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 [-NonInteractive] [-Cpu]
 #>
 
+param([switch]$NonInteractive, [switch]$Cpu)
+
 $ErrorActionPreference = 'Stop'
+
+# Sin preguntas devuelve lo que diga $Default.
+function Ask($q, $Default) { if ($NonInteractive) { $Default } else { Read-Host $q } }
 
 function Info($m) { Write-Host "[INFO] $m"  -ForegroundColor Green }
 function Warn($m) { Write-Host "[WARN] $m"  -ForegroundColor Yellow }
@@ -25,15 +30,15 @@ docker compose version | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "Docker Compose v2 is not available." }
 Info "Docker $((docker --version))"
 
-if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
-    Warn "No NVIDIA GPU detected. EcoDB requires CUDA for embeddings."
-    $r = Read-Host "Continue anyway? [y/N]"
+if (-not $Cpu -and -not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
+    Warn "No NVIDIA GPU detected. Use -Cpu to run without one (~12 GB of RAM, slower search)."
+    $r = Ask "Continue anyway? [y/N]" 'n'
     if ($r -notmatch '^[Yy]') { exit 1 }
 }
 
 if (Test-Path .env) {
     Warn ".env already exists. Overwriting resets all secrets."
-    $r = Read-Host "Continue? [y/N]"
+    $r = Ask "Continue? [y/N]" 'n'
     if ($r -notmatch '^[Yy]') { Info "Keeping existing .env."; exit 0 }
 }
 
@@ -46,7 +51,7 @@ $ApiPepper = New-HexSecret 32
 $UseSeed = $false
 Write-Host ""
 Info "EcoDB can install a demo dataset on first boot (example memories)."
-$r = Read-Host "Install demo dataset? [Y/n]"
+$r = Ask "Install demo dataset? [Y/n]" 'n'
 if ($r -notmatch '^[Nn]') { $UseSeed = $true; Info "Demo dataset will be loaded on first boot." }
 else { Info "Starting with empty database." }
 
@@ -56,6 +61,7 @@ $lines = @(
     "ECODB_DB_PASSWORD=$DbPass"
     "CELL_DB_PASSWORD=$CellPass"
     "ECODB_ENV=development"
+    if ($Cpu) { "COMPOSE_PATH_SEPARATOR=;"; "COMPOSE_FILE=docker-compose.yml;docker-compose.cpu.yml" }
     "ECODB_JWT_SECRET=$JwtSecret"
     "ECODB_API_KEY_PEPPER=$ApiPepper"
     "ECODB_CORS_ORIGINS=http://localhost:8080,http://localhost:8091"
