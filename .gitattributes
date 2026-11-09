@@ -1,0 +1,3 @@
+# Los scripts de shell van siempre con LF: con CRLF (checkout de Windows con autocrlf) bash falla con
+# «set: pipefail: invalid option name» (hallado en la repetición del experimento desde cero, 9-nov).
+*.sh text eol=lf

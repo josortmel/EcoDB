@@ -111,8 +111,11 @@ fi
 # ENCRYPTION_KEY for LLM provider key encryption (Fernet — 32-byte url-safe base64).
 # Required by the providers API and the cell worker. Without it, POST /providers 500s.
 if ! grep -q "ENCRYPTION_KEY" .env 2>/dev/null; then
+    # A Fernet key is just urlsafe-base64 of 32 random bytes: the standard library is enough.
+    # (With `set -e`, a failing `$(...)` in an assignment used to abort the script silently here.)
+    ENC_KEY=""
     if command -v python3 >/dev/null 2>&1; then
-        ENC_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null)
+        ENC_KEY=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())" 2>/dev/null || true)
     fi
     if [ -z "$ENC_KEY" ]; then
         # Fallback: Fernet keys are urlsafe-base64 of 32 random bytes.
