@@ -59,6 +59,73 @@ docker compose up -d api mcp
 
 ---
 
+## Total loss — you lost the machine AND the `.env`
+
+The two sections above assume your `.env` survived. This one is for the day it didn't: the disk died, the server is gone, and all you have is a backup file.
+
+### What to keep, and where
+
+| Keep this | Why | Where |
+|---|---|---|
+| The backup (`.dump` or `.sql.gz` from `scripts/backup.sh`) | It is your memory. Everything else can be rebuilt. | Off the machine: another disk, a private repo, cloud storage. |
+| The keys of your **external providers** (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `CELL_LLM_KEY`, and any provider key you saved in EcoDB) | EcoDB cannot regenerate them: they belong to your provider account. | Your password manager. |
+| *Optional:* the list of files where your clients keep their EcoDB key (MCP configs, scripts) | `restore.sh --key-targets` rewrites them for you. | One path per line, outside the repo. |
+
+You do **not** need to keep the `.env`. Its secrets are regenerated (next section). Keeping it in the same place as the backup would be worse: whoever gets the backup would also get the keys.
+
+### What you lose, on purpose
+
+The backup does not carry the `.env`, so after a total loss:
+
+- **Every old API key stops working.** Keys are hashed with a pepper that lived in the `.env`; `--recover` deactivates all of them and issues two new ones (`familia-<date>` and `mcp-service-<date>`).
+- **Provider keys stored inside EcoDB are deleted.** They were encrypted with `ENCRYPTION_KEY`, which is gone. Before deleting them, `restore.sh` prints which provider and name each one was, so you know what to paste again.
+- **Database passwords, JWT secret and broadcast secret** are new. Nothing outside EcoDB should depend on them.
+
+Your memories, documents, graph and clusters are all in the backup and come back intact.
+
+### How to come back
+
+```bash
+# 1. Fresh clone and images
+git clone https://github.com/josortmel/EcoDB.git && cd EcoDB
+bash scripts/setup.sh --non-interactive --cpu   # or without --cpu if you have a GPU
+
+# 2. Start ONLY postgres, then restore with --recover
+docker compose up -d postgres
+bash scripts/restore.sh /path/to/backup.dump \
+  --target=ecodb --allow-dangerous --recover \
+  [--key-targets=/path/outside/repo/key_targets.txt]
+
+# 3. Start the rest
+docker compose up -d
+```
+
+What `--recover` does, in order:
+
+1. Restores the backup into `ecodb`.
+2. Prints the provider keys you will have to paste again, then deletes them.
+3. Sets new database passwords (`ALTER ROLE`), deactivates every old API key and creates the two new ones.
+4. Writes the new secrets into `.env` (`ECODB_DB_PASSWORD`, `CELL_DB_PASSWORD`, `ECODB_JWT_SECRET`, `ECODB_API_KEY_PEPPER`, `ECODB_API_KEY`, `INTERNAL_BROADCAST_SECRET`, `ENCRYPTION_KEY`).
+5. Saves the two new API keys in `.recovered_keys` (permissions 600, next to `.env`). They are **not** printed.
+6. If you passed `--key-targets`, replaces the old `ecodb_…` key with the new family key in each listed file.
+
+### After restoring: checklist
+
+- [ ] Memory count equals the backup's (see *SQL counts* below).
+- [ ] `curl http://localhost:8080/health` answers `ok`.
+- [ ] Your clients use the new key from `.recovered_keys`, and a real `search` returns results.
+- [ ] You pasted the external provider keys again into `.env` (and in the dashboard, the ones `restore.sh` listed).
+- [ ] **Check `ECODB_ENV` in `.env`.** Today, if the variable is missing, `--recover` sets it to `development`. A recovered *production* install must say `ECODB_ENV=production`: set it by hand and restart the API. (An explicit option for this is planned.)
+- [ ] Delete `.recovered_keys` once every client has its new key.
+
+### Things that can go wrong
+
+- **Never run plain `docker compose up` next to another running EcoDB on the same machine.** The compose file pins container names: you would replace the other instance's containers.
+- **Optional services keep their own secrets.** If you used the alerting override (`docker-compose.alerting.yml`), set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` again: `restore.sh` does not list them yet.
+- The first start downloads the embedding model (several GB). If the download stalls, restarting the container resumes it.
+
+---
+
 ## Verification Checklist
 
 ### SQL counts
