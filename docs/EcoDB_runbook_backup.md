@@ -94,7 +94,8 @@ bash scripts/setup.sh --non-interactive --cpu   # or without --cpu if you have a
 docker compose up -d postgres
 bash scripts/restore.sh /path/to/backup.dump \
   --target=ecodb --allow-dangerous --recover \
-  [--key-targets=/path/outside/repo/key_targets.txt]
+  [--key-targets=/path/outside/repo/key_targets.txt] \
+  [--env-file=/path/to/.env]   # default: .env in the current folder
 
 # 3. Start the rest
 docker compose up -d
@@ -112,7 +113,7 @@ What `--recover` does, in order:
 ### After restoring: checklist
 
 - [ ] Memory count equals the backup's (see *SQL counts* below).
-- [ ] `curl http://localhost:8080/health` answers `ok`.
+- [ ] `curl http://localhost:8080/health` answers `ok`. **Be patient on the first start:** the API waits until the embedding model has loaded, which on CPU can take close to an hour. Until then `/health` does not answer. That is not a failure.
 - [ ] Your clients use the new key from `.recovered_keys`, and a real `search` returns results.
 - [ ] You pasted the external provider keys again into `.env` (and in the dashboard, the ones `restore.sh` listed).
 - [ ] **Check `ECODB_ENV` in `.env`.** Today, if the variable is missing, `--recover` sets it to `development`. A recovered *production* install must say `ECODB_ENV=production`: set it by hand and restart the API. (An explicit option for this is planned.)
