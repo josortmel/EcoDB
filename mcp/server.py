@@ -1939,6 +1939,51 @@ def narrate_cluster(cluster_id: str, narrative: str) -> dict:
 # Entry point: stdio MCP server (Claude Code lo invoca como subprocess).
 # ---------------------------------------------------------------------------
 
+@mcp.tool()
+def decisiones_vigentes(
+    tema: str,
+    agente: Optional[str] = None,
+    incluir_superadas: bool = False,
+    limit: int = 10,
+) -> dict:
+    """Las decisiones y acuerdos que VALEN HOY sobre un tema (#919, decisiones vigentes).
+
+    Úsala ANTES de actuar sobre algo que tenga decisiones detrás: busca por parecido con `tema`
+    en memorias de tipo decision y acuerdo y, si alguna está marcada como superada, sigue la cadena
+    hasta la vigente (A→B→C devuelve C, «sustituye_a [A, B]»). Quita las caducadas (valid_until
+    pasado). Los ciclos y las sustitutas que no se pueden leer salen en «errores», no se esconden.
+
+    Args:
+      tema: de qué trata (texto libre, 3-2000 caracteres).
+      agente: opcional, solo las de ese agente.
+      incluir_superadas: true para auditar: añade «superadas» con por quién y por qué.
+      limit: máximo de vigentes (1-50, default 10).
+    """
+    import vigentes as _vig  # módulo hermano, lógica pura
+
+    limit = max(1, min(int(limit), 50))
+    try:
+        candidatas: list[dict] = []
+        for tipo in ("decision", "acuerdo"):
+            payload = {"query_text": tema, "type": tipo, "limit": limit * 3, "include_documents": False}
+            if agente:
+                payload["agent_identifier"] = agente
+            data = _api_call("POST", "/search", json=payload) or {}
+            candidatas.extend(data.get("results", []))
+        candidatas.sort(key=lambda r: r.get("score", 0), reverse=True)
+
+        def leer(mid: str):
+            try:
+                return _api_call("GET", f"/memories/{quote(str(mid), safe='')}")
+            except Exception:
+                return None
+
+        completas = [m for m in (leer(c["id"]) for c in candidatas) if m]
+        return _ok(_vig.vigentes(completas, leer, incluir_superadas=incluir_superadas, limit=limit))
+    except Exception as e:
+        return _err(e)
+
+
 if __name__ == "__main__":
     # #547: send what earlier sessions queued, and keep retrying in the background.
     threading.Thread(target=_spool_worker, name="ecodb-spool", daemon=True).start()
