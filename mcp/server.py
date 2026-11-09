@@ -474,6 +474,11 @@ def save_memory(
     image_base64: Optional[str] = None,
     file_path: Optional[str] = None,
     image_path: Optional[str] = None,
+    supersedes: Optional[list[str]] = None,
+    supersede_kind: Optional[str] = None,
+    supersede_reason: Optional[str] = None,
+    valid_until: Optional[str] = None,
+    decidido_por: Optional[dict] = None,
 ) -> dict:
     """Guardar una memoria en EcoDB. Puede adjuntar un archivo de cualquier tipo.
 
@@ -493,6 +498,12 @@ def save_memory(
         Archivos de credenciales/config/ejecutables bloqueados por seguridad.
       image_path: alias de file_path (backward-compat). Si ambos presentes,
         file_path tiene prioridad.
+      supersedes: ids de las memorias que esta SUSTITUYE (p. ej. una decisión que cambia otra
+        anterior: nómbrala aquí). La API las marca como superadas por esta, con quién y cuándo.
+      supersede_kind: total (default), parcial o nunca_valida (solo la autora de la vieja o un humano).
+      supersede_reason: una línea, por qué se sustituye.
+      valid_until: YYYY-MM-DD, hasta cuándo vale (instrucciones para un día concreto).
+      decidido_por: quién la decidió, no quién la guarda: {"tipo": "humano"|"agente"|"equipo", "quien": "<nombre>"}.
     """
     payload = {
         "content": content,
@@ -504,6 +515,12 @@ def save_memory(
     }
     if agent_identifier is not None:
         payload["agent_identifier"] = agent_identifier
+    # #919: solo se mandan si vienen (la API valida tipos, fechas y permisos).
+    for _k, _v in (("supersedes", supersedes), ("supersede_kind", supersede_kind),
+                   ("supersede_reason", supersede_reason), ("valid_until", valid_until),
+                   ("decidido_por", decidido_por)):
+        if _v is not None:
+            payload[_k] = _v
     resolved_file_path = file_path if file_path is not None else image_path
     real = None
     if resolved_file_path is not None and image_base64 is None:
