@@ -14,6 +14,12 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
 - Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
+## 9-nov-2026 (Hilo) — instalable desde cero, segunda vuelta, y decisiones vigentes en rama
+- **Repetición del experimento desde cero (#913):** 5/5 en el criterio pero 4 apaños fuera del repo → NO pasa. Sus 6 huecos, arreglados en main (#1082): `setup.sh` ya no necesita `cryptography` (con `set -e`, `X=$(python3 …)` fallido mataba el script sin mensaje); `scripts/*.sh` ejecutables; `.gitattributes` con `*.sh eol=lf` (un checkout de Windows con autocrlf rompe bash: «set: pipefail: invalid option name»); `docker-compose.expose.yml` publica SOLO la API (el SSE del MCP no pide credenciales: no se publica nunca); `ECODB_INTERNAL_HOSTS` en el MCP; README del arranque en CPU (~1 h) y de la descarga de HF que se atasca (`docker restart`). Tercera vuelta propuesta jue 12.
+- **El arnés del experimento** (`Hilo/experimento_desde_cero`): `PAUSA_EMB=1` para parar embeddings/LLM/NER de producción ANTES de lanzar (el vigilante y `comprobar_red.sh` miran producción); `criterio.sh` admite `CRITERIO_KEY` (la clave que crea `restore.sh --recover`) y `CRITERIO_ENTRADA`.
+- **Decisiones vigentes (#919), rama `hilo-919`, SIN fusionar:** `save_memory(supersedes…)` marca la vieja en `metadata` (validado antes de embeber); `search` avisa «superada por X» / «caducada el …» en `trust_warnings` sin tocar la puntuación; `decisiones_vigentes` en el MCP (lógica en `mcp/vigentes.py`). Decisión de Prima: esa lógica se MUEVE a un endpoint GET de solo lectura de la API (condiciones en el ticket).
+- **Tests de EcoDB desde el host:** `test_memories` (16) y los de búsqueda/reranker (7) fallan igual con y sin cambios: el NER no se alcanza desde fuera de Docker. Comparar siempre con y sin el cambio.
+
 ## 5 y 6-nov-2026 (Hilo) — lo que hay que saber
 
 - **Embeddings (#910, en main 645e0d1):** versiones fijadas a las de producción (transformers 4.57.6, peft 0.19.1), rama CPU en bf16 y `reference_check.py`: al arrancar compara un vector conocido y, con coseno < 0,9, no sirve. Medido fuera de WSL: bf16 CPU 0,996-0,997 contra vectores guardados; peft 0.21.2, 0,29. La imagen viva sigue siendo la vieja: el rebuild está sin probar, lo cubre la repetición del experimento.
