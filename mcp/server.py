@@ -101,6 +101,11 @@ if not ECODB_API_KEY:
 # en claro al destino, vector SSRF + exfiltracion. Hosts internos OK con http
 # (red Docker, localhost, host.docker.internal son trusted dentro del entorno).
 _INTERNAL_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal", "ecodb-api", "api"}
+# ECODB_INTERNAL_HOSTS (opcional, separados por comas): hosts de una red tuya que también valen con
+# http://, p. ej. la API en otro Docker («dind») o en otra máquina de tu red. Lo pone a propósito quien
+# lanza el MCP; la clave viaja en claro hasta ese host. Hallado en el experimento «desde cero» (9-nov):
+# sin esto, apuntar el MCP a una API en otro host exigía un túnel local.
+_INTERNAL_HOSTS |= {h.strip().lower() for h in os.environ.get("ECODB_INTERNAL_HOSTS", "").split(",") if h.strip()}
 
 # Media store: default is <project_root>/media/. Override with ECODB_MEDIA_DIR env var.
 # Docker MCP sets ECODB_MEDIA_DIR=/app/media in docker-compose.yml.

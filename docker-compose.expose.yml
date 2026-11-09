@@ -1,0 +1,16 @@
+# Publica la API en todas las interfaces (no solo en 127.0.0.1), para llegar a EcoDB desde otra máquina
+# o desde otro Docker (p. ej. un Docker-in-Docker). Opcional; por defecto todo escucha solo en local.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.expose.yml up -d
+#   (o añádelo a COMPOSE_FILE en .env: COMPOSE_FILE=docker-compose.yml:docker-compose.expose.yml)
+#
+# Solo la API: exige un token (POST /auth/token con una API key) en cada petición.
+# El MCP por SSE (8091) NO se publica: no pide credenciales a quien se conecta y actúa con la API key
+# que tiene en su entorno, así que publicarlo es dar la memoria entera a cualquiera de la red. Para usar
+# el MCP desde otra máquina, lánzalo allí por stdio apuntando a esta API (ECODB_API_URL y, si el host
+# no es local, ECODB_INTERNAL_HOSTS; ver el README). Postgres y NER tampoco se publican.
+# Si la máquina está en una red que no controlas, pon delante un cortafuegos o un proxy con TLS.
+services:
+  api:
+    ports: !override
+      - "8080:8080"

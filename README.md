@@ -393,8 +393,32 @@ docker compose up --build -d # first boot builds images + downloads models (~35 
 Without a GPU, or from a script: `./scripts/setup.sh --non-interactive --cpu`. On CPU the model needs
 about 12 GB of RAM and encoding a text takes 40 to 70 seconds, so search is slow.
 
+**First boot on CPU takes about an hour.** Downloading the embedding model and loading it on CPU took
+~50 minutes in our from-scratch test (loading alone, 3,110 s). The API waits for `embeddings` to be
+healthy before it starts, so `/health` does not answer until then: that is expected, not a failure.
+
+**If the model download stalls** (the `.incomplete` blob in the Hugging Face cache stops growing for
+several minutes), restart the service; the download resumes where it stopped:
+
+```bash
+docker restart ecodb-embeddings    # or ecodb-ner
+```
+
+**Reaching EcoDB from another machine or another Docker.** By default every port listens on
+`127.0.0.1` only. `docker-compose.expose.yml` publishes the API (and only the API, which requires a
+token on every request) on all interfaces:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.expose.yml up -d
+```
+
+The MCP's SSE port is never published: it does not ask clients for credentials and acts with its own
+API key. To use the MCP from another machine, run it there over stdio, pointing at this API.
+
 The MCP only accepts `http://` for `ECODB_API_URL` on internal hosts (`localhost`, `127.0.0.1`,
-`host.docker.internal`, `ecodb-api`, `api`). Any other host needs `https://`.
+`host.docker.internal`, `ecodb-api`, `api`). Any other host needs `https://`, or, on a network you
+control, add it to `ECODB_INTERNAL_HOSTS` (comma-separated), e.g. `ECODB_INTERNAL_HOSTS=dind` for
+`ECODB_API_URL=http://dind:8080`. The API key then travels unencrypted to that host.
 
 On **Windows**, run the setup step with PowerShell instead of `setup.sh`:
 
