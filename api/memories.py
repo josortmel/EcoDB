@@ -30,13 +30,13 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
 from asyncpg.exceptions import ForeignKeyViolationError, UniqueViolationError
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from auth import get_current_user
 from db import get_pool
@@ -87,6 +87,17 @@ ContentModality = Literal["text", "image", "audio", "document", "video"]
 Visibility = Literal["public", "private"]
 
 
+class DecididoPor(BaseModel):
+    """#919: quién DECIDIÓ (no quién guardó). Sin nombres de una casa escritos a fuego."""
+    model_config = ConfigDict(extra="forbid")
+    tipo: Literal["humano", "agente", "equipo"]
+    quien: str = Field(..., min_length=1, max_length=80)
+
+
+SupersedeKind = Literal["total", "parcial", "nunca_valida"]
+MAX_SUPERSEDES = 20
+
+
 class MemoryCreate(BaseModel):
     # Deuda #22: rechazar campos desconocidos. Cliente que envia `agent_id`
     # legacy (numerico, formato pre-2026-05-08) recibe 422 explicito, no 201
@@ -120,6 +131,24 @@ class MemoryCreate(BaseModel):
         None, description="Id chosen by the client; a repeated id from the same owner returns the existing memory.")
     occurred_at: Optional[datetime] = Field(
         None, description=f"When it happened (default now). Not in the future, at most {OCCURRED_AT_MAX_AGE_DAYS} days back.")
+    # #919 (decisiones vigentes): esta memoria sustituye a otras. La marca va en la VIEJA y la escribe la API.
+    supersedes: list[UUID] = Field(default_factory=list, max_length=MAX_SUPERSEDES,
+                                   description="Ids de las memorias que esta sustituye (se marcan como superadas).")
+    supersede_kind: Optional[SupersedeKind] = Field(
+        None, description="total (default), parcial o nunca_valida (esta solo la autora de la vieja o un humano).")
+    supersede_reason: Optional[str] = Field(None, max_length=300, description="Una línea: por qué se sustituye.")
+    valid_until: Optional[date] = Field(None, description="Hasta cuándo vale (instrucciones para un día).")
+    decidido_por: Optional[DecididoPor] = None
+
+    @model_validator(mode="after")
+    def _v_supersede(self):
+        if not self.supersedes and (self.supersede_kind or self.supersede_reason):
+            raise ValueError("supersede_kind/supersede_reason need supersedes")
+        if len(set(self.supersedes)) != len(self.supersedes):
+            raise ValueError("supersedes repeats an id")
+        if self.supersede_reason is not None:
+            _no_null_bytes(self.supersede_reason, "supersede_reason")
+        return self
 
     @field_validator("content")
     @classmethod
@@ -401,6 +430,35 @@ async def create_memory(
                     raise HTTPException(403, "cannot create memory for agent owned by another user")
             resolved_agent_id = agent_row["id"]
 
+        # #919: las memorias que esta sustituye se validan ANTES de embeber: si alguna no vale, no se
+        # crea nada. Solo memorias del mismo usuario; una ya superada no se vuelve a marcar (409);
+        # «nunca_valida» solo la pone la autora de la vieja o un humano (sin agent_identifier).
+        supersede_targets: list[UUID] = []
+        if body.supersedes:
+            found = {r["id"]: r for r in await conn.fetch(
+                "SELECT id, user_id, agent_id, metadata FROM memories WHERE id = ANY($1::uuid[])",
+                body.supersedes)}
+            for sid in body.supersedes:
+                r = found.get(sid)
+                if r is None or (not is_super and int(r["user_id"]) != actor_id):
+                    raise HTTPException(422, f"supersedes: {sid} does not exist or is not yours")
+                old_meta = r["metadata"]
+                old_meta = json.loads(old_meta) if isinstance(old_meta, str) else (old_meta or {})
+                if old_meta.get("superseded_by"):
+                    raise HTTPException(409, f"supersedes: {sid} is already superseded by {old_meta['superseded_by']}")
+                if (body.supersede_kind == "nunca_valida" and resolved_agent_id is not None
+                        and r["agent_id"] != resolved_agent_id):
+                    raise HTTPException(403, "supersede_kind nunca_valida: only the old memory's author or a human")
+            supersede_targets = list(body.supersedes)
+        marker = {"user_id": actor_id, "agent": body.agent_identifier,
+                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        new_metadata = dict(body.metadata or {})
+        if body.valid_until is not None:
+            new_metadata["valid_until"] = body.valid_until.isoformat()
+            new_metadata["valid_until_by"] = marker
+        if body.decidido_por is not None:
+            new_metadata["decidido_por"] = body.decidido_por.model_dump()
+
         # #547: a re-sent queued save. Same id + same owner = already saved, return it
         # (before embedding, so a replay costs nothing). Another owner's id = 409.
         occurred_at = None
@@ -468,7 +526,7 @@ async def create_memory(
                 body.tags, weight_base, weight_base, body.media_path,
                 embedding_literal, EMBEDDING_MODEL_TAG,
                 body.foresight_start, body.foresight_end,
-                json.dumps(body.metadata or {}),
+                json.dumps(new_metadata),
                 body.client_id, occurred_at,
             )
         except UniqueViolationError:
@@ -488,6 +546,18 @@ async def create_memory(
                 422,
                 "referenced resource (workspace, project, user or agent) was deleted concurrently",
             )
+
+        # #919: la marca en las viejas, con quién y cuándo. Si otra petición la marcó entre la validación
+        # y aquí, esa gana (no se pisa una marca).
+        if supersede_targets:
+            marca = {"superseded_by": str(row["id"]), "supersede_kind": body.supersede_kind or "total",
+                     "marked_by": marker}
+            if body.supersede_reason:
+                marca["supersede_reason"] = body.supersede_reason
+            await conn.execute(
+                "UPDATE memories SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb "
+                "WHERE id = ANY($1::uuid[]) AND NOT (COALESCE(metadata, '{}'::jsonb) ? 'superseded_by')",
+                supersede_targets, json.dumps(marca))
 
         # FASE 3b — filas en memory_embeddings (multimodal).
         # Backward compat: memories.embedding sigue lleno con text embedding (arriba).
