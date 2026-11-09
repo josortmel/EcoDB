@@ -20,7 +20,7 @@ import os
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -949,6 +949,23 @@ class SearchResult(BaseModel):
     trust_warnings: list[str] = Field(default_factory=list, description="Avisos de confianza sobre este resultado")
 
 
+def _avisos_vigencia(r) -> list[str]:
+    """#919: «superada por X» si alguien la marcó como sustituida, y «caducada» si su valid_until ya pasó."""
+    avisos = []
+    sup = r.get("superseded_by")
+    if sup:
+        tipo = r.get("supersede_kind") or "total"
+        avisos.append(f"superada por {sup} ({tipo})" if tipo != "total" else f"superada por {sup}")
+    vu = r.get("valid_until")
+    if vu:
+        try:
+            if date.fromisoformat(str(vu)[:10]) < datetime.now(timezone.utc).date():
+                avisos.append(f"caducada el {str(vu)[:10]}")
+        except ValueError:
+            pass
+    return avisos
+
+
 class ContradictionPair(BaseModel):
     memory_id_1: str
     memory_id_2: str
@@ -1301,6 +1318,9 @@ async def search_memories(
               m.type::text, m.content_type::text, m.visibility::text,
               m.content, m.tags, m.weight, m.weight_base, m.media_path, m.created_at,
               m.staleness,
+              m.metadata->>'superseded_by' AS superseded_by,
+              m.metadata->>'supersede_kind' AS supersede_kind,
+              m.metadata->>'valid_until' AS valid_until,
               bm.matched_modality,
               bm.score
             FROM (
@@ -1440,6 +1460,8 @@ async def search_memories(
         warnings = []
         if r.get("staleness") and r["staleness"] != "active":
             warnings.append(f"memoria {r['staleness']}")
+        # #919 (decisiones vigentes): se avisa, no se esconde ni se baja la puntuación (Pepe, 16-oct).
+        warnings.extend(_avisos_vigencia(r))
 
         results.append(SearchResult(
             id=r["id"],
