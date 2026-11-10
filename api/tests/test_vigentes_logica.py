@@ -1,4 +1,4 @@
-"""#919 H2: la lógica de decisiones vigentes, sin red ni base."""
+"""#919 H2: la lógica de decisiones vigentes (api/vigentes.py), sin red ni base."""
 import sys
 from datetime import date
 from pathlib import Path
@@ -74,34 +74,3 @@ def test_decidido_por_y_valid_until_viajan_en_la_fila():
     f = vigentes([d["A"]], leer, HOY)["vigentes"][0]
     assert f["decidido_por"] == {"tipo": "humano", "quien": "Pepe"} and f["valid_until"] == "2026-12-31"
     assert f["fuente"] == "EcoDB"
-
-
-# ---- la herramienta del MCP, con la API simulada (y sin FarOS) ----
-
-import os  # noqa: E402
-
-os.environ.setdefault("ECODB_API_URL", "http://localhost:8080")
-os.environ.setdefault("ECODB_API_KEY", "clave-de-prueba")
-os.environ.setdefault("MCP_TRANSPORT", "stdio")
-
-import server  # noqa: E402
-
-
-def test_la_herramienta_busca_decisiones_y_acuerdos_y_resuelve_la_cadena(monkeypatch):
-    memorias = {"A": _m("A", superseded_by="B"), "B": _m("B", superseded_by="C"), "C": _m("C")}
-    llamadas = []
-
-    def falsa(method, path, **kw):
-        llamadas.append((method, path, kw.get("json")))
-        if path == "/search":
-            return {"results": [{"id": "A", "score": 0.9}] if kw["json"]["type"] == "decision" else []}
-        return memorias.get(path.rsplit("/", 1)[-1])
-
-    monkeypatch.setattr(server, "_api_call", falsa)
-    fn = getattr(server.decisiones_vigentes, "fn", server.decisiones_vigentes)
-    r = fn(tema="horario de la tienda", agente="Hilo")
-    datos = r.get("data", r)
-    assert [f["id"] for f in datos["vigentes"]] == ["C"]
-    tipos = sorted(j["type"] for m, p, j in llamadas if p == "/search")
-    assert tipos == ["acuerdo", "decision"]
-    assert all(j["agent_identifier"] == "Hilo" for m, p, j in llamadas if p == "/search")
