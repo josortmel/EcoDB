@@ -137,7 +137,7 @@ def test_clave_sin_rol_elevado_ve_lo_que_ya_veia_y_no_escribe(client, entorno, a
     del_worker = _vigentes(client, entorno["worker"], agente)
     # La sustituta es privada de otro: el trabajador no la lee, se le avisa y se queda con la que ve.
     assert [f["id"] for f in del_worker["vigentes"]] == [publica]
-    assert del_worker["errores"] == [{"sustituta_no_legible": privada, "de": publica}]
+    assert del_worker["errores"] == [{"sustituta_no_legible": True, "de": publica}]
 
     despues = _sql("SELECT id, metadata, content FROM memories WHERE content LIKE $1 ORDER BY id", PREFIX + "%")
     assert [dict(r) for r in antes] == [dict(r) for r in despues]
@@ -172,3 +172,58 @@ def test_cadena_mas_larga_que_el_tope_de_saltos_avisa(client, entorno, agente, m
     r = _vigentes(client, entorno["super"], agente)
     assert any("pasa de 2 saltos" in a for a in r["avisos"])
     assert r["errores"], "la cadena cortada no se esconde"
+
+
+# ---- #919, Prima 10-nov: el id de la sustituta solo sale si quien llama puede leerla, en las cuatro salidas ----
+
+def _par_publica_privada(client, entorno, agente):
+    publica = _guardar(client, entorno["super"], agente)
+    privada = _guardar(client, entorno["super"], agente, visibility="private", supersedes=[publica])
+    return publica, privada
+
+
+def test_endpoint_no_dice_el_id_de_la_privada_ni_con_superadas(client, entorno, agente):
+    publica, privada = _par_publica_privada(client, entorno, agente)
+    r = client.get(URL, headers={"Authorization": f"Bearer {entorno['worker']}"},
+                   params={"tema": "decisión de prueba", "agente": agente, "incluir_superadas": "true"})
+    assert r.status_code == 200 and privada not in r.text
+    assert r.json()["superadas"] == []
+
+
+def test_get_memories_tapa_la_sustituta_que_no_se_puede_leer(client, entorno, agente):
+    publica, privada = _par_publica_privada(client, entorno, agente)
+    h_w = {"Authorization": f"Bearer {entorno['worker']}"}
+    r = client.get(f"/memories/{publica}", headers=h_w)
+    assert r.status_code == 200 and privada not in r.text
+    assert r.json()["metadata"]["superseded_by"] is None and r.json()["metadata"]["sustituta_no_legible"] is True
+    lista = client.get("/memories/recent", headers=h_w, params={"agent_identifier": agente})
+    assert lista.status_code == 200 and privada not in lista.text
+    en_lista = {m["id"]: m for m in lista.json()["items"]}
+    assert en_lista[publica]["metadata"]["sustituta_no_legible"] is True
+    # Quien sí la puede leer ve el id.
+    r_s = client.get(f"/memories/{publica}", headers={"Authorization": f"Bearer {entorno['super']}"})
+    assert r_s.json()["metadata"]["superseded_by"] == privada and "sustituta_no_legible" not in r_s.json()["metadata"]
+
+
+def test_search_avisa_sin_el_id(client, entorno, agente):
+    publica, privada = _par_publica_privada(client, entorno, agente)
+    body = {"query_text": "decisión de prueba", "agent_identifier": agente, "limit": 10,
+            "rerank_mode": "off", "include_documents": False}
+    r = client.post("/search", headers={"Authorization": f"Bearer {entorno['worker']}"}, json=body)
+    assert r.status_code == 200 and privada not in r.text
+    fila = {x["id"]: x for x in r.json()["results"]}[publica]
+    assert "superada por una memoria que no puedes leer" in fila["trust_warnings"]
+    r_s = client.post("/search", headers={"Authorization": f"Bearer {entorno['super']}"}, json=body)
+    assert f"superada por {privada}" in {x["id"]: x for x in r_s.json()["results"]}[publica]["trust_warnings"]
+
+
+def test_un_put_de_metadata_no_pone_ni_quita_la_marca(client, entorno, agente):
+    publica, privada = _par_publica_privada(client, entorno, agente)
+    r = client.put(f"/memories/{publica}", headers={"Authorization": f"Bearer {entorno['super']}"},
+                   json={"metadata": {"nota": "x", "superseded_by": None, "sustituta_no_legible": True}})
+    assert r.status_code == 200, r.text
+    guardada = _sql("SELECT metadata FROM memories WHERE id = $1", uuid.UUID(publica))[0]["metadata"]
+    import json as _json
+    guardada = _json.loads(guardada) if isinstance(guardada, str) else guardada
+    assert guardada["superseded_by"] == privada and guardada["nota"] == "x"
+    assert "sustituta_no_legible" not in guardada

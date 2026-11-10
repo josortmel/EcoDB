@@ -31,7 +31,7 @@ from auth import get_current_user
 from db import get_pool
 from embeddings_client import embed_image, embed_text
 from permissions import no_null_bytes as _no_null_bytes
-from permissions import visible_project_ids, visible_workspace_ids
+from permissions import ids_legibles, visible_project_ids, visible_workspace_ids
 import settings
 from settings import ENABLE_BM25, ENABLE_BM25_EXPANSION, ENABLE_STOP_ENTITIES_DYNAMIC, ENABLE_TRUST_TIERS, ENABLE_WEIGHT_DYNAMIC, GAMR_WEIGHTS_BM25
 from settings import RERANK_BLEND_ALPHA, RERANK_MODE
@@ -949,12 +949,22 @@ class SearchResult(BaseModel):
     trust_warnings: list[str] = Field(default_factory=list, description="Avisos de confianza sobre este resultado")
 
 
-def _avisos_vigencia(r) -> list[str]:
-    """#919: «superada por X» si alguien la marcó como sustituida, y «caducada» si su valid_until ya pasó."""
+def _canon_id(valor) -> Optional[str]:
+    try:
+        return str(uuid.UUID(str(valor)))
+    except (ValueError, TypeError):
+        return None
+
+
+def _avisos_vigencia(r, legibles: Optional[set] = None) -> list[str]:
+    """#919: «superada por X» si alguien la marcó como sustituida, y «caducada» si su valid_until ya pasó.
+    Si se pasa `legibles` y quien busca no puede leer la sustituta, no se dice su id."""
     avisos = []
     sup = r.get("superseded_by")
     if sup:
         tipo = r.get("supersede_kind") or "total"
+        if legibles is not None and _canon_id(sup) not in legibles:
+            sup = "una memoria que no puedes leer"
         avisos.append(f"superada por {sup} ({tipo})" if tipo != "total" else f"superada por {sup}")
     vu = r.get("valid_until")
     if vu:
@@ -1441,6 +1451,13 @@ async def search_memories(
         logging.getLogger("ecodb.gamr").warning("detect_contradictions failed: %r", _ctr_err)
         contradictions_raw = []
 
+    # #919: el id de una sustituta solo se dice si quien busca puede leerla.
+    sustitutas = [r["superseded_by"] for r in rows if r.get("superseded_by")]
+    legibles: set = set()
+    if sustitutas:
+        async with pool.acquire() as conn:
+            legibles = await ids_legibles(conn, actor, sustitutas)
+
     # Etapas 6 + 8 — Freshness + Score compuesto por resultado
     results = []
     for r in rows:
@@ -1461,7 +1478,7 @@ async def search_memories(
         if r.get("staleness") and r["staleness"] != "active":
             warnings.append(f"memoria {r['staleness']}")
         # #919 (decisiones vigentes): se avisa, no se esconde ni se baja la puntuación (Pepe, 16-oct).
-        warnings.extend(_avisos_vigencia(r))
+        warnings.extend(_avisos_vigencia(r, legibles))
 
         results.append(SearchResult(
             id=r["id"],

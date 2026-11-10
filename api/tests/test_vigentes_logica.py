@@ -60,7 +60,7 @@ def test_sustituta_ilegible_se_avisa_y_se_queda_la_que_hay():
     d, leer = _base(_m("A", superseded_by="X"))
     r = vigentes([d["A"]], leer, HOY)
     assert [f["id"] for f in r["vigentes"]] == ["A"]
-    assert r["errores"] == [{"sustituta_no_legible": "X", "de": "A"}]
+    assert r["errores"] == [{"sustituta_no_legible": True, "de": "A"}]   # sin el id de la que no se lee
 
 
 def test_limit_corta():

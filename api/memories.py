@@ -43,6 +43,7 @@ from db import get_pool
 from embeddings_client import embed_text
 from permissions import (
     can_write_memory,
+    ids_legibles,
     no_null_bytes as _no_null_bytes,
     visible_project_ids,
     visible_workspace_ids,
@@ -473,7 +474,7 @@ async def create_memory(
         if body.client_id is not None:
             existing = await _fetch_for_replay(conn, body.client_id, actor_id)
             if existing is not None:
-                return _row_to_response(existing)
+                return (await tapar_sustitutas(actor, [_row_to_response(existing)]))[0]
     # Pool liberado aqui — la conexion vuelve al pool para otros endpoints.
 
     # FASE 2 — embed FUERA del pool. Si falla, lanzamos 503 sin tocar DB.
@@ -535,7 +536,7 @@ async def create_memory(
                         if body.client_id is not None else None)
             if existing is None:
                 raise
-            return _row_to_response(existing)
+            return (await tapar_sustitutas(actor, [_row_to_response(existing)]))[0]
         except ForeignKeyViolationError:
             # NV1-10 cierre Deuda #22 (2026-05-08): TOCTOU FASE1→FASE3. Si
             # workspace/project/user/agent fue borrado entre validacion y INSERT
@@ -773,7 +774,7 @@ async def create_memory(
         _task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     _perf_log.info("create_memory TOTAL %.2fs", _time.time() - _t0)
-    return _row_to_response(row)
+    return (await tapar_sustitutas(actor, [_row_to_response(row)]))[0]
 
 
 @router.get("/recent", response_model=MemoryListResponse)
@@ -971,7 +972,7 @@ async def list_recent(
                 }), actor.get("organization_id"),
             )
 
-    items = [_row_to_response(r) for r in rows]
+    items = await tapar_sustitutas(actor, [_row_to_response(r) for r in rows])
     return MemoryListResponse(
         items=items, total=total_row, limit=limit, cursor_next=None,
         warnings=_date_window_warnings(fecha_desde, fecha_hasta, result_empty=not items),
@@ -1039,7 +1040,7 @@ async def get_memory(
     row = dict(row)
     row["access_count"] = row["access_count"] + 1
     row["last_accessed"] = datetime.now(timezone.utc)
-    return _row_to_response(row)
+    return (await tapar_sustitutas(actor, [_row_to_response(row)]))[0]
 
 
 @router.put("/{memory_id}", response_model=MemoryResponse)
@@ -1113,7 +1114,8 @@ async def update_memory(
         if body.media_path is not None:
             sets.append(f"media_path = ${i}"); params.append(body.media_path); i += 1
         if body.metadata is not None:
-            sets.append(f"metadata = ${i}::jsonb"); params.append(json.dumps(body.metadata)); i += 1
+            sets.append(f"metadata = ${i}::jsonb")
+            params.append(json.dumps(_metadata_sin_tocar_marca(body.metadata, row["metadata"]))); i += 1
         if not sets:
             raise HTTPException(400, "no fields to update")
         sets.append("updated_at = now()")
@@ -1148,7 +1150,7 @@ async def update_memory(
             actor.get("organization_id"),
         )
 
-    return _row_to_response(new_row)
+    return (await tapar_sustitutas(actor, [_row_to_response(new_row)]))[0]
 
 
 @router.delete("/{memory_id}", status_code=204)
@@ -1383,6 +1385,41 @@ async def _fetch_for_replay(conn, memory_id: UUID, actor_id: int):
             "SELECT 1 FROM trash WHERE id = $1 AND original_table = 'memories'", memory_id):
         raise HTTPException(409, "memory was deleted; not recreating it")
     return row
+
+
+# #919: la marca «superada por» es de la API (la pone al guardar la sustituta). El id de la sustituta
+# solo sale si quien llama puede leerla; si no, superseded_by va a null con sustituta_no_legible.
+# Un PUT de metadata no pone ni quita la marca.
+MARCA_SUSTITUCION = ("superseded_by", "supersede_kind", "supersede_reason", "marked_by")
+MARCA_OCULTA = "sustituta_no_legible"
+
+
+def _canon(valor) -> Optional[str]:
+    try:
+        return str(uuid.UUID(str(valor)))
+    except (ValueError, TypeError):
+        return None
+
+
+async def tapar_sustitutas(actor: dict, items: list) -> list:
+    sups = {_canon((it.metadata or {}).get("superseded_by")) for it in items if (it.metadata or {}).get("superseded_by")}
+    if not sups:
+        return items
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        legibles = await ids_legibles(conn, actor, [x for x in sups if x])
+    for it in items:
+        sup = (it.metadata or {}).get("superseded_by")
+        if sup and _canon(sup) not in legibles:
+            it.metadata = {**it.metadata, "superseded_by": None, MARCA_OCULTA: True}
+    return items
+
+
+def _metadata_sin_tocar_marca(nueva: dict, vieja) -> dict:
+    vieja = json.loads(vieja) if isinstance(vieja, str) else dict(vieja or {})
+    meta = {k: v for k, v in nueva.items() if k not in MARCA_SUSTITUCION and k != MARCA_OCULTA}
+    meta.update({k: vieja[k] for k in MARCA_SUSTITUCION if k in vieja})
+    return meta
 
 
 def _row_to_response(row, agent_identifier=None) -> MemoryResponse:

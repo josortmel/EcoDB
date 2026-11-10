@@ -4,6 +4,7 @@ Lógica pura (sin red ni base), para probarla sola. Recibe las memorias candidat
 que devuelve una memoria con su metadata o None. Sigue cada cadena «superada por» hasta la vigente
 (A→B→C devuelve C, «sustituye a A, B»), registra los ciclos como error sin colgarse, quita las
 caducadas (valid_until pasado) y, con incluir_superadas, deja también las superadas con su motivo.
+El id de una sustituta que `leer` no devuelve (borrada o de otro sin permiso) no sale nunca (#919, Prima).
 EcoDB no sabe nada de FarOS: esto solo mira memorias.
 """
 from __future__ import annotations
@@ -69,15 +70,14 @@ def vigentes(candidatas: list[dict], leer: Callable[[str], Optional[dict]], hoy:
                 actual = None
                 break
             siguiente = cargar(str(_meta(actual)["superseded_by"]))
-            if siguiente is None:   # la sustituta no se puede leer (borrada o ajena): se avisa
-                errores.append({"sustituta_no_legible": str(_meta(actual)["superseded_by"]),
-                                "de": str(actual["id"])})
+            if siguiente is None:   # la sustituta no se puede leer (borrada o ajena): se avisa sin su id
+                errores.append({"sustituta_no_legible": True, "de": str(actual["id"])})
                 break
             camino.append(str(actual["id"]))
             actual = siguiente
         if actual is None:
             continue
-        if incluir_superadas and camino:
+        if incluir_superadas and camino:   # solo cadenas seguidas: su sustituta se pudo leer
             original = vistas[str(c["id"])]
             superadas.append({**_fila(original, []), "superada_por": str(_meta(original)["superseded_by"]),
                               "supersede_kind": _meta(original).get("supersede_kind", "total"),
