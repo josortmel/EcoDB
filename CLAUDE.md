@@ -14,6 +14,20 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
 - Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
+## 10-nov-2026 (Hilo) — decisiones vigentes en main y en producción (#919)
+- **En main (d30379c) y desplegado** (api y mcp reconstruidos; vuelta atrás `ecodb-api:0.25.0-pre919` y `ecodb-mcp:1.8.0-pre919`).
+- **`GET /api/v1/decisiones/vigentes`** (`api/decisiones.py`, capa fina sobre `api/vigentes.py`, lógica pura): `tema`, `agente`,
+  `incluir_superadas`, `limit` (fuera de 1-50 se recorta con aviso). Solo lectura con la `check_visibility` de quien llama;
+  topes con aviso, nunca 500 (500 memorias leídas, 20 saltos). ~12 s en producción (dos búsquedas). El MCP solo lo llama.
+- **El id de una sustituta solo sale si quien llama puede leerla** (Prima, las cuatro salidas): GET/listado/POST/PUT de
+  /memories (`superseded_by: null` + `sustituta_no_legible: true`), aviso de search, errores del endpoint.
+  `permissions.ids_legibles`.
+- **La marca es del servidor:** `PUT /memories` ya no puede poner ni quitar `superseded_by`, `supersede_kind`,
+  `supersede_reason` ni `marked_by` (antes reemplazaba el metadata entero y la borraba).
+- **Los Dockerfile copian módulo a módulo:** un `api/*.py` nuevo que no esté en el COPY falla en el contenedor. Lo vigila
+  `api/tests/test_dockerfile_copia_modulos.py`. El del MCP solo copia `server.py`: nada de módulos hermanos.
+- **Los tests que levantan la app se lanzan desde la raíz del repo** (las migraciones abren `sql/` por ruta relativa).
+
 ## 9-nov-2026 (Hilo) — instalable desde cero, segunda vuelta, y decisiones vigentes en rama
 - **Repetición del experimento desde cero (#913):** 5/5 en el criterio pero 4 apaños fuera del repo → NO pasa. Sus 6 huecos, arreglados en main (#1082): `setup.sh` ya no necesita `cryptography` (con `set -e`, `X=$(python3 …)` fallido mataba el script sin mensaje); `scripts/*.sh` ejecutables; `.gitattributes` con `*.sh eol=lf` (un checkout de Windows con autocrlf rompe bash: «set: pipefail: invalid option name»); `docker-compose.expose.yml` publica SOLO la API (el SSE del MCP no pide credenciales: no se publica nunca); `ECODB_INTERNAL_HOSTS` en el MCP; README del arranque en CPU (~1 h) y de la descarga de HF que se atasca (`docker restart`). Tercera vuelta propuesta jue 12.
 - **El arnés del experimento** (`Hilo/experimento_desde_cero`): `PAUSA_EMB=1` para parar embeddings/LLM/NER de producción ANTES de lanzar (el vigilante y `comprobar_red.sh` miran producción); `criterio.sh` admite `CRITERIO_KEY` (la clave que crea `restore.sh --recover`) y `CRITERIO_ENTRADA`.
