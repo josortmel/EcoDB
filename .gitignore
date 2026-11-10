@@ -61,3 +61,6 @@ eval/longmemeval/results/
 # LoCoMo benchmark data and results
 eval/locomo/data/
 eval/locomo/results/
+
+# Claude Code guarda ahí el comando entero, con claves, al pulsar «Yes, and don't ask again» (#1101)
+.claude/settings.local.json

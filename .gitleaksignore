@@ -1,0 +1,5 @@
+# Falsos positivos revisados a mano (10-nov-2026, #1101): textos de ayuda con «ecodb_...» y la clave
+# inventada de un test. Ninguno es una clave.
+28946dd5196ce16a6faa27f5e167f473cfb95844:scripts/setup.ps1:generic-api-key:83
+9e0f58dbac83f578aec78f36f8ef0edd453e4816:scripts/setup.sh:generic-api-key:91
+9e0f58dbac83f578aec78f36f8ef0edd453e4816:api/tests/test_auth.py:generic-api-key:90
