@@ -386,6 +386,29 @@ async def can_read_memory(conn, actor: dict, memory) -> bool:
     return memory["workspace_id"] in visible_ws
 
 
+async def ids_legibles(conn, actor: dict, ids) -> set[str]:
+    """#919: de estos ids de memoria, los que el actor puede leer (la misma check_visibility que
+    GET /memories/{id}). Un id mal formado cuenta como no legible."""
+    import uuid
+    validos = []
+    for i in ids:
+        try:
+            validos.append(uuid.UUID(str(i)))
+        except (ValueError, TypeError):
+            pass
+    if not validos:
+        return set()
+    rows = await conn.fetch(
+        """SELECT m.id FROM memories m
+           WHERE m.id = ANY($1::uuid[])
+             AND check_visibility(m.user_id, m.visibility::text, m.workspace_id, m.project_id,
+                                  $2, $3::bool, $4::bool, $5, $6::int[], false)""",
+        validos, int(actor["sub"]), bool(actor.get("is_super")), bool(actor.get("is_ceo")),
+        actor.get("organization_id"), list(actor.get("lead_workspaces") or []),
+    )
+    return {str(r["id"]) for r in rows}
+
+
 async def can_write_memory(conn, actor: dict, memory) -> bool:
     """Permiso de escritura/borrado de una memoria concreta.
     - super: siempre.

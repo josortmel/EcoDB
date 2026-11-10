@@ -321,6 +321,10 @@ def create_app(environment: str = None) -> FastAPI:
     import providers
     app.include_router(providers.router, prefix="/api/v1")
 
+    # Decisiones vigentes (#919) — solo lectura, lógica en vigentes.py.
+    import decisiones
+    app.include_router(decisiones.router, prefix="/api/v1")
+
     return app
 
 
