@@ -227,3 +227,32 @@ def test_un_put_de_metadata_no_pone_ni_quita_la_marca(client, entorno, agente):
     guardada = _json.loads(guardada) if isinstance(guardada, str) else guardada
     assert guardada["superseded_by"] == privada and guardada["nota"] == "x"
     assert "sustituta_no_legible" not in guardada
+
+
+# #1118 (caso de Eco, c8269119 → 9fb038e2): una observación superada por una decisión.
+
+def test_1118_observacion_superada_por_decision_sale_en_sustituye_a_y_en_superadas(client, entorno, agente):
+    obs = _guardar(client, entorno["super"], agente, tipo="observacion")
+    dec = _guardar(client, entorno["super"], agente, supersedes=[obs], supersede_reason="se decidió")
+    sin = _vigentes(client, entorno["super"], agente)
+    assert [f["id"] for f in sin["vigentes"]] == [dec] and sin["vigentes"][0]["sustituye_a"] == [obs]
+    con = _vigentes(client, entorno["super"], agente, incluir_superadas="true")
+    assert [(s["id"], s["superada_por"], s["tipo"]) for s in con["superadas"]] == [(obs, dec, "observacion")]
+
+
+def test_1118_la_cadena_hacia_atras_pasa_por_una_decision_ya_vista(client, entorno, agente):
+    obs = _guardar(client, entorno["super"], agente, tipo="observacion")
+    d1 = _guardar(client, entorno["super"], agente, supersedes=[obs])
+    d2 = _guardar(client, entorno["super"], agente, supersedes=[d1])
+    r = _vigentes(client, entorno["super"], agente)
+    assert [f["id"] for f in r["vigentes"]] == [d2] and set(r["vigentes"][0]["sustituye_a"]) == {d1, obs}
+
+
+def test_1118_el_trabajador_no_ve_el_id_de_la_observacion_privada(client, entorno, agente):
+    obs = _guardar(client, entorno["super"], agente, tipo="observacion", visibility="private")
+    dec = _guardar(client, entorno["super"], agente, supersedes=[obs])
+    r = client.get(URL, headers={"Authorization": f"Bearer {entorno['worker']}"},
+                   params={"tema": "decisión de prueba", "agente": agente, "incluir_superadas": "true"})
+    assert r.status_code == 200 and obs not in r.text
+    assert [f["id"] for f in r.json()["vigentes"]] == [dec] and "sustituye_a" not in r.json()["vigentes"][0]
+    assert r.json()["superadas"] == []

@@ -92,3 +92,26 @@ def vigentes(candidatas: list[dict], leer: Callable[[str], Optional[dict]], hoy:
     if incluir_superadas:
         resultado["superadas"] = superadas
     return resultado
+
+
+def con_previas(resultado: dict, previas: dict[str, list[dict]]) -> dict:
+    """#1118: añade a cada vigente las memorias de CUALQUIER tipo que la sustituye (una observación
+    superada por una decisión), encontradas buscando al revés por la marca. `previas` va de id de vigente
+    a esas memorias, ya filtradas por la visibilidad de quien pregunta y en orden de fecha. Las añade a
+    «sustituye_a» y, si el resultado trae «superadas», también ahí con su «superada_por», que es una
+    memoria que quien pregunta sí puede leer (la vigente o un eslabón encontrado por el mismo camino)."""
+    ya_superadas = {s["id"] for s in resultado.get("superadas", [])}
+    for fila in resultado["vigentes"]:
+        sustituye = fila.get("sustituye_a", [])
+        for p in previas.get(fila["id"], []):
+            pid = str(p["id"])
+            if pid not in sustituye:
+                sustituye.append(pid)
+            if "superadas" in resultado and pid not in ya_superadas:
+                ya_superadas.add(pid)
+                resultado["superadas"].append({**_fila(p, []), "superada_por": str(_meta(p)["superseded_by"]),
+                                               "supersede_kind": _meta(p).get("supersede_kind", "total"),
+                                               "motivo": _meta(p).get("supersede_reason")})
+        if sustituye:
+            fila["sustituye_a"] = sustituye
+    return resultado
