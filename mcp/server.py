@@ -1821,13 +1821,14 @@ def list_clusters(agent_identifier: str, level: Optional[str] = None,
 
 @mcp.tool()
 def read_cluster(cluster_id: str, include_members: bool = False,
-                 include_sources: bool = False) -> dict:
+                 include_sources: bool = False, include_model: bool = False) -> dict:
     """Leer el detalle de un cluster, opcionalmente con miembros y fuentes.
 
     Args:
       cluster_id: UUID del cluster.
       include_members: si true, añade la lista de memorias miembro.
       include_sources: si true, añade fuentes y clusters padre (navegación telescópica).
+      include_model: si true, añade qué modelo y qué célula lo escribieron. Solo sale si se pide.
     """
     if not _UUID_RE.match(cluster_id):
         return _err(RuntimeError("cluster_id must be a valid UUID"))
@@ -1838,6 +1839,8 @@ def read_cluster(cluster_id: str, include_members: bool = False,
             data["members"] = _api_call("GET", f"/api/v1/clusters/{cid}/members")
         if include_sources:
             data["sources_detail"] = _api_call("GET", f"/api/v1/clusters/{cid}/sources")
+        if include_model:
+            data["modelo"] = _api_call("GET", f"/api/v1/clusters/{cid}/modelo")
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
