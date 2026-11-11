@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -50,8 +50,6 @@ class ClusterSummary(BaseModel):
     created_at: datetime
     # #221: which model wrote this cluster, and whether that is a measurement (stamped by the
     # cell worker from its active config at write time) or an inference.
-    model: Optional[str] = None
-    model_source: Optional[Literal["measured", "inferred"]] = None
 
 
 class ClusterDetail(ClusterSummary):
@@ -144,8 +142,6 @@ class ClusterNarrativeSummary(BaseModel):
     period_end: date
     member_count: int
     source_count: int
-    model: Optional[str] = None  # #221
-    model_source: Optional[Literal["measured", "inferred"]] = None
 
 
 class TelescopicViewResponse(BaseModel):
@@ -179,8 +175,6 @@ class FractalZoomCluster(BaseModel):
     member_count: int
     source_count: int
     score: Optional[float] = None
-    model: Optional[str] = None  # #221
-    model_source: Optional[Literal["measured", "inferred"]] = None
 
 
 class FractalZoomMemory(BaseModel):
@@ -215,10 +209,19 @@ def _parse_jsonb(val):
     return val
 
 
+# NORMA DE PEPE (11-nov-2026): «cuando leáis las consolidaciones no veáis qué modelo lo ha escrito; puede estar en
+# unos metadatos que haya que buscar, pero nunca lo recibáis sin buscarlo explícitamente». Las respuestas de clusters
+# (vista progresiva, telescópica, zoom, búsqueda, listado y detalle) NO llevan modelo ni agente de la célula; se
+# piden aparte en GET /clusters/{id}/modelo. Antes (#221, 7-ago) iban en cada cluster.
+_CLAVES_MODELO = ("cell_model", "cell_agent", "cell_model_before_owner")
+
+
 def _model_fields(cell_model) -> dict:
-    """#221: every active cluster is stamped metadata.cell_model by the cell worker at write time
-    (since v1.3, 2026-06-11; 1295/1295 active clusters on 2026-09-25) — a measurement."""
-    return {"model": cell_model, "model_source": "measured" if cell_model else None}
+    return {}
+
+
+def _sin_modelo(meta: dict) -> dict:
+    return {k: v for k, v in (meta or {}).items() if k not in _CLAVES_MODELO}
 
 
 def _cluster_summary(row) -> ClusterSummary:
@@ -243,7 +246,7 @@ def _cluster_summary(row) -> ClusterSummary:
 
 def _cluster_detail(row) -> ClusterDetail:
     base = _cluster_summary(row).model_dump()
-    return ClusterDetail(**base, metadata=_parse_jsonb(row.get("metadata")))
+    return ClusterDetail(**base, metadata=_sin_modelo(_parse_jsonb(row.get("metadata"))))
 
 
 # ---------------------------------------------------------------------------
@@ -776,6 +779,17 @@ async def get_cluster(cluster_id: UUID, actor: dict = Depends(get_current_user))
         cluster["member_count"] = len(cluster["member_ids"])
         cluster["source_count"] = len(cluster["source_ids"] or [])
     return _cluster_detail(cluster)
+
+
+@router.get("/{cluster_id}/modelo")
+async def get_cluster_modelo(cluster_id: UUID, actor: dict = Depends(get_current_user)) -> dict:
+    """Qué modelo y qué célula escribieron este cluster. Solo aquí, y solo si se pide (norma de Pepe, 11-nov)."""
+    detalle = await get_cluster(cluster_id, actor)   # misma visibilidad que el detalle
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        meta = _parse_jsonb(await conn.fetchval("SELECT metadata FROM memory_clusters WHERE id = $1", detalle.id))
+    return {"cluster_id": str(detalle.id), "cell_model": meta.get("cell_model"), "cell_agent": meta.get("cell_agent"),
+            "model_source": "measured" if meta.get("cell_model") else None, "narrated_by": meta.get("narrated_by")}
 
 
 @router.get("/{cluster_id}/members")
