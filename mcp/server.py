@@ -298,6 +298,8 @@ def _api_call(method: str, path: str, **kwargs) -> dict:
                 # UA4 fix (adv-code): http_status como atributo separado.
                 err = RuntimeError(f"{method} {path} -> HTTP {r.status_code}: {detail_str}")
                 err.http_status = r.status_code  # type: ignore[attr-defined]
+                # #1114: el 429 trae cuánto esperar; la cola lo respeta.
+                err.retry_after = r.headers.get("Retry-After")  # type: ignore[attr-defined]
                 raise err
             if r.status_code == 204:
                 return {"ok": True}
@@ -350,15 +352,31 @@ def _err(exc: Exception) -> dict:
 SPOOL_DIR = Path(os.environ.get("ECODB_SPOOL_DIR") or (
     Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "ecodb-mcp" / "spool"))
 SPOOL_RETRY_SECONDS = float(os.environ.get("ECODB_SPOOL_RETRY_SECONDS", "30"))
+# #1114 (10-nov, lo vio Lienzo): al volver la API, las cuatro sesiones vaciaban sus colas a la vez, el
+# límite de POST /memories (20 por minuto) respondía 429 y esas memorias iban a failed/. Ahora la cola
+# envía de una en una con este hueco, y un 429 no es un fallo: se para la pasada y se espera lo que diga
+# su Retry-After (o la pausa normal) antes de seguir.
+SPOOL_SEND_GAP = float(os.environ.get("ECODB_SPOOL_SEND_GAP", "3"))
 _SPOOL_STALE_CLAIM_SECONDS = 600
 _OUTAGE_STATUSES = {502, 503, 504}
+_TOO_MANY = 429
+_spool_pause_until = 0.0
 
 
 def _is_outage(exc: Exception) -> bool:
+    """«Now no, later yes»: the API is down or slow (5xx, network, our timeout) or asks us to slow down
+    (429). Both are queued and retried, never sent to failed/."""
     status = getattr(exc, "http_status", None)
     if status is not None:
-        return status in _OUTAGE_STATUSES
+        return status in _OUTAGE_STATUSES or status == _TOO_MANY
     return "network error" in str(exc)
+
+
+def _retry_after(exc: Exception) -> float:
+    try:
+        return max(1.0, float(getattr(exc, "retry_after", None)))
+    except (TypeError, ValueError):
+        return SPOOL_RETRY_SECONDS
 
 
 def _spool_put(mem_id: str, payload: dict, file_real: Optional[str]) -> None:
@@ -401,22 +419,29 @@ def _spool_claim(f: Path) -> Optional[Path]:
 
 
 def _spool_flush() -> dict:
-    """Send every queued save once. Returns counts; never raises."""
+    """Send every queued save once, SPOOL_SEND_GAP apart. A 429 stops the pass and sets the pause
+    (#1114). Returns counts; never raises."""
+    global _spool_pause_until
     sent = kept = failed = 0
     if not SPOOL_DIR.is_dir():
         return {"sent": 0, "kept": 0, "failed": 0}
     now = time.time()
+    if now < _spool_pause_until:
+        return {"sent": 0, "kept": len(list(SPOOL_DIR.glob("*.json"))), "failed": 0}
     for lock in SPOOL_DIR.glob("*.lock"):  # a process died mid-send: free it for the next pass
         try:
             if now - lock.stat().st_mtime > _SPOOL_STALE_CLAIM_SECONDS:
                 lock.unlink()
         except OSError:
             pass
-    for f in sorted(SPOOL_DIR.glob("*.json")):
+    pendientes = sorted(SPOOL_DIR.glob("*.json"))
+    for i, f in enumerate(pendientes):
         lock = _spool_claim(f)
         if lock is None:
             continue
         try:
+            if sent and SPOOL_SEND_GAP > 0:
+                time.sleep(SPOOL_SEND_GAP)
             rec = json.loads(f.read_text(encoding="utf-8"))
             data = _api_call("POST", "/memories", json=rec["payload"])
             if rec.get("file_real"):
@@ -425,6 +450,10 @@ def _spool_flush() -> dict:
             sent += 1
         except Exception as e:  # noqa: BLE001 — one bad file must not stop the rest
             if _is_outage(e):
+                if getattr(e, "http_status", None) == _TOO_MANY:
+                    _spool_pause_until = time.time() + _retry_after(e)
+                    kept += len(pendientes) - i
+                    break
                 kept += 1
                 continue
             failed_dir = SPOOL_DIR / "failed"
