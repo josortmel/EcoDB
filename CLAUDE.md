@@ -14,6 +14,19 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - ecodb-langchain: `0.2.0` (SDK 13 tools nativas + 40 via MCP parity)
 - Release pública: `v1.3.1` (Progressive zoom + fractal navigation)
 
+## 11-nov-2026 (Hilo) — #1118 y #1114 en main y en producción
+- **Desplegado** (main f4b7cd4): `ecodb-api:0.25.0` y `ecodb-mcp:1.8.0` reconstruidas con `docker compose build api mcp`;
+  recreados api, worker, ecodb-cell y mcp (EcoDB sano en ~5 s). Vuelta atrás: `ecodb-api:0.25.0-pre1118`, `ecodb-mcp:1.8.0-pre1114`.
+- **#1118:** `decisiones_vigentes` busca también AL REVÉS (`_previas` en `api/decisiones.py`: memorias de cualquier tipo con
+  `metadata->>'superseded_by'` = una vigente, con la `check_visibility` de quien llama, ronda a ronda; las ya vistas por el camino
+  de delante abren camino pero no se repiten) y `vigentes.con_previas` rellena `sustituye_a` y `superadas`. Las candidatas siguen
+  siendo decision y acuerdo (decisión de Prima). Probado en la casa con c8269119 → 9fb038e2.
+- **#1114:** la cola local del MCP trata el 429 como «más tarde» (Retry-After, para la pasada) y envía una cada
+  `ECODB_SPOOL_SEND_GAP` (3 s). Las sesiones cogen el `mcp/server.py` nuevo tras `/mcp` o al arrancar.
+- **Tests de la api contra test-pg, desde la RAÍZ:** `TEST_DB_PORT=5436 python -m pytest api/tests/...` (desde api/ falla
+  por `sql/`). `test_decisiones_vigentes.py` tarda ~3,5 min (cada búsqueda llama al NER, que desde el host no resuelve).
+- **Los usuarios de Postgres:** el contenedor no tiene rol `postgres`; `docker exec ecodb-postgres printenv POSTGRES_USER`.
+
 ## 10-nov-2026 (Hilo) — decisiones vigentes en main y en producción (#919)
 - **En main (d30379c) y desplegado** (api y mcp reconstruidos; vuelta atrás `ecodb-api:0.25.0-pre919` y `ecodb-mcp:1.8.0-pre919`).
 - **`GET /api/v1/decisiones/vigentes`** (`api/decisiones.py`, capa fina sobre `api/vigentes.py`, lógica pura): `tema`, `agente`,
