@@ -423,10 +423,22 @@ async def _fetch_doc_expansion(conn, entity_ids: list, project_ids=None, limit: 
     """, *params)
 
 
+# #1144 (parche del grafo, Pepe 11-nov: «parche ya + arreglo después»): el salto 2 por cypher agota su tiempo
+# (5 s) en casi todas las búsquedas (#486). EXPAND_GRAPH_HOP2=0 lo apaga en todo el servicio; el campo
+# graph_hop2 de la petición lo sobrescribe en una llamada, para medir encendido y apagado intercalados.
+EXPAND_GRAPH_HOP2 = os.environ.get("EXPAND_GRAPH_HOP2", "1").strip().lower() not in ("0", "false", "off", "no")
+
+
+def _saltos(hop2: Optional[bool] = None) -> tuple[int, ...]:
+    """Qué saltos del grafo se hacen: (1, 2) o solo (1,). None = lo que diga EXPAND_GRAPH_HOP2."""
+    return (1, 2) if (EXPAND_GRAPH_HOP2 if hop2 is None else hop2) else (1,)
+
+
 async def expand_by_graph(
     pool, candidate_memory_ids: list[str],
     visible_project_ids: Optional[list[int]] = None,
     query_vec=None,
+    hop2: Optional[bool] = None,
 ) -> tuple[dict[str, float], list[dict]]:
     """Etapa 4 GAMR — expansión por grafo dual AGE+SQL.
 
@@ -511,7 +523,7 @@ async def expand_by_graph(
         expanded_entity_ids: set[int] = set()
         hop_map: dict[int, int] = {}  # entity_sql_id → min_hops
 
-        for hop_depth in (1, 2):
+        for hop_depth in _saltos(hop2):
             params = json.dumps({"ids": entity_ids_list})
             try:
                 await conn.execute("SET LOCAL statement_timeout = '4500'")
@@ -857,6 +869,7 @@ class SearchRequest(BaseModel):
         "Memorias creadas <= este INSTANTE (ISO 8601). OJO: una fecha sin hora = 00:00:00, el PRINCIPIO "
         "del dia, no el final. Para cubrir el dia D entero: fecha_desde=\"D\", fecha_hasta=\"DT23:59:59.999999\"."))
     graph_discovery: bool = Field(False, description="Si true, GAMR añade memorias descubiertas via grafo que no aparecieron en busqueda semantica. Requiere grafo denso para ser util.")
+    graph_hop2: Optional[bool] = Field(None, description="#1144, diagnóstico: hacer (true) o no (false) el salto 2 del grafo en esta llamada. Sin valor, lo que diga EXPAND_GRAPH_HOP2 (por defecto, sí).")
     include_documents: bool = Field(True, description="Si true, añade resultados de chunks de documentos junto a memorias. Default true.")
     max_document_results: int = Field(3, ge=0, le=20, description="Max chunks de documentos a incluir (0-20). Solo aplica si include_documents=true.")
     tags: Optional[list[str]] = Field(None, max_length=20, description="Filtrar por tags (AND logic). Max 20 tags, each max 128 chars.")
@@ -1433,7 +1446,7 @@ async def search_memories(
     # Etapa 4 — Expansión por grafo.
     _vp_list = list(visible_projects) if visible_projects else None
     graph_scores, graph_context = await expand_by_graph(pool, candidate_ids, visible_project_ids=_vp_list,
-                                                        query_vec=query_vec)
+                                                        query_vec=query_vec, hop2=body.graph_hop2)
 
     # Etapa 3b — BM25 scoring (re-rank de candidatos).
     bm25_scores: dict[str, float] = {}
