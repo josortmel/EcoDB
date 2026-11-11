@@ -3,7 +3,6 @@ under the ecodb_cell role, which has no grant on memory_embeddings), the backfil
 that re-embeds — must leave the 'text' row there, without waiting for an api restart.
 Against the throwaway Postgres (5436)."""
 import asyncio
-import os
 import uuid
 from pathlib import Path
 
@@ -19,7 +18,7 @@ VEC_B = "[" + ",".join(["0.02"] * 512) + "]"
 
 def _run(coro_fn):
     async def go():
-        conn = await asyncpg.connect(dsn=os.environ.get("DATABASE_URL", TEST_DB_URL))
+        conn = await asyncpg.connect(dsn=TEST_DB_URL)   # #1066: la de pruebas, no lo que haya en el entorno
         try:
             await conn.execute(SQL.read_text(encoding="utf-8"))
             return await coro_fn(conn)
