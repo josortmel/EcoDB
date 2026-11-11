@@ -17,6 +17,12 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 ## 11-nov-2026 (Hilo) — #1118 y #1114 en main y en producción
 - **Desplegado** (main f4b7cd4): `ecodb-api:0.25.0` y `ecodb-mcp:1.8.0` reconstruidas con `docker compose build api mcp`;
   recreados api, worker, ecodb-cell y mcp (EcoDB sano en ~5 s). Vuelta atrás: `ecodb-api:0.25.0-pre1118`, `ecodb-mcp:1.8.0-pre1114`.
+- **Grafo en la búsqueda (#1144, Pepe 11-nov):** dos interruptores en `api/search.py`, que llegan a la api por el
+  compose (99accfb). `EXPAND_GRAPH_HOP2=0` (en el .env de la casa desde el 11-nov 16:1x: 10 s → 5 s, mismos 5 primeros)
+  y `EXPAND_GRAPH` (a05c045; por defecto 1) que apaga el grafo ENTERO en la búsqueda: no se llama a expand_by_graph,
+  graph_score 0. Por petición: `graph_hop2` y `graph`. Con graph=false, 2,4-3,3 s y CAMBIA el orden del top-5:
+  lo decide la vara v5 de Prima (#1160). neighbors/path_between/save_triple, NER y BM25 de entidades NO se tocan.
+  OJO: una variable del .env que no esté en el `environment:` del compose NO llega al contenedor.
 - **Norma de Pepe (11-nov, f78b443): las respuestas de clusters NO llevan el modelo que las escribió.** Ni `model`/`model_source`
   en la vista progresiva, la telescópica, el zoom, el listado ni la búsqueda; el detalle quita de `metadata` `cell_model`,
   `cell_agent`, `cell_generated`, `narrated_by` y sus `*_before_owner` (`_CLAVES_MODELO` en `api/clusters.py`). Solo se ve pidiéndolo:
