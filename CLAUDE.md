@@ -26,6 +26,16 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 - **Tests de la api contra test-pg, desde la RAÍZ:** `TEST_DB_PORT=5436 python -m pytest api/tests/...` (desde api/ falla
   por `sql/`). `test_decisiones_vigentes.py` tarda ~3,5 min (cada búsqueda llama al NER, que desde el host no resuelve).
 - **Los usuarios de Postgres:** el contenedor no tiene rol `postgres`; `docker exec ecodb-postgres printenv POSTGRES_USER`.
+- **#895 (aa6d6ed): una sola copia del modelo de búsqueda.** La imagen de embeddings trae `TRANSFORMERS_CACHE=/cache/huggingface`,
+  que resolvía config y pesos a una copia VIEJA e INCOMPLETA en la raíz de la caché (sin `adapters/` ni `qwen2_5_vl.py`) y lo
+  demás a `hub/`. El compose ahora pone `TRANSFORMERS_CACHE: /cache/huggingface/hub` (la completa); coseno 1,0 en 3 memorias
+  antes y después. La copia de la raíz (7,1 GB) sigue en disco como vuelta atrás; se borra con el sí de Pepe (#1135, 16-nov).
+  Cómo saber qué copia se consulta con el montaje `noatime`: los marcadores `.no_exist/<sha>/…` que HF escribe al arrancar.
+- **#1083 (29c0b5d):** `restore.sh --recover --env=production` (sin la opción, la recuperada nace en desarrollo); TELEGRAM_*
+  clasificadas; la guarda recorre todos los `docker-compose*.yml`. El runbook de Prima (PR #1) lo añade al comando.
+- **#1066 (c1d62d8):** el `DATABASE_URL` falso de `test_tension_only_live_week` solo vive durante el import de cell_worker.
+- **#941 en la rama `hilo-941` (al día con main), SIN fusionar a propósito:** api, worker y célula comparten imagen y un
+  rebuild de la api lo desplegaría sin querer. Se fusiona y despliega con #846, con el sí de Pepe (decisión 119).
 
 ## 10-nov-2026 (Hilo) — decisiones vigentes en main y en producción (#919)
 - **En main (d30379c) y desplegado** (api y mcp reconstruidos; vuelta atrás `ecodb-api:0.25.0-pre919` y `ecodb-mcp:1.8.0-pre919`).
