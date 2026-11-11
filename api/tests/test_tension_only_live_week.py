@@ -8,10 +8,17 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+# cell_worker pide DATABASE_URL al importarse. Se pone una falsa SOLO para el import y se quita
+# después: si se queda, los tests de después que leen el entorno (test_sync_text_embedding) se
+# conectaban a 127.0.0.1:1 (#1066).
+_HABIA_URL = "DATABASE_URL" in os.environ
 os.environ.setdefault("DATABASE_URL", "postgresql://x@127.0.0.1:1/x")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cell_worker as cw  # noqa: E402
+
+if not _HABIA_URL:
+    del os.environ["DATABASE_URL"]
 
 TENSION = json.dumps({"tensions": [{"observed_trait": "o", "declared_trait": "d",
                                     "tension_type": "gap"}]})
