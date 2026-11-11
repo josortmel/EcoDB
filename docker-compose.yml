@@ -65,6 +65,10 @@ services:
     environment:
       MODEL_NAME: jinaai/jina-embeddings-v4
       EMBEDDING_BACKEND: local
+      # #895: la imagen trae TRANSFORMERS_CACHE=/cache/huggingface, que resolvía config y pesos a una
+      # copia vieja e INCOMPLETA de la raíz (sin adapters/ ni qwen2_5_vl.py) y lo demás a hub/. Con esto
+      # todo sale de la copia completa de hub/ (la de huggingface_hub con HF_HOME). Medido 11-nov.
+      TRANSFORMERS_CACHE: /cache/huggingface/hub
       EMBEDDING_DIM: "512"
       MAX_TEXT_LEN: "32000"
     # NO exponemos puerto al host — solo accesible internamente desde api via
