@@ -56,8 +56,8 @@ ORDER BY m.created_at
 # recíproco (RRF), con la misma visibilidad. Diseño sellado antes de medir: Hilo/Documentacion/diseno_1098_vigentes.md.
 RRF_K = 60
 TOPE_LISTA = 50
-SUELO = 0.70     # coseno mínimo para que una fila de EcoDB cuente como relevante
-MARGEN = 0.10    # y no más lejos que esto de la mejor de su mitad
+SUELO = 0.60     # coseno mínimo para que una fila de EcoDB cuente como relevante (ajuste con el set de desarrollo)
+MARGEN = 0.06    # y no más lejos que esto de la mejor de su mitad
 _VACIAS = {"de", "la", "el", "en", "y", "a", "que", "los", "las", "del", "por", "con", "para", "un", "una",
            "se", "no", "lo", "al", "es"}
 
