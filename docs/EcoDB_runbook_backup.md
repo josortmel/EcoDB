@@ -93,7 +93,7 @@ bash scripts/setup.sh --non-interactive --cpu   # or without --cpu if you have a
 # 2. Start ONLY postgres, then restore with --recover
 docker compose up -d postgres
 bash scripts/restore.sh /path/to/backup.dump \
-  --target=ecodb --allow-dangerous --recover \
+  --target=ecodb --allow-dangerous --recover --env=production \
   [--key-targets=/path/outside/repo/key_targets.txt] \
   [--env-file=/path/to/.env]   # default: .env in the current folder
 
@@ -108,21 +108,22 @@ What `--recover` does, in order:
 3. Sets new database passwords (`ALTER ROLE`), deactivates every old API key and creates the two new ones.
 4. Writes the new secrets into `.env` (`ECODB_DB_PASSWORD`, `CELL_DB_PASSWORD`, `ECODB_JWT_SECRET`, `ECODB_API_KEY_PEPPER`, `ECODB_API_KEY`, `INTERNAL_BROADCAST_SECRET`, `ENCRYPTION_KEY`).
 5. Saves the two new API keys in `.recovered_keys` (permissions 600, next to `.env`). They are **not** printed.
-6. If you passed `--key-targets`, replaces the old `ecodb_…` key with the new family key in each listed file.
+6. Sets `ECODB_ENV` in `.env` to what you passed with `--env` (`production` or `development`). Without `--env`, it keeps the value already in `.env`, or writes `development` if there is none: the right default for a new install, the wrong one for a recovered production house. That is why the command above passes `--env=production`.
+7. If you passed `--key-targets`, replaces the old `ecodb_…` key with the new family key in each listed file.
 
 ### After restoring: checklist
 
 - [ ] Memory count equals the backup's (see *SQL counts* below).
 - [ ] `curl http://localhost:8080/health` answers `ok`. **Be patient on the first start:** the API waits until the embedding model has loaded, which on CPU can take close to an hour. Until then `/health` does not answer. That is not a failure.
 - [ ] Your clients use the new key from `.recovered_keys`, and a real `search` returns results.
-- [ ] You pasted the external provider keys again into `.env` (and in the dashboard, the ones `restore.sh` listed).
-- [ ] **Check `ECODB_ENV` in `.env`.** Today, if the variable is missing, `--recover` sets it to `development`. A recovered *production* install must say `ECODB_ENV=production`: set it by hand and restart the API. (An explicit option for this is planned.)
+- [ ] You pasted the external keys again into `.env`: `restore.sh` prints the list (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `CELL_LLM_KEY`, `TELEGRAM_BOT_TOKEN`; only the ones you used), and in the dashboard the provider keys it listed.
+- [ ] `.env` says `ECODB_ENV=production` (it will, if you passed `--env=production`).
 - [ ] Delete `.recovered_keys` once every client has its new key.
 
 ### Things that can go wrong
 
 - **Never run plain `docker compose up` next to another running EcoDB on the same machine.** The compose file pins container names: you would replace the other instance's containers.
-- **Optional services keep their own secrets.** If you used the alerting override (`docker-compose.alerting.yml`), set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` again: `restore.sh` does not list them yet.
+- **The alerting override needs its Telegram settings.** If you used `docker-compose.alerting.yml`, paste `TELEGRAM_BOT_TOKEN` again (it is in the list `restore.sh` prints) and set `TELEGRAM_CHAT_ID`, which is a plain setting, not a secret.
 - The first start downloads the embedding model (several GB). If the download stalls, restarting the container resumes it.
 
 ---
