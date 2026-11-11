@@ -17,6 +17,11 @@ Memoria colectiva compartida para equipos multi-agente. PostgreSQL + pgvector + 
 ## 11-nov-2026 (Hilo) — #1118 y #1114 en main y en producción
 - **Desplegado** (main f4b7cd4): `ecodb-api:0.25.0` y `ecodb-mcp:1.8.0` reconstruidas con `docker compose build api mcp`;
   recreados api, worker, ecodb-cell y mcp (EcoDB sano en ~5 s). Vuelta atrás: `ecodb-api:0.25.0-pre1118`, `ecodb-mcp:1.8.0-pre1114`.
+- **Norma de Pepe (11-nov, f78b443): las respuestas de clusters NO llevan el modelo que las escribió.** Ni `model`/`model_source`
+  en la vista progresiva, la telescópica, el zoom, el listado ni la búsqueda; el detalle quita de `metadata` `cell_model`,
+  `cell_agent`, `cell_generated`, `narrated_by` y sus `*_before_owner` (`_CLAVES_MODELO` en `api/clusters.py`). Solo se ve pidiéndolo:
+  `GET /clusters/{id}/modelo` o `read_cluster(include_model=True)`. No volver a ponerlo en una salida por defecto
+  (`test_modelo_oculto.py`). Vuelta atrás: `ecodb-api:0.25.0-premodelo`, `ecodb-mcp:1.8.0-premodelo`.
 - **#1118:** `decisiones_vigentes` busca también AL REVÉS (`_previas` en `api/decisiones.py`: memorias de cualquier tipo con
   `metadata->>'superseded_by'` = una vigente, con la `check_visibility` de quien llama, ronda a ronda; las ya vistas por el camino
   de delante abren camino pero no se repiten) y `vigentes.con_previas` rellena `sustituye_a` y `superadas`. Las candidatas siguen
