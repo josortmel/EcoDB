@@ -474,6 +474,11 @@ def save_memory(
     image_base64: Optional[str] = None,
     file_path: Optional[str] = None,
     image_path: Optional[str] = None,
+    supersedes: Optional[list[str]] = None,
+    supersede_kind: Optional[str] = None,
+    supersede_reason: Optional[str] = None,
+    valid_until: Optional[str] = None,
+    decidido_por: Optional[dict] = None,
 ) -> dict:
     """Guardar una memoria en EcoDB. Puede adjuntar un archivo de cualquier tipo.
 
@@ -493,6 +498,12 @@ def save_memory(
         Archivos de credenciales/config/ejecutables bloqueados por seguridad.
       image_path: alias de file_path (backward-compat). Si ambos presentes,
         file_path tiene prioridad.
+      supersedes: ids de las memorias que esta SUSTITUYE (p. ej. una decisión que cambia otra
+        anterior: nómbrala aquí). La API las marca como superadas por esta, con quién y cuándo.
+      supersede_kind: total (default), parcial o nunca_valida (solo la autora de la vieja o un humano).
+      supersede_reason: una línea, por qué se sustituye.
+      valid_until: YYYY-MM-DD, hasta cuándo vale (instrucciones para un día concreto).
+      decidido_por: quién la decidió, no quién la guarda: {"tipo": "humano"|"agente"|"equipo", "quien": "<nombre>"}.
     """
     payload = {
         "content": content,
@@ -504,6 +515,12 @@ def save_memory(
     }
     if agent_identifier is not None:
         payload["agent_identifier"] = agent_identifier
+    # #919: solo se mandan si vienen (la API valida tipos, fechas y permisos).
+    for _k, _v in (("supersedes", supersedes), ("supersede_kind", supersede_kind),
+                   ("supersede_reason", supersede_reason), ("valid_until", valid_until),
+                   ("decidido_por", decidido_por)):
+        if _v is not None:
+            payload[_k] = _v
     resolved_file_path = file_path if file_path is not None else image_path
     real = None
     if resolved_file_path is not None and image_base64 is None:
@@ -1921,6 +1938,38 @@ def narrate_cluster(cluster_id: str, narrative: str) -> dict:
 # ---------------------------------------------------------------------------
 # Entry point: stdio MCP server (Claude Code lo invoca como subprocess).
 # ---------------------------------------------------------------------------
+
+@mcp.tool()
+def decisiones_vigentes(
+    tema: str,
+    agente: Optional[str] = None,
+    incluir_superadas: bool = False,
+    limit: int = 10,
+) -> dict:
+    """Las decisiones y acuerdos que VALEN HOY sobre un tema (#919, decisiones vigentes).
+
+    Úsala ANTES de actuar sobre algo que tenga decisiones detrás: busca por parecido con `tema`
+    en memorias de tipo decision y acuerdo y, si alguna está marcada como superada, sigue la cadena
+    hasta la vigente (A→B→C devuelve C, «sustituye_a [A, B]»). Quita las caducadas (valid_until
+    pasado). Los ciclos y las sustitutas que no se pueden leer salen en «errores», no se esconden,
+    y los topes (memorias leídas, saltos de cadena) en «avisos». La lógica vive en la API
+    (GET /api/v1/decisiones/vigentes); esta herramienta solo la llama.
+
+    Args:
+      tema: de qué trata (texto libre, 3-2000 caracteres).
+      agente: opcional, solo las de ese agente.
+      incluir_superadas: true para auditar: añade «superadas» con por quién y por qué.
+      limit: máximo de vigentes (1-50, default 10).
+    """
+    params = {"tema": tema, "incluir_superadas": str(bool(incluir_superadas)).lower(),
+              "limit": max(1, min(int(limit), 50))}
+    if agente:
+        params["agente"] = agente
+    try:
+        return _ok(_api_call("GET", "/api/v1/decisiones/vigentes", params=params))
+    except Exception as e:
+        return _err(e)
+
 
 if __name__ == "__main__":
     # #547: send what earlier sessions queued, and keep retrying in the background.
