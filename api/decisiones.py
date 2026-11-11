@@ -37,6 +37,20 @@ WHERE m.id = ANY($1::uuid[])
 """
 
 
+# #1118: al revés, las memorias de cualquier tipo que nombran como sustituta a alguna de $1.
+_PREVIAS_SQL = """
+SELECT m.id, m.type, m.content, m.created_at, m.metadata, a.identifier AS agent_identifier
+FROM memories m
+LEFT JOIN agents a ON a.id = m.agent_id
+WHERE m.metadata->>'superseded_by' = ANY($1::text[])
+  AND check_visibility(
+    m.user_id, m.visibility::text, m.workspace_id, m.project_id,
+    $2, $3::bool, $4::bool, $5, $6::int[], false
+  )
+ORDER BY m.created_at
+"""
+
+
 def _uuid(valor) -> Optional[str]:
     try:
         return str(uuid.UUID(str(valor)))
@@ -62,6 +76,40 @@ async def _leer(ids: list[str], actor: dict) -> dict[str, dict]:
             bool(actor.get("is_ceo")), actor.get("organization_id"), list(actor.get("lead_workspaces") or []),
         )
     return {str(r["id"]): _memoria(r) for r in rows}
+
+
+async def _previas(raices: list[str], conocidas: set[str], actor: dict, presupuesto: int) -> tuple[dict, bool]:
+    """#1118: para cada vigente, las memorias que la sustituye buscando al revés por la marca, ronda a
+    ronda (A→B→vigente da B y A), con la visibilidad de quien pregunta. Devuelve ({vigente: [memorias]},
+    si se cortó por el tope de memorias leídas). Lo ya visto por el camino de delante no se repite."""
+    previas: dict[str, list[dict]] = {r: [] for r in raices}
+    raiz_de = {r: r for r in raices}
+    frontera, cortado = list(raices), False
+    pool = await get_pool()
+    for _ in range(_vig.MAX_SALTOS):
+        if not frontera or presupuesto <= 0:
+            cortado = cortado or bool(frontera)
+            break
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                _PREVIAS_SQL, frontera, int(actor["sub"]), bool(actor.get("is_super")),
+                bool(actor.get("is_ceo")), actor.get("organization_id"), list(actor.get("lead_workspaces") or []),
+            )
+        frontera = []
+        for r in rows:
+            m = _memoria(r)
+            if m["id"] in raiz_de:   # ciclo o ya encontrada
+                continue
+            if presupuesto <= 0:
+                cortado = True
+                break
+            presupuesto -= 1
+            raiz = raiz_de[str(m["metadata"]["superseded_by"])]
+            raiz_de[m["id"]] = raiz
+            if m["id"] not in conocidas:   # las del camino de delante ya están; solo abren camino hacia atrás
+                previas[raiz].append(m)
+            frontera.append(m["id"])
+    return previas, cortado
 
 
 @router.get("/vigentes")
@@ -113,5 +161,11 @@ async def decisiones_vigentes(
     # memoria repetida no es un ciclo, es el tope, y se dice.
     if any("ciclo" in e and len(set(e["ciclo"])) == len(e["ciclo"]) for e in resultado["errores"]):
         avisos.append(f"una cadena pasa de {_vig.MAX_SALTOS} saltos: se cortó y sale en «errores»")
+    # #1118: lo que sustituye cada vigente aunque no sea decisión ni acuerdo (las candidatas no cambian).
+    raices = [f["id"] for f in resultado["vigentes"]]
+    previas, cortado = await _previas(raices, set(vistas), actor, MAX_LEIDAS - len(pedidas))
+    _vig.con_previas(resultado, previas)
+    if cortado:
+        avisos.append(f"más de {MAX_LEIDAS} memorias que leer: «sustituye_a» puede venir incompleto")
     resultado["avisos"] = avisos
     return resultado

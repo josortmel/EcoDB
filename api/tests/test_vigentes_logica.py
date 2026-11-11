@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vigentes import vigentes  # noqa: E402
+from vigentes import con_previas, vigentes  # noqa: E402
 
 HOY = date(2026, 11, 9)
 
@@ -74,3 +74,33 @@ def test_decidido_por_y_valid_until_viajan_en_la_fila():
     f = vigentes([d["A"]], leer, HOY)["vigentes"][0]
     assert f["decidido_por"] == {"tipo": "humano", "quien": "Pepe"} and f["valid_until"] == "2026-12-31"
     assert f["fuente"] == "EcoDB"
+
+
+# #1118: lo que sustituye una vigente aunque no sea decisión ni acuerdo, encontrado al revés por la marca.
+
+def _obs(mid, **meta):
+    return {**_m(mid, **meta), "type": "observacion", "content": f"observación {mid}"}
+
+
+def test_con_previas_anade_la_observacion_a_sustituye_a_y_a_superadas():
+    d, leer = _base(_m("D"))
+    r = vigentes([d["D"]], leer, HOY, incluir_superadas=True)
+    con_previas(r, {"D": [_obs("O", superseded_by="D", supersede_reason="se decidió")]})
+    assert r["vigentes"][0]["sustituye_a"] == ["O"]
+    assert [(s["id"], s["superada_por"], s["motivo"], s["tipo"]) for s in r["superadas"]] == [
+        ("O", "D", "se decidió", "observacion")]
+
+
+def test_con_previas_sin_incluir_superadas_no_crea_superadas_ni_repite():
+    d, leer = _base(_m("A", superseded_by="C"), _m("C"))
+    r = vigentes([d["A"]], leer, HOY)
+    con_previas(r, {"C": [_obs("O", superseded_by="A"), _obs("O", superseded_by="A")]})
+    assert r["vigentes"][0]["sustituye_a"] == ["A", "O"] and "superadas" not in r
+
+
+def test_con_previas_sin_previas_no_toca_nada():
+    d, leer = _base(_m("C"))
+    r = vigentes([d["C"]], leer, HOY, incluir_superadas=True)
+    antes = repr(r)
+    con_previas(r, {"C": []})
+    assert repr(r) == antes and "sustituye_a" not in r["vigentes"][0]
