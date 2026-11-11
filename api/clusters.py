@@ -48,8 +48,6 @@ class ClusterSummary(BaseModel):
     status: str
     narrated_at: Optional[datetime] = None
     created_at: datetime
-    # #221: which model wrote this cluster, and whether that is a measurement (stamped by the
-    # cell worker from its active config at write time) or an inference.
 
 
 class ClusterDetail(ClusterSummary):
@@ -213,11 +211,8 @@ def _parse_jsonb(val):
 # unos metadatos que haya que buscar, pero nunca lo recibáis sin buscarlo explícitamente». Las respuestas de clusters
 # (vista progresiva, telescópica, zoom, búsqueda, listado y detalle) NO llevan modelo ni agente de la célula; se
 # piden aparte en GET /clusters/{id}/modelo. Antes (#221, 7-ago) iban en cada cluster.
-_CLAVES_MODELO = ("cell_model", "cell_agent", "cell_model_before_owner")
-
-
-def _model_fields(cell_model) -> dict:
-    return {}
+_CLAVES_MODELO = ("cell_model", "cell_agent", "cell_model_before_owner", "cell_generated",
+                  "cell_generated_before_owner", "narrated_by")
 
 
 def _sin_modelo(meta: dict) -> dict:
@@ -240,7 +235,6 @@ def _cluster_summary(row) -> ClusterSummary:
         status=row["status"],
         narrated_at=row.get("narrated_at"),
         created_at=row["created_at"],
-        **_model_fields(row.get("cell_model") or _parse_jsonb(row.get("metadata")).get("cell_model")),
     )
 
 
@@ -354,8 +348,8 @@ async def get_telescopic_view(
             # boot reads chronologically (yearly→quarterly→monthly→weekly = old→recent).
             rows = await conn.fetch("""
                 SELECT id, label, narrative, period_start, period_end,
-                       member_count, source_count, cell_model FROM (
-                    SELECT mc.id, mc.label, mc.narrative, mc.metadata->>'cell_model' AS cell_model,
+                       member_count, source_count FROM (
+                    SELECT mc.id, mc.label, mc.narrative,
                            mc.period_start, mc.period_end,
                            coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
                            coalesce(array_length(mc.source_ids, 1), 0) AS source_count
@@ -370,7 +364,6 @@ async def get_telescopic_view(
                 id=r["id"], label=r["label"], narrative=r["narrative"],
                 period_start=r["period_start"], period_end=r["period_end"],
                 member_count=r["member_count"], source_count=r["source_count"],
-                **_model_fields(r.get("cell_model")),
             ) for r in rows]
 
         # Last 3 complete days of raw memories (finest, most-recent layer of the boot).
@@ -459,7 +452,7 @@ async def get_progressive_view(
                 continue
             rows = await conn.fetch("""
                 WITH unabsorbed AS (
-                    SELECT mc.id, mc.label, mc.narrative, mc.metadata->>'cell_model' AS cell_model,
+                    SELECT mc.id, mc.label, mc.narrative,
                            mc.period_start, mc.period_end,
                            coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
                            coalesce(array_length(mc.source_ids, 1), 0) AS source_count
@@ -490,7 +483,6 @@ async def get_progressive_view(
                 id=r["id"], label=r["label"], narrative=r["narrative"],
                 period_start=r["period_start"], period_end=r["period_end"],
                 member_count=r["member_count"], source_count=r["source_count"],
-                **_model_fields(r.get("cell_model")),
             ) for r in rows]
 
         # Loose days = ONLY the open edge. A memory is hidden if its week is
@@ -629,7 +621,7 @@ async def _zoom_clusters(conn, where: str, params: list,
         order_sql = "mc.period_end ASC"
     rows = await conn.fetch(f"""
         SELECT mc.id, mc.level, mc.label, mc.narrative,
-               mc.period_start, mc.period_end, mc.metadata->>'cell_model' AS cell_model,
+               mc.period_start, mc.period_end,
                coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
                coalesce(array_length(mc.source_ids, 1), 0) AS source_count,
                {score_sql} AS score
@@ -643,7 +635,6 @@ async def _zoom_clusters(conn, where: str, params: list,
         period_start=r["period_start"], period_end=r["period_end"],
         member_count=r["member_count"], source_count=r["source_count"],
         score=float(r["score"]) if r["score"] is not None else None,
-        **_model_fields(r["cell_model"]),
     ) for r in rows]
 
 
@@ -784,12 +775,13 @@ async def get_cluster(cluster_id: UUID, actor: dict = Depends(get_current_user))
 @router.get("/{cluster_id}/modelo")
 async def get_cluster_modelo(cluster_id: UUID, actor: dict = Depends(get_current_user)) -> dict:
     """Qué modelo y qué célula escribieron este cluster. Solo aquí, y solo si se pide (norma de Pepe, 11-nov)."""
-    detalle = await get_cluster(cluster_id, actor)   # misma visibilidad que el detalle
     pool = await get_pool()
     async with pool.acquire() as conn:
-        meta = _parse_jsonb(await conn.fetchval("SELECT metadata FROM memory_clusters WHERE id = $1", detalle.id))
-    return {"cluster_id": str(detalle.id), "cell_model": meta.get("cell_model"), "cell_agent": meta.get("cell_agent"),
-            "model_source": "measured" if meta.get("cell_model") else None, "narrated_by": meta.get("narrated_by")}
+        cluster = await resolve_cluster_for_actor(conn, actor, cluster_id)   # misma visibilidad que el detalle
+    meta = _parse_jsonb(cluster.get("metadata")) or {}
+    return {"cluster_id": str(cluster["id"]), "cell_model": meta.get("cell_model"),
+            "model_source": "measured" if meta.get("cell_model") else None,
+            **{k: meta[k] for k in _CLAVES_MODELO if k in meta}}
 
 
 @router.get("/{cluster_id}/members")

@@ -1,6 +1,6 @@
 """C23 (#221): after an owner rewrites a cluster narrative (PUT /clusters/{id}/narrate),
-the cluster must stop claiming the cell's model. metadata.cell_model is removed (readers
-then report model=None, model_source=None), kept as cell_model_before_owner, and
+the cluster must stop claiming the cell's model. metadata.cell_model is removed, kept as
+cell_model_before_owner (only GET /clusters/{id}/modelo shows either), and
 narrated_by="owner" is set. Router-only, fake conn — no DB.
 """
 import sys
@@ -65,7 +65,3 @@ def test_owner_narrate_drops_cell_model_claim(monkeypatch):
     assert "- 'cell_generated'" in sql                   # C23b: authorship claim moves too
     assert "cell_generated_before_owner" in sql
     assert args[0] == "mi versión"
-
-
-def test_model_fields_without_cell_model_is_no_measurement():
-    assert clusters._model_fields(None) == {"model": None, "model_source": None}
