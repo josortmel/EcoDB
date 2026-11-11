@@ -11,7 +11,7 @@
 #   ./restore.sh DUMP_FILE                          # restaura a 'ecodb_restore_test', deja la DB
 #   ./restore.sh DUMP_FILE --temp                   # restaura, smoke test, BORRA la DB
 #   ./restore.sh DUMP_FILE --target=ecodb_v2        # restaura a DB con otro nombre
-#   ./restore.sh DUMP_FILE --target=ecodb --allow-dangerous --recover [--env-file=.env]
+#   ./restore.sh DUMP_FILE --target=ecodb --allow-dangerous --recover [--env-file=.env] [--env=production]
 #                [--key-targets=FICHERO]            # recuperacion completa
 #
 # --key-targets: una ruta por linea. En cada fichero se sustituye la clave ecodb_... por la
@@ -30,8 +30,8 @@ set -euo pipefail
 # GENERATED_ENV: los rehace --recover. EXTERNAL_ENV: claves de terceros, las vuelve a poner el
 # dueño. CONFIG_ENV: ajustes con valor por defecto, ningun secreto.
 GENERATED_ENV="ECODB_DB_PASSWORD CELL_DB_PASSWORD ECODB_JWT_SECRET ECODB_API_KEY_PEPPER ECODB_API_KEY INTERNAL_BROADCAST_SECRET ENCRYPTION_KEY"
-EXTERNAL_ENV="ANTHROPIC_API_KEY DEEPSEEK_API_KEY CELL_LLM_KEY"
-CONFIG_ENV="CELL_LLM_MODEL CELL_LLM_PROVIDER CELL_LLM_URL CONSOLIDATION_ALPHA CONSOLIDATION_BETA1 CONSOLIDATION_BETA2 CONSOLIDATION_BETA3 DEEPSEEK_URL ECODB_CORS_ORIGINS ECODB_ENV ECODB_LLM_PROVIDER FORESIGHT_CONFIDENCE_THRESHOLD FORESIGHT_SCAN_HOURS HF_CACHE_PATH LLM_THREADS MAX_MEMORIES_PER_WINDOW MIN_CLUSTER_SIZE RERANKER_ENABLED RERANKER_MODEL RERANKER_REVISION RERANK_FETCH_K SKILL_MIN_CASES SKILL_MIN_SUCCESS_RATE SKILL_STALE_THRESHOLD THRESHOLD_NARRATIVE THRESHOLD_WORK WINDOWS_MEDIA_PREFIX"
+EXTERNAL_ENV="ANTHROPIC_API_KEY DEEPSEEK_API_KEY CELL_LLM_KEY TELEGRAM_BOT_TOKEN"
+CONFIG_ENV="CELL_LLM_MODEL CELL_LLM_PROVIDER CELL_LLM_URL CONSOLIDATION_ALPHA CONSOLIDATION_BETA1 CONSOLIDATION_BETA2 CONSOLIDATION_BETA3 DEEPSEEK_URL ECODB_CORS_ORIGINS ECODB_ENV ECODB_LLM_PROVIDER FORESIGHT_CONFIDENCE_THRESHOLD FORESIGHT_SCAN_HOURS HF_CACHE_PATH LLM_THREADS MAX_MEMORIES_PER_WINDOW MIN_CLUSTER_SIZE RERANKER_ENABLED RERANKER_MODEL RERANKER_REVISION RERANK_FETCH_K SKILL_MIN_CASES SKILL_MIN_SUCCESS_RATE SKILL_STALE_THRESHOLD TELEGRAM_CHAT_ID THRESHOLD_NARRATIVE THRESHOLD_WORK WINDOWS_MEDIA_PREFIX"
 
 # Git Bash en Windows convierte rutas estilo Unix /tmp/foo a C:/Users/.../Temp/foo
 # antes de pasarlas a docker. Eso rompe pg_restore porque el path se aplica DENTRO
@@ -53,6 +53,7 @@ TEMP=false
 RECOVER=false
 ENV_FILE=".env"
 KEY_TARGETS=""
+RECOVER_ENV=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -61,10 +62,22 @@ for arg in "$@"; do
     --recover) RECOVER=true ;;
     --env-file=*) ENV_FILE="${arg#*=}" ;;
     --key-targets=*) KEY_TARGETS="${arg#*=}" ;;
+    --env=*)
+      # #1083: una casa recuperada tras un fallo total arrancaba en desarrollo (el .env se perdió).
+      # Con --env=production nace como la que se perdió; sin la opción, como una instalación nueva.
+      RECOVER_ENV="${arg#*=}"
+      case "$RECOVER_ENV" in development|production) ;;
+        *) echo "[restore] ERROR — --env solo admite development o production (llegó: $RECOVER_ENV)" >&2; exit 1 ;;
+      esac ;;
     --allow-dangerous) ;;  # RF3 fix — flag procesado mas abajo, aqui solo reconocido
     *) echo "[restore] arg desconocido: $arg" >&2; exit 1 ;;
   esac
 done
+
+if [ -n "$RECOVER_ENV" ] && ! $RECOVER; then
+  echo "[restore] ERROR — --env solo tiene sentido con --recover" >&2
+  exit 1
+fi
 
 if [ ! -f "$DUMP_FILE" ]; then
   echo "[restore] ERROR — dump file not found: $DUMP_FILE" >&2
@@ -191,7 +204,8 @@ if $RECOVER; then
   echo "[restore] claves de proveedores que hay que volver a pegar:"
   docker exec "$CONTAINER" psql -At -U "$PG_USER" -d "$TARGET" \
     -c "SELECT '  - ' || provider || ' (' || coalesce(display_name, 'sin nombre') || ')' FROM llm_provider_keys ORDER BY id;"
-  echo "  - CELL_LLM_KEY, ANTHROPIC_API_KEY y DEEPSEEK_API_KEY en $ENV_FILE, si las usabas"
+  # #1083: la lista sale de EXTERNAL_ENV, para que no se quede atrás cuando se añada una.
+  echo "  - $(echo "$EXTERNAL_ENV" | sed 's/ /, /g') en $ENV_FILE, si las usabas"
 
   docker exec -i "$CONTAINER" psql -q -U "$PG_USER" -d "$TARGET" <<SQL
 \\set ON_ERROR_STOP on
@@ -213,7 +227,11 @@ SQL
   set_env ECODB_API_KEY "$MCP_KEY"
   set_env INTERNAL_BROADCAST_SECRET "$(openssl rand -hex 32)"
   set_env ENCRYPTION_KEY "$(openssl rand -base64 32 | tr '+/' '-_')"
-  grep -q '^ECODB_ENV=' "$ENV_FILE" || set_env ECODB_ENV development
+  if [ -n "$RECOVER_ENV" ]; then
+    set_env ECODB_ENV "$RECOVER_ENV"
+  else
+    grep -q '^ECODB_ENV=' "$ENV_FILE" || set_env ECODB_ENV development
+  fi
   grep -q '^ECODB_CORS_ORIGINS=' "$ENV_FILE" || set_env ECODB_CORS_ORIGINS http://localhost:8080,http://localhost:8091
 
   KEYS_FILE="$(dirname "$ENV_FILE")/.recovered_keys"
