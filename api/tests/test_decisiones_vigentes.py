@@ -82,6 +82,7 @@ def entorno(client):
 def _embed(monkeypatch):
     monkeypatch.setattr(memories, "embed_text", _fake_embed)
     monkeypatch.setattr(search, "embed_text", _fake_embed)
+    monkeypatch.setattr(decisiones, "embed_text", _fake_embed)   # #1098: camino propio de candidatas
 
 
 @pytest.fixture

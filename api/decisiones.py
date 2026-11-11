@@ -7,7 +7,6 @@ cada clave ve lo que ya podía ver. Los topes devuelven un aviso en «avisos», 
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from typing import Optional
@@ -18,6 +17,7 @@ import search
 import vigentes as _vig
 from auth import get_current_user
 from db import get_pool
+from embeddings_client import embed_text
 
 router = APIRouter(prefix="/decisiones", tags=["decisiones"])
 
@@ -49,6 +49,92 @@ WHERE m.metadata->>'superseded_by' = ANY($1::text[])
   )
 ORDER BY m.created_at
 """
+
+
+# #1098: camino propio de candidatas. search_memories tarda 12,5 s por llamada y 9-10 s son del grafo (#486),
+# que a vigentes no le sirve; aquí, una consulta: vector y texto sobre decision/acuerdo, fusionados por rango
+# recíproco (RRF), con la misma visibilidad. Diseño sellado antes de medir: Hilo/Documentacion/diseno_1098_vigentes.md.
+RRF_K = 60
+TOPE_LISTA = 50
+SUELO = 0.70     # coseno mínimo para que una fila de EcoDB cuente como relevante
+MARGEN = 0.10    # y no más lejos que esto de la mejor de su mitad
+_VACIAS = {"de", "la", "el", "en", "y", "a", "que", "los", "las", "del", "por", "con", "para", "un", "una",
+           "se", "no", "lo", "al", "es"}
+
+_CANDIDATAS_SQL = f"""
+WITH vis AS (
+  SELECT m.id, m.content
+  FROM memories m
+  LEFT JOIN agents a ON a.id = m.agent_id
+  WHERE m.type IN ('decision', 'acuerdo')
+    AND {search.DORMANT_EXCLUSION_CLAUSE}
+    AND ($7::text IS NULL OR a.identifier = $7)
+    AND check_visibility(
+      m.user_id, m.visibility::text, m.workspace_id, m.project_id,
+      $2, $3::bool, $4::bool, $5, $6::int[], false
+    )
+),
+vec AS (
+  SELECT v.id, row_number() OVER (ORDER BY e.embedding <=> $1::vector) AS r
+  FROM vis v JOIN memory_embeddings e ON e.memory_id = v.id AND e.modality = 'text'
+  ORDER BY e.embedding <=> $1::vector
+  LIMIT {TOPE_LISTA}
+),
+txt AS (
+  SELECT v.id, row_number() OVER (ORDER BY ts_rank({search._bm25_tsvector("v.content")}, q) DESC) AS r
+  FROM vis v, plainto_tsquery('spanish', $8) q
+  WHERE {search._bm25_tsvector("v.content")} @@ q
+  ORDER BY ts_rank({search._bm25_tsvector("v.content")}, q) DESC
+  LIMIT {TOPE_LISTA}
+)
+SELECT u.id, vec.r AS r_vec, txt.r AS r_txt, mm.content,
+       1 - (e.embedding <=> $1::vector) AS cos,
+       coalesce(1.0 / ({RRF_K} + vec.r), 0) + coalesce(1.0 / ({RRF_K} + txt.r), 0) AS rrf
+FROM (SELECT id FROM vec UNION SELECT id FROM txt) u
+LEFT JOIN vec ON vec.id = u.id
+LEFT JOIN txt ON txt.id = u.id
+LEFT JOIN memory_embeddings e ON e.memory_id = u.id AND e.modality = 'text'
+JOIN memories mm ON mm.id = u.id
+ORDER BY rrf DESC
+"""
+
+
+def _palabras(texto: str) -> set[str]:
+    import re
+    return {w for w in re.findall(r"\w+", (texto or "").lower()) if len(w) > 2 and w not in _VACIAS}
+
+
+def _relevantes(filas: list[dict], tema: str) -> list[dict]:
+    """#1098, umbral POR MITAD (Prima, 10-nov): de las candidatas de EcoDB, solo las que se parecen de verdad
+    al tema. Por vector: coseno ≥ SUELO y a menos de MARGEN de la mejor. Solo por texto: además comparte al
+    menos la mitad de las palabras con contenido del tema. Si ninguna pasa, la mitad no aporta nada."""
+    if not filas:
+        return []
+    mejor = max((f["cos"] or 0) for f in filas)
+    pide = _palabras(tema)
+    salen = []
+    for f in filas:
+        cos = f["cos"] or 0
+        if cos < SUELO or cos < mejor - MARGEN:
+            continue
+        if f["r_vec"] is None and pide:
+            comun = pide & _palabras(f.get("content", ""))
+            if len(comun) * 2 < len(pide):
+                continue
+        salen.append(f)
+    return salen
+
+
+async def _candidatas(tema: str, agente: Optional[str], actor: dict) -> list[dict]:
+    vector = await embed_text(tema, prompt_name="query")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            _CANDIDATAS_SQL, vector, int(actor["sub"]), bool(actor.get("is_super")), bool(actor.get("is_ceo")),
+            actor.get("organization_id"), list(actor.get("lead_workspaces") or []), agente, tema,
+        )
+    return [{"id": str(r["id"]), "r_vec": r["r_vec"], "r_txt": r["r_txt"], "content": r["content"],
+             "cos": float(r["cos"]) if r["cos"] is not None else None, "rrf": float(r["rrf"])} for r in rows]
 
 
 def _uuid(valor) -> Optional[str]:
@@ -127,14 +213,12 @@ async def decisiones_vigentes(
         avisos.append(f"limit {limit} fuera de 1-{MAX_LIMIT}: se usa {ajustado}")
         limit = ajustado
 
-    async def buscar(tipo: str):
-        body = search.SearchRequest(query_text=tema, type=tipo, agent_identifier=agente,
-                                    limit=min(limit * 3, MAX_POR_BUSQUEDA), include_documents=False)
-        return await search.search_memories(body, actor)
-
-    respuestas = await asyncio.gather(buscar("decision"), buscar("acuerdo"))
-    encontradas = sorted((r for resp in respuestas for r in resp.results), key=lambda r: r.score, reverse=True)
-    orden = list(dict.fromkeys(str(r.id) for r in encontradas))
+    # #1098: candidatas por el camino propio (vector + texto, sin grafo) y umbral de esta mitad.
+    candidatas_puntuadas = _relevantes(await _candidatas(tema, agente, actor), tema)
+    puntos = {c["id"]: c for c in candidatas_puntuadas}
+    orden = [c["id"] for c in candidatas_puntuadas][:min(limit * 3, MAX_POR_BUSQUEDA)]
+    if not orden:
+        avisos.append("sin decisiones relevantes en EcoDB para este tema")
 
     # Lee las candidatas y sigue las cadenas por rondas, con tope de saltos y de memorias leídas.
     vistas: dict[str, dict] = {}
@@ -165,6 +249,11 @@ async def decisiones_vigentes(
     raices = [f["id"] for f in resultado["vigentes"]]
     previas, cortado = await _previas(raices, set(vistas), actor, MAX_LEIDAS - len(pedidas))
     _vig.con_previas(resultado, previas)
+    for fila in resultado["vigentes"]:   # #1098: la puntuación de la candidata que llevó a esta fila
+        origen = next((puntos[i] for i in [fila["id"], *fila.get("sustituye_a", [])] if i in puntos), None)
+        if origen is not None:
+            fila["puntuacion"] = round(origen["cos"] or 0.0, 3)
+            fila["por"] = "ambos" if origen["r_vec"] and origen["r_txt"] else ("vector" if origen["r_vec"] else "texto")
     if cortado:
         avisos.append(f"más de {MAX_LEIDAS} memorias que leer: «sustituye_a» puede venir incompleto")
     resultado["avisos"] = avisos
