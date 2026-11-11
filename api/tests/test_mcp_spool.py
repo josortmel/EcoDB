@@ -19,6 +19,7 @@ def mod(monkeypatch, tmp_path):
     monkeypatch.setenv("ECODB_API_URL", API)
     monkeypatch.setenv("ECODB_API_KEY", "ecodb_test")
     monkeypatch.setenv("ECODB_SPOOL_DIR", str(tmp_path / "spool"))
+    monkeypatch.setenv("ECODB_SPOOL_SEND_GAP", "0")
     spec = importlib.util.spec_from_file_location("ecodb_mcp_server_547", SERVER)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
@@ -150,3 +151,58 @@ def test_a_file_another_session_already_sent_is_not_a_failure(mod, api):
     mod._spool_claim = claim_after_other_session_sent
     assert mod._spool_flush() == {"sent": 0, "kept": 0, "failed": 0}
     assert not (mod.SPOOL_DIR / "failed").exists() and not f.with_suffix(".lock").exists()
+
+
+
+# ---- #1114: un 429 no es un fallo, y la cola no se vacía de golpe ----
+
+def _queue(mod, api, n=1):
+    route = api.post("/memories")
+    route.respond(503, json={"detail": "down"})
+    ids = [mod.save_memory(content=f"pytest 1114 {i}", type="observacion")["id"] for i in range(n)]
+    return route, ids
+
+
+def test_1114_429_429_201_la_memoria_se_guarda_y_no_va_a_failed(mod, api):
+    route, (mid,) = _queue(mod, api)
+    respuestas = iter([respx.MockResponse(429, json={"detail": "rate"}, headers={"Retry-After": "1"}),
+                       respx.MockResponse(429, json={"detail": "rate"}, headers={"Retry-After": "1"})])
+    route.side_effect = lambda req: next(respuestas, None) or respx.MockResponse(201, json=_created(req))
+    for _ in range(2):
+        assert mod._spool_flush() == {"sent": 0, "kept": 1, "failed": 0}
+        mod._spool_pause_until = 0.0          # en la vida real, lo que diga Retry-After
+    assert mod._spool_flush() == {"sent": 1, "kept": 0, "failed": 0}
+    assert _posts(api)[-1]["client_id"] == mid
+    assert not (mod.SPOOL_DIR / "failed").exists() or not list((mod.SPOOL_DIR / "failed").glob("*"))
+    assert list(mod.SPOOL_DIR.glob("*.json")) == []
+
+
+def test_1114_un_429_para_la_pasada_y_respeta_el_retry_after(mod, api):
+    route, ids = _queue(mod, api, n=3)
+    route.side_effect = None
+    route.respond(429, json={"detail": "rate"}, headers={"Retry-After": "120"})
+    antes = len(_posts(api))
+    assert mod._spool_flush() == {"sent": 0, "kept": 3, "failed": 0}
+    assert len(_posts(api)) == antes + 1             # paró en el primer 429, no insistió con las otras dos
+    assert mod._spool_pause_until - time.time() > 100
+    route.side_effect = lambda req: respx.MockResponse(201, json=_created(req))
+    assert mod._spool_flush() == {"sent": 0, "kept": 3, "failed": 0}   # en pausa: ni lo intenta
+    assert len(_posts(api)) == antes + 1
+
+
+def test_1114_con_varias_en_cola_no_salen_en_el_mismo_segundo(mod, api):
+    route, ids = _queue(mod, api, n=3)
+    momentos = []
+    def guardar(req):
+        momentos.append(time.monotonic())
+        return respx.MockResponse(201, json=_created(req))
+    route.side_effect = guardar
+    mod.SPOOL_SEND_GAP = 0.3
+    assert mod._spool_flush() == {"sent": 3, "kept": 0, "failed": 0}
+    assert all(b - a >= 0.29 for a, b in zip(momentos, momentos[1:]))
+
+
+def test_1114_un_429_al_guardar_directo_se_encola(mod, api):
+    api.post("/memories").respond(429, json={"detail": "rate"}, headers={"Retry-After": "5"})
+    r = mod.save_memory(content="pytest 1114 directo", type="observacion")
+    assert r["status"] == "queued" and (mod.SPOOL_DIR / f"{r['id']}.json").exists()
