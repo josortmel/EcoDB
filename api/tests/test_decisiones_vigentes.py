@@ -256,3 +256,24 @@ def test_1118_el_trabajador_no_ve_el_id_de_la_observacion_privada(client, entorn
     assert r.status_code == 200 and obs not in r.text
     assert [f["id"] for f in r.json()["vigentes"]] == [dec] and "sustituye_a" not in r.json()["vigentes"][0]
     assert r.json()["superadas"] == []
+
+
+def test_1144_search_sin_grafo_no_pasa_por_el_grafo(client, entorno, agente, monkeypatch):
+    """#1144 (Pepe, 11-nov): con el grafo apagado la búsqueda no llama a expand_by_graph y nadie lleva bonificación
+    de grafo; encendido, sí lo llama. Los resultados siguen saliendo."""
+    _par_publica_privada(client, entorno, agente)
+    llamadas = []
+    real = search.expand_by_graph
+
+    async def espia(*a, **k):
+        llamadas.append(1)
+        return await real(*a, **k)
+    monkeypatch.setattr(search, "expand_by_graph", espia)
+    body = {"query_text": "decisión de prueba", "agent_identifier": agente, "limit": 10,
+            "rerank_mode": "off", "include_documents": False}
+    h = {"Authorization": f"Bearer {entorno['super']}"}
+    sin = client.post("/search", headers=h, json={**body, "graph": False})
+    assert sin.status_code == 200 and sin.json()["results"] and llamadas == []
+    assert all(x["graph_score"] == 0.0 for x in sin.json()["results"])
+    con = client.post("/search", headers=h, json={**body, "graph": True})
+    assert con.status_code == 200 and llamadas == [1]
