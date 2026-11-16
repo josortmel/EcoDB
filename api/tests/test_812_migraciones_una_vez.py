@@ -50,13 +50,16 @@ def test_una_plantilla_cambiada_a_mano_sobrevive_a_dos_arranques():
         antes = await _q("SELECT content FROM cell_prompt_templates WHERE name=$1", PLANTILLA)
         if antes is None:
             pytest.skip("la base de pruebas no tiene la plantilla")
+        # Una config que una semilla SÍ reescribe: seed_higher_prompts_v2.sql pasa el cron semanal de
+        # '0 3 * * 0' a '0 3 * * 1'. Puesto a mano en '0 3 * * 0', el runner viejo lo pisaba al arrancar.
         cfg = await _q("""SELECT id, schedule_cron FROM cell_task_configs WHERE cell_type='consolidation'
-                          ORDER BY id LIMIT 1""", fetch="rows")
+                          AND level='weekly' ORDER BY id LIMIT 1""", fetch="rows")
+        assert cfg, "la base de pruebas no tiene config semanal de consolidación: la mitad de la config no mediría nada"
         try:
             await _q("UPDATE cell_prompt_templates SET content = content || $2 WHERE name=$1",
                      PLANTILLA, MARCA, fetch="exec")
             if cfg:
-                await _q("UPDATE cell_task_configs SET schedule_cron='7 7 * * 7' WHERE id=$1", cfg[0]["id"], fetch="exec")
+                await _q("UPDATE cell_task_configs SET schedule_cron='0 3 * * 0' WHERE id=$1", cfg[0]["id"], fetch="exec")
             await _arranque(veces=2)
             despues = await _q("SELECT content FROM cell_prompt_templates WHERE name=$1", PLANTILLA)
             cron = await _q("SELECT schedule_cron FROM cell_task_configs WHERE id=$1", cfg[0]["id"]) if cfg else None
@@ -67,8 +70,8 @@ def test_una_plantilla_cambiada_a_mano_sobrevive_a_dos_arranques():
                 await _q("UPDATE cell_task_configs SET schedule_cron=$2 WHERE id=$1",
                          cfg[0]["id"], cfg[0]["schedule_cron"], fetch="exec")
     despues, cron, hay_cfg = asyncio.run(go())
+    assert hay_cfg and cron == "0 3 * * 0", "un arranque de la api ha deshecho la config cambiada a mano"
     assert despues.endswith(MARCA), "un arranque de la api ha deshecho la plantilla cambiada a mano"
-    assert not hay_cfg or cron == "7 7 * * 7"
 
 
 def test_una_migracion_corre_otra_vez_solo_si_su_fichero_cambia(tmp_path, monkeypatch):
