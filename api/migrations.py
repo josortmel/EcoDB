@@ -1,13 +1,25 @@
-"""Idempotent migration runner for EcoDB.
-
-Applies pending SQL migrations on every API startup. All migrations
-are idempotent (IF NOT EXISTS / OR REPLACE / ON CONFLICT DO NOTHING),
-so re-applying is a no-op on an up-to-date schema.
+"""Migration runner for EcoDB, with a registry of what has been applied.
 
 Runs inside the FastAPI lifespan, after validate_production_secrets()
 and before the dictionary cache. Uses pg_advisory_lock to serialize
 concurrent startups (future multi-replica).
+
+#812 (Hilo, 16-nov-2026): it used to re-run EVERY migration on EVERY
+startup and trusted them all to be idempotent. They are, as SQL, but
+7 seeds do `ON CONFLICT (name) DO UPDATE SET content = ...`, so every
+restart of the api rewrote those prompt templates and undid any hand
+edit (#708 was one of those, found by Prima on 28-oct). Now each
+migration is recorded in `schema_migrations` with the sha256 of its
+file, and runs again only when the file changes: a change in the repo
+still reaches the database, a restart no longer does.
+
+A database that was already migrated before the registry existed is
+not re-run on the first startup with this code: the names in
+_BEFORE_REGISTRY are recorded as applied ("baseline", like Flyway's).
+That list is closed on purpose: a migration added after #812 always
+runs, baseline or not.
 """
+import hashlib
 import logging
 import time
 from pathlib import Path
@@ -43,23 +55,65 @@ MIGRATIONS: list[tuple[str, str]] = [
     ("5.5.0_sync_text_embedding", "sql/migrate_5.5.0_sync_text_embedding.sql"),
 ]
 
+# #812: the migrations that existed when the registry was introduced. Closed list:
+# do NOT add new names here.
+_BEFORE_REGISTRY = frozenset(name for name, _ in MIGRATIONS)
+
+_REGISTRY = """CREATE TABLE IF NOT EXISTS schema_migrations (
+    name       text PRIMARY KEY,
+    sha256     text NOT NULL,
+    applied_at timestamptz NOT NULL DEFAULT now(),
+    baseline   boolean NOT NULL DEFAULT false
+)"""
+# A database is "already migrated" when the object created by the last migration of
+# _BEFORE_REGISTRY exists (5.5.0 creates this function; a brand-new volume doesn't have it).
+_ALREADY_MIGRATED = "SELECT to_regprocedure('public.sync_text_embedding()') IS NOT NULL"
+
 _LOCK_KEY = 728_1990
+
+
+def _sha(sql: str) -> str:
+    return hashlib.sha256(sql.encode("utf-8")).hexdigest()
+
+
+async def _record(conn, name: str, sha: str, baseline: bool = False) -> None:
+    await conn.execute(
+        """INSERT INTO schema_migrations (name, sha256, baseline) VALUES ($1, $2, $3)
+           ON CONFLICT (name) DO UPDATE SET sha256 = EXCLUDED.sha256, applied_at = now(),
+                                            baseline = EXCLUDED.baseline""",
+        name, sha, baseline)
 
 
 async def run_migrations(pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute("SELECT pg_advisory_lock($1)", _LOCK_KEY, timeout=600)
         try:
-            for name, path in MIGRATIONS:
-                sql = Path(path).read_text(encoding="utf-8")
+            had_registry = await conn.fetchval("SELECT to_regclass('public.schema_migrations') IS NOT NULL")
+            await conn.execute(_REGISTRY)
+            files = [(name, Path(path).read_text(encoding="utf-8")) for name, path in MIGRATIONS]
+            if not had_registry and await conn.fetchval(_ALREADY_MIGRATED):
+                for name, sql in files:
+                    if name in _BEFORE_REGISTRY:
+                        await _record(conn, name, _sha(sql), baseline=True)
+                log.info("migrations: registry created over an already migrated database "
+                         "(baseline of %d, nothing re-run)", len(_BEFORE_REGISTRY))
+            applied = {r["name"]: r["sha256"]
+                       for r in await conn.fetch("SELECT name, sha256 FROM schema_migrations")}
+            for name, sql in files:
+                sha = _sha(sql)
+                if applied.get(name) == sha:
+                    log.debug("migration already applied: %s", name)
+                    continue
                 t0 = time.monotonic()
                 try:
                     await conn.execute(sql, timeout=300)
                 except Exception:
                     log.error("migration FAILED: %s", name)
                     raise
+                await _record(conn, name, sha)
                 elapsed = (time.monotonic() - t0) * 1000
-                log.info("migration OK: %s (%.0f ms)", name, elapsed)
+                log.info("migration %s: %s (%.0f ms)",
+                         "CHANGED, re-applied" if name in applied else "OK", name, elapsed)
             log.info("schema at target %s", settings.SCHEMA_VERSION)
         finally:
             await conn.execute("SELECT pg_advisory_unlock($1)", _LOCK_KEY)
