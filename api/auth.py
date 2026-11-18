@@ -31,7 +31,7 @@ import time
 from typing import Optional
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 import settings
 from db import get_pool
@@ -130,7 +130,7 @@ async def resolve_user_from_api_key(key: str) -> dict:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT ak.id AS key_id, ak.user_id, ak.expires_at, ak.active, ak.grace_until,
+            SELECT ak.id AS key_id, ak.user_id, ak.expires_at, ak.active, ak.grace_until, ak.read_only,
                    u.active AS user_active,
                    ue.email AS primary_email
             FROM api_keys ak
@@ -152,10 +152,53 @@ async def resolve_user_from_api_key(key: str) -> dict:
         raise HTTPException(status_code=401, detail="api key expired")
 
     primary_email = row["primary_email"] or f"user-{row['user_id']}@unknown"
-    return await build_jwt_payload(row["user_id"], primary_email)
+    payload = await build_jwt_payload(row["user_id"], primary_email)
+    if row["read_only"]:
+        payload["read_only"] = True   # #1332: viaja también en el JWT de /auth/token
+    return payload
+
+
+# #1332 (pieza A de #1200): lo ÚNICO por donde pasa una clave de solo lectura. Lista explícita de (método,
+# plantilla de ruta), no «todo lo que sea GET»: hay lecturas por POST (/search) y hay GET de administración.
+RUTAS_DE_LECTURA: frozenset[tuple[str, str]] = frozenset({
+    ("GET", "/health"),
+    ("GET", "/auth/me"),
+    ("POST", "/auth/token"),
+    ("POST", "/search"),
+    ("POST", "/search/document/{document_id}"),
+    ("GET", "/memories/recent"),
+    ("GET", "/memories/{memory_id}"),
+    ("GET", "/api/v1/decisiones/vigentes"),
+    ("GET", "/api/v1/clusters"),
+    ("GET", "/api/v1/clusters/{cluster_id}"),
+    ("GET", "/api/v1/clusters/{cluster_id}/members"),
+    ("GET", "/api/v1/clusters/{cluster_id}/sources"),
+    ("GET", "/api/v1/clusters/telescopic"),
+    ("GET", "/api/v1/clusters/telescopic/progressive"),
+    ("POST", "/api/v1/clusters/search"),
+    ("POST", "/api/v1/clusters/zoom"),
+    ("GET", "/graph/neighbors/{node_name}"),
+    ("GET", "/graph/path"),
+    ("GET", "/graph/search"),
+    ("GET", "/graph/subgraph"),
+    ("GET", "/agents/{agent_identifier}/identity"),
+    ("GET", "/documents"),
+    ("GET", "/documents/{document_id}"),
+    ("GET", "/documents/{document_id}/chunks"),
+})
+
+
+def _lectura_permitida(request: Optional[Request]) -> bool:
+    if request is None:
+        return False
+    route = request.scope.get("route")
+    plantilla = getattr(route, "path", None) or request.url.path
+    metodo = "GET" if request.method == "HEAD" else request.method
+    return (metodo, plantilla) in RUTAS_DE_LECTURA
 
 
 async def get_current_user(
+    request: Request,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ) -> dict:
     """Resuelve el user actual desde:
@@ -178,11 +221,14 @@ async def get_current_user(
     # Si el token empieza con el prefijo de API keys, tratarlo como tal aunque
     # venga con scheme "Bearer" (compat con clientes MCP que solo soportan Bearer).
     if token.startswith(settings.API_KEY_PREFIX) or scheme == "apikey":
-        return await resolve_user_from_api_key(token)
-    if scheme == "bearer":
-        return decode_jwt(token)
-
-    raise HTTPException(status_code=401, detail="unsupported auth scheme")
+        claims = await resolve_user_from_api_key(token)
+    elif scheme == "bearer":
+        claims = decode_jwt(token)
+    else:
+        raise HTTPException(status_code=401, detail="unsupported auth scheme")
+    if claims.get("read_only") and not _lectura_permitida(request):
+        raise HTTPException(status_code=403, detail="read-only api key: this route is not in the read list")
+    return claims
 
 
 def require_super(user: dict = Depends(get_current_user)) -> dict:
@@ -232,6 +278,7 @@ class ApiKeyCreateRequest(BaseModel):
     user_id: int = Field(..., description="ID del user al que pertenece la nueva API key")
     name: str = Field(..., min_length=1, max_length=200, description="Nombre legible (ej: 'agent-eco-mcp')")
     expires_at: Optional[datetime] = Field(None, description="Opcional. None = key permanente.")
+    read_only: bool = Field(False, description="#1332: solo pasa por las rutas de lectura (auth.RUTAS_DE_LECTURA).")
 
 
 class ApiKeyCreateResponse(BaseModel):
@@ -324,11 +371,11 @@ async def auth_create_api_key(
         key_plain, key_hash = generate_api_key()
         row = await conn.fetchrow(
             """
-            INSERT INTO api_keys (key_hash, name, user_id, expires_at, active)
-            VALUES ($1, $2, $3, $4, true)
+            INSERT INTO api_keys (key_hash, name, user_id, expires_at, active, read_only)
+            VALUES ($1, $2, $3, $4, true, $5)
             RETURNING id, expires_at
             """,
-            key_hash, body.name, body.user_id, body.expires_at,
+            key_hash, body.name, body.user_id, body.expires_at, body.read_only,
         )
 
         await conn.execute(
@@ -379,7 +426,7 @@ async def auth_rotate_api_key(
     pool = await get_pool()
     async with pool.acquire() as conn:
         old_key = await conn.fetchrow(
-            "SELECT id, user_id, active, name FROM api_keys WHERE id = $1", key_id
+            "SELECT id, user_id, active, name, read_only FROM api_keys WHERE id = $1", key_id
         )
         if old_key is None or not old_key["active"]:
             raise HTTPException(404, "api key not found or inactive")
@@ -410,11 +457,11 @@ async def auth_rotate_api_key(
             new_plain, new_hash = generate_api_key()
             new_row = await conn.fetchrow(
                 """
-                INSERT INTO api_keys (key_hash, name, user_id, active)
-                VALUES ($1, $2, $3, true)
+                INSERT INTO api_keys (key_hash, name, user_id, active, read_only)
+                VALUES ($1, $2, $3, true, $4)
                 RETURNING id
                 """,
-                new_hash, f"{old_key['name']} (rotated)", key_owner_id,
+                new_hash, f"{old_key['name']} (rotated)", key_owner_id, old_key["read_only"],   # #1332: hereda
             )
 
             await conn.execute(

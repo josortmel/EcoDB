@@ -59,6 +59,9 @@ MIGRATIONS: list[tuple[str, str]] = [
 # do NOT add new names here.
 _BEFORE_REGISTRY = frozenset(name for name, _ in MIGRATIONS)
 
+# #1332: claves de solo lectura. Va DESPUÉS de fijar _BEFORE_REGISTRY: es una migración nueva, se registra y corre.
+MIGRATIONS.append(("5.6.0_api_keys_read_only", "sql/migrate_5.6.0_api_keys_read_only.sql"))
+
 _REGISTRY = """CREATE TABLE IF NOT EXISTS schema_migrations (
     name       text PRIMARY KEY,
     sha256     text NOT NULL,
