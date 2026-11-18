@@ -17,6 +17,7 @@ os.environ.setdefault("ENVIRONMENT", "development")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import decisiones  # noqa: E402
 import memories  # noqa: E402
 import search  # noqa: E402
 from auth import generate_api_key  # noqa: E402
@@ -50,6 +51,7 @@ def client():
 def _embed(monkeypatch):
     monkeypatch.setattr(memories, "embed_text", _fake_embed)
     monkeypatch.setattr(search, "embed_text", _fake_embed)
+    monkeypatch.setattr(decisiones, "embed_text", _fake_embed)
 
 
 def _clave(read_only: bool) -> tuple[str, int]:
@@ -85,6 +87,10 @@ def test_lee(client, claves, quien):
     assert client.get(f"/memories/{mid}", headers=_h(claves[quien])).status_code == 200
     assert client.post("/search", headers=_h(claves[quien]), json={"query_text": "prueba de lectura"}).status_code == 200
     assert client.get("/auth/me", headers=_h(claves[quien])).status_code == 200
+    r = client.get("/api/v1/decisiones/vigentes", headers=_h(claves[quien]), params={"tema": "prueba de lectura"})
+    assert r.status_code == 200, r.text            # una ruta bajo /api/v1 (en vivo dio 403 el 18-nov)
+    # el agente no existe en la base de pruebas (404): lo que se mide es que la autorización no la corta
+    assert client.get("/api/v1/clusters", headers=_h(claves[quien]), params={"agent_identifier": "Hilo"}).status_code != 403
 
 
 @pytest.mark.parametrize("quien", ["lectura", "jwt_lectura"])

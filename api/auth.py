@@ -188,13 +188,23 @@ RUTAS_DE_LECTURA: frozenset[tuple[str, str]] = frozenset({
 })
 
 
+def _patron(plantilla: str):
+    import re
+    return re.compile("^" + re.sub(r"\\{[^/]+?\\}", "[^/]+", re.escape(plantilla)) + "$")
+
+
+# Se compara la RUTA REAL de la petición con cada plantilla («{param}» = un tramo sin barras). No se usa
+# scope["route"]: con la FastAPI de la casa, en las rutas incluidas con prefix (todo /api/v1) trae la plantilla sin
+# el prefijo («/decisiones/vigentes»), y la ruta que casa con la app es un _IncludedRouter sin path (#1332, en vivo).
+_PATRONES_DE_LECTURA = [(m, _patron(p)) for m, p in RUTAS_DE_LECTURA]
+
+
 def _lectura_permitida(request: Optional[Request]) -> bool:
     if request is None:
         return False
-    route = request.scope.get("route")
-    plantilla = getattr(route, "path", None) or request.url.path
     metodo = "GET" if request.method == "HEAD" else request.method
-    return (metodo, plantilla) in RUTAS_DE_LECTURA
+    ruta = request.scope.get("path") or request.url.path
+    return any(m == metodo and patron.match(ruta) for m, patron in _PATRONES_DE_LECTURA)
 
 
 async def get_current_user(
