@@ -160,7 +160,9 @@ async def broadcast_internal(
         try:
             from auth import decode_jwt
             payload = decode_jwt(auth_header[7:])
-            if payload.get("is_super"):
+            # #1345 (lo vio Fiel): esta ruta no pasa por get_current_user, así que la marca de solo lectura (#1332)
+            # se mira aquí. Emitir un evento es escribir, aunque no toque la base.
+            if payload.get("is_super") and not payload.get("read_only"):
                 authorized = True
         except Exception:
             pass

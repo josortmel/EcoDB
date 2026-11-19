@@ -128,3 +128,13 @@ def test_rotar_una_de_lectura_da_otra_de_lectura(client, claves):
     finally:
         _sql("DELETE FROM api_keys WHERE user_id = $1", uid)
         _sql("DELETE FROM users WHERE id = $1", uid)
+
+
+def test_1345_broadcast_no_acepta_un_jwt_de_solo_lectura(client, claves):
+    """#1345 (lo vio Fiel al verificar #1332): /events/broadcast valida el JWT por su cuenta (mira is_super) y no pasa
+    por get_current_user, así que se saltaba la marca read_only. La clave de pruebas es de un super."""
+    url = "/api/v1/events/broadcast"
+    cuerpo = {"event_type": PREFIX + "evento", "data": {}}
+    jwt_normal = client.post("/auth/token", json={"api_key": claves["normal"]}).json()["access_token"]
+    assert client.post(url, headers=_h(claves["jwt_lectura"]), json=cuerpo).status_code == 403
+    assert client.post(url, headers=_h(jwt_normal), json=cuerpo).status_code == 204

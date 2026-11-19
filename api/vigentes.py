@@ -52,7 +52,8 @@ def vigentes(candidatas: list[dict], leer: Callable[[str], Optional[dict]], hoy:
     """Devuelve {"vigentes": [...], "superadas": [...], "errores": [...]} en el orden de las candidatas."""
     hoy = hoy or date.today()
     vistas: dict[str, dict] = {}
-    salida, superadas, errores, ya = [], [], [], set()
+    salida, superadas, errores = [], [], []
+    ya: dict[str, dict] = {}   # id de vigente → su fila
 
     def cargar(mid: str) -> Optional[dict]:
         if mid not in vistas:
@@ -82,12 +83,20 @@ def vigentes(candidatas: list[dict], leer: Callable[[str], Optional[dict]], hoy:
             superadas.append({**_fila(original, []), "superada_por": str(_meta(original)["superseded_by"]),
                               "supersede_kind": _meta(original).get("supersede_kind", "total"),
                               "motivo": _meta(original).get("supersede_reason")})
-        if str(actual["id"]) in ya or _caducada(actual, hoy):
+        if _caducada(actual, hoy):
             continue
-        ya.add(str(actual["id"]))
-        salida.append(_fila(actual, camino))
-        if len(salida) >= limit:
-            break
+        if str(actual["id"]) in ya:
+            # #1315: la vigente ya salió por otra candidata (la búsqueda puede traerla ANTES que su anterior):
+            # su camino se suma al de esa fila en vez de tirarse.
+            fila = ya[str(actual["id"])]
+            for mid in camino:   # sin camino no se toca: una fila sin «sustituye_a» no lo lleva vacío
+                if mid not in fila.setdefault("sustituye_a", []):
+                    fila["sustituye_a"].append(mid)
+            continue
+        if len(salida) >= limit:   # sin sitio para filas nuevas, pero las que quedan pueden alargar un camino
+            continue
+        ya[str(actual["id"])] = _fila(actual, camino)
+        salida.append(ya[str(actual["id"])])
     resultado = {"vigentes": salida, "errores": errores}
     if incluir_superadas:
         resultado["superadas"] = superadas

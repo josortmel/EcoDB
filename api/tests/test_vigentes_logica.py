@@ -104,3 +104,19 @@ def test_con_previas_sin_previas_no_toca_nada():
     antes = repr(r)
     con_previas(r, {"C": []})
     assert repr(r) == antes and "sustituye_a" not in r["vigentes"][0]
+
+
+def test_1315_la_vigente_antes_que_su_anterior_no_pierde_el_camino():
+    """#1315: con las candidatas en orden [B, A] (A sustituida por B), B entraba primero sin camino y A se
+    saltaba por «ya está», así que «sustituye_a» perdía a A. El orden depende de la búsqueda (empates)."""
+    d, leer = _base(_m("A", superseded_by="B"), _m("B"))
+    r = vigentes([d["B"], d["A"]], leer, HOY)
+    assert [f["id"] for f in r["vigentes"]] == ["B"]
+    assert r["vigentes"][0]["sustituye_a"] == ["A"]
+
+
+def test_1315_dos_caminos_a_la_misma_vigente_se_juntan_sin_repetir():
+    d, leer = _base(_m("A", superseded_by="B"), _m("B", superseded_by="C"), _m("C"), _m("X", superseded_by="C"))
+    r = vigentes([d["C"], d["B"], d["X"], d["A"]], leer, HOY)
+    assert [f["id"] for f in r["vigentes"]] == ["C"]
+    assert r["vigentes"][0]["sustituye_a"] == ["B", "X", "A"]
