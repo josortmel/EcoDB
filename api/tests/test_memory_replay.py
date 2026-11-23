@@ -109,10 +109,17 @@ def test_occurred_at_out_of_range_is_rejected(client, jwt, monkeypatch, delta):
 
 def test_client_id_of_another_owner_is_409(client, jwt, monkeypatch):
     monkeypatch.setattr(memories, "embed_text", _fake_embed)
+    # The other owner is created here: user 30 only existed when earlier test files had made it, and on a
+    # fresh test DB the INSERT died on memories_user_id_fkey (#1362).
+    other = _sql("INSERT INTO users (name) VALUES ($1) RETURNING id", PREFIX + "other-owner")[0]["id"]
     mid = uuid.uuid4()
-    _sql("INSERT INTO memories (id, user_id, workspace_id, project_id, type, content, embedding) "
-         "VALUES ($1, 30, 1, 1, 'observacion', $2, $3::vector)", mid, PREFIX + "other", FAKE_VEC)
-    assert _post(client, jwt, client_id=str(mid)).status_code == 409
+    try:
+        _sql("INSERT INTO memories (id, user_id, workspace_id, project_id, type, content, embedding) "
+             "VALUES ($1, $2, 1, 1, 'observacion', $3, $4::vector)", mid, other, PREFIX + "other", FAKE_VEC)
+        assert _post(client, jwt, client_id=str(mid)).status_code == 409
+    finally:
+        _sql("DELETE FROM memories WHERE id = $1", mid)
+        _sql("DELETE FROM users WHERE id = $1", other)
 
 
 def test_resend_of_a_deleted_memory_is_409_and_not_recreated(client, jwt, monkeypatch):
