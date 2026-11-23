@@ -256,7 +256,7 @@ def main():
         print(f"Found {len(ws_map)} workspaces\n")
 
         with open(out_path, "w") as out_f:
-            for conv_idx, (conv_id, (ws_id, proj_id)) in enumerate(sorted(ws_map.items())):
+            for conv_idx, (conv_id, (ws_id, _proj_id)) in enumerate(sorted(ws_map.items())):
                 conv = conv_by_id.get(conv_id)
                 if conv is None:
                     print(f"WARNING: No conv data for {conv_id}, skipping")

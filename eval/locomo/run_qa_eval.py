@@ -128,7 +128,7 @@ def main():
             print(f"\n--- {sample_id} ({len(qa_pairs)} QA pairs) ---")
             conv_scores = []
 
-            for qi, q in enumerate(qa_pairs):
+            for q in qa_pairs:
                 if MAX_QUERIES > 0 and total_done >= MAX_QUERIES:
                     break
                 question = q["question"]

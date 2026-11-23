@@ -9,10 +9,12 @@ Monthly/quarterly/yearly consolidation stacks on top of weeklies.
 """
 
 import asyncio
+import contextvars as _contextvars
 import hashlib
 import json
 import logging
 import os
+import string as _string
 from datetime import date, datetime, timedelta, timezone
 
 import asyncpg
@@ -56,9 +58,6 @@ SKILL_MIN_SUCCESS = float(os.environ.get("SKILL_MIN_SUCCESS_RATE", "0.60"))
 SKILL_STALE = float(os.environ.get("SKILL_STALE_THRESHOLD", "0.30"))
 MAX_LLM_RETRIES = 3
 LLM_DELAYS = [30, 60, 120]
-
-
-import string as _string
 
 
 class _SafeFormatter(_string.Formatter):
@@ -539,7 +538,6 @@ _PROVIDER_URLS = {
 # Ambient per-run LLM routing config. Set by _run_from_config / trigger at the start of
 # a cell run; read by _llm_call and the prompt builders. Holds the RESOLVED config:
 # {"provider", "model", "key" (decrypted), "template" (str|None)}. None → default path.
-import contextvars as _contextvars
 
 _active_cell: "_contextvars.ContextVar[dict | None]" = _contextvars.ContextVar("active_cell", default=None)
 # #716: what answered each LLM call. DeepSeek ships new builds under the SAME name
@@ -1671,7 +1669,7 @@ def _split_large_clusters(labels, distance_matrix):
         condensed = sub_dist[np.triu_indices(n, k=1)]
         Z = linkage(condensed, method="average")
         current_t = 0.5
-        for attempt in range(5):
+        for _attempt in range(5):
             sub_labels = fcluster(Z, t=current_t, criterion="distance")
             max_size = max(np.bincount(sub_labels)[1:]) if len(set(sub_labels)) > 1 else len(indices)
             if max_size <= MAX_CLUSTER_MEMBERS:

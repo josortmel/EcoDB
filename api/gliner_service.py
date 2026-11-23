@@ -205,7 +205,7 @@ def _match_dictionary(text: str) -> tuple[list[dict], str]:
     entities: list[dict] = []
     consumed_ranges: list[tuple[int, int]] = []
     # Iterar diccionario ordenado por longitud DESC (longest-match wins).
-    for pattern, entity_type, name_original in _dictionary_cache:
+    for pattern, entity_type, _name_original in _dictionary_cache:
         for match in pattern.finditer(text_folded):
             start, end = match.start(), match.end()
             # Verificar que este span no se solapa con uno ya consumido (un

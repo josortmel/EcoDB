@@ -29,12 +29,14 @@ import hashlib
 import json
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
 import settings
 from db import get_pool
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # API key generation + hashing
@@ -261,11 +263,6 @@ def require_super_or_ceo(user: dict = Depends(get_current_user)) -> dict:
 # ---------------------------------------------------------------------------
 # Router con los endpoints del plan v3 §2.1
 # ---------------------------------------------------------------------------
-from datetime import datetime, timedelta, timezone
-
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
-
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -429,13 +426,15 @@ class RotateResponse(BaseModel):
 @router.post("/api-keys/{key_id}/rotate", response_model=RotateResponse, status_code=201)
 async def auth_rotate_api_key(
     key_id: int,
-    body: RotateRequest = RotateRequest(),
+    body: Optional[RotateRequest] = None,
     actor: dict = Depends(get_current_user),
 ) -> RotateResponse:
     """Rotate an API key: generate new key, mark old with grace_until.
     Max 3 active keys per user — 4th rotation deactivates oldest.
     Auth: key owner, CEO of key owner's org, or super.
     """
+    # #1362 (B008): a fresh default per request; a RotateRequest() default was ONE instance shared by all of them.
+    body = body or RotateRequest()
     grace_hours = max(1.0, min(body.grace_hours, 720.0))
 
     pool = await get_pool()
