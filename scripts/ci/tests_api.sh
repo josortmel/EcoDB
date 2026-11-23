@@ -48,8 +48,15 @@ export RATE_LIMIT_SEARCH=1000000
 export RATE_LIMIT_CREATE_MEMORY=1000000
 export RATE_LIMIT_PREVIEW=1000000
 
+shopt -s nullglob  # a folder without tests adds nothing (a literal «test_*.py» would reach pytest)
+files=(api/tests/test_*.py mcp/tests/test_*.py)
+if [ "${#files[@]}" -eq 0 ]; then
+    echo "::error::no test files found (run from the repo root)"
+    exit 1
+fi
+
 failed_files=()
-for f in api/tests/test_*.py mcp/tests/test_*.py; do
+for f in "${files[@]}"; do
     name="$(basename "$(dirname "$(dirname "$f")")")_$(basename "$f" .py)"
     python -m pytest "$f" -q -p no:cacheprovider --junitxml="$OUT/$name.xml" > "$OUT/$name.log" 2>&1
     rc=$?
