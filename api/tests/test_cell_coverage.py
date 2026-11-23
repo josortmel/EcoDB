@@ -104,7 +104,8 @@ def test_nothing_is_added_when_everything_is_covered(monkeypatch):
 
 def test_the_loose_cluster_never_enters_the_next_weeks_context():
     src = inspect.getsource(cw.run_consolidation)
-    prev = re.search(r"prev_narratives = await conn\.fetch\(\"\"\"(.*?)\"\"\"", src, re.S).group(1)
+    # \s* between «(» and the SQL: the formatter puts the string on its own line (#1362), same query.
+    prev = re.search(r"prev_narratives = await conn\.fetch\(\s*\"\"\"(.*?)\"\"\"", src, re.S).group(1)
     assert "narrative IS NOT NULL" in prev  # the loose cluster has narrative None
 
 
