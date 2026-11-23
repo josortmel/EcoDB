@@ -602,7 +602,8 @@ async def main() -> None:
     # conn.add_listener registers callback; the main loop awaits queue.get().
     notify_queue: asyncio.Queue[str] = asyncio.Queue()
 
-    def _on_notify(connection: asyncpg.Connection, pid: int, channel: str, payload: str) -> None:
+    # asyncpg calls it positionally with (connection, pid, channel, payload); only the payload is used.
+    def _on_notify(_connection: asyncpg.Connection, _pid: int, _channel: str, payload: str) -> None:
         notify_queue.put_nowait(payload)
 
     listen_conn = await asyncpg.connect(DATABASE_URL)
