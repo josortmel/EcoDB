@@ -92,7 +92,7 @@ jobs:
           TEST_DB_PORT: "5436"
           TEST_API_URL: http://127.0.0.1:1
           # What runs today; if tests are removed on purpose, lower it in the same PR.
-          MIN_TESTS: "709"
+          MIN_TESTS: "713"
           OUT: test-results
         run: bash scripts/ci/tests_api.sh
 
@@ -103,3 +103,34 @@ jobs:
           name: test-results
           path: test-results/
           retention-days: 7
+
+  # Releases come out of main by themselves (#1362): the version is api/version.py, and when main has a
+  # «## [X.Y.Z]» section for it in CHANGELOG.md and there is no release vX.Y.Z yet, it is published with that
+  # section as notes, on the commit that passed «check». Only this job can write to the repo.
+  release:
+    needs: check
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Publish the release of this version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' api/version.py)
+          if [ -z "$version" ]; then echo "::error::no __version__ in api/version.py"; exit 1; fi
+          if gh release view "v$version" >/dev/null 2>&1; then
+              echo "v$version is already published"
+              exit 0
+          fi
+          # index() and not a regex: in an awk string «\[» does not escape (the EcoRelay lesson).
+          awk -v h="## [$version]" 'index($0, h) == 1 {f = 1; next} f && /^## \[/ {exit} f {print}' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+              echo "no CHANGELOG section for $version: nothing to publish"
+              exit 0
+          fi
+          gh release create "v$version" --target "$GITHUB_SHA" --title "v$version" --notes-file notes.md

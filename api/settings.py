@@ -7,7 +7,7 @@ Variables:
 - JWT_TTL_SECONDS      : JWT lifetime, default 3600 (1 hour).
 - API_KEY_PEPPER       : pepper for hashing API keys (default DEV ONLY).
 - CORS_ORIGINS         : comma-separated, default http://localhost:8080,http://localhost:8091.
-- API_VERSION          : external version string, default 0.9.0.
+- API_VERSION is NOT read from the environment: it is api/version.py, the one version of EcoDB (#1362).
 
 NEVER use the JWT_SECRET / API_KEY_PEPPER defaults in production.
 The Docker image will FAIL to start if ENVIRONMENT=production and secrets
@@ -16,11 +16,14 @@ are still set to their development defaults.
 
 import os
 
+from version import __version__
+
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
 IS_DEVELOPMENT = ENVIRONMENT == "development"
 
-API_VERSION = os.environ.get("API_VERSION", "0.9.0")
+# #1362: was os.environ.get("API_VERSION", "0.9.0"), a third version that nobody updated. Now the one in version.py.
+API_VERSION = __version__
 SCHEMA_VERSION = "5.3.0"
 
 DATABASE_URL = os.environ.get(

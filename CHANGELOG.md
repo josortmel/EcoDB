@@ -2,6 +2,8 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+**Version numbering (from 23-nov-2026).** EcoDB has one version: `api/version.py`, the same as the `ecodb-api` image tag and what `/health` reports. It continues from **0.25.0**, the image that was running in production. The `v1.x` tags and releases below used an older, separate numbering and are kept as history; `v1.3.2` sorts above `v0.26.0` but is older. Raise the version with `scripts/subir_version.py`; when a `## [X.Y.Z]` section reaches `main`, CI publishes the release.
+
 ## [1.3.2] — 2026-07-01
 
 ### Changed — NER image optimization
