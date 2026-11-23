@@ -48,9 +48,11 @@ def _search_grafo(monkeypatch, valor=None):
     return importlib.reload(search)
 
 
-def test_grafo_entero_por_defecto_encendido_como_hoy(monkeypatch):
+def test_grafo_entero_por_defecto_apagado_desde_1160(monkeypatch):
+    # #1144 lo dejó encendido «como hoy»; #1160 (medida de Prima, 11-nov) lo apagó por defecto, y #1362 lo llevó al
+    # código y al compose. Encenderlo sigue siendo EXPAND_GRAPH=1 (abajo).
     s = _search_grafo(monkeypatch)
-    assert s._usa_grafo() is True
+    assert s._usa_grafo() is False
     assert s.SearchRequest(query_text="hola mundo").graph is None
 
 
