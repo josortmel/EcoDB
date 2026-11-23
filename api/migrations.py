@@ -61,6 +61,9 @@ _BEFORE_REGISTRY = frozenset(name for name, _ in MIGRATIONS)
 
 # #1332: claves de solo lectura. Va DESPUÉS de fijar _BEFORE_REGISTRY: es una migración nueva, se registra y corre.
 MIGRATIONS.append(("5.6.0_api_keys_read_only", "sql/migrate_5.6.0_api_keys_read_only.sql"))
+# #1362: las tablas del vocabulario de predicados, que el código usa y ninguna migración creaba (deriva de esquema
+# de antes del primer commit; la cazó el primer CI). Idempotente: en la base de la familia no cambia nada.
+MIGRATIONS.append(("5.7.0_predicates_schema", "sql/migrate_5.7.0_predicates_schema.sql"))
 
 _REGISTRY = """CREATE TABLE IF NOT EXISTS schema_migrations (
     name       text PRIMARY KEY,
