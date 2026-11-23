@@ -1,0 +1,32 @@
+# Tool configuration for the repo (#1362). EcoDB is not installed as a package: the services run from their
+# folders in Docker. This file only holds the settings of the checks the CI runs.
+
+[tool.ruff]
+# The api image runs Python 3.12 (api/Dockerfile).
+target-version = "py312"
+# 120 and not 88: the code already lives in long lines, and splitting them all would turn the formatting
+# commit into an unreadable diff for no gain (same decision as FarOS, #1361).
+line-length = 120
+# ecodb-langchain is its own package with its own pyproject; archive/ is frozen history.
+extend-exclude = ["archive", "ecodb-langchain", "models", "media", "backups", "dashboard"]
+
+[tool.ruff.lint]
+# Written out, not ruff's defaults (ruff 0.17 turned on many more by default: 1.386 findings here, most of them
+# style). The ones that catch real faults: E4/E7/E9 (pycodestyle errors), F (pyflakes: unused imports and
+# variables, redefinitions), W, B (bugbear: patterns that are usually a fault) and I (import order, fixes itself).
+# The same set as FarOS.
+select = ["E4", "E7", "E9", "F", "W", "B", "I"]
+ignore = [
+  "E741",  # names l, O, I: readability, not a fault
+  "E731",  # lambda assigned to a name: style, not a fault
+  "B904",  # raise without from inside an except: changes the traceback shown, not what it does
+  "B905",  # zip without strict=: not reviewed case by case yet
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency injection: Depends()/Query()/... as default values is how FastAPI is written, not the
+# mutable-default bug B008 looks for (154 of the 422 findings were this).
+extend-immutable-calls = [
+  "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header", "fastapi.Body", "fastapi.File",
+  "fastapi.Form", "fastapi.Cookie", "fastapi.Security",
+]
