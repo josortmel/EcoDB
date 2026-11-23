@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Query
 from permissions import visible_project_ids
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])

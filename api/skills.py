@@ -7,16 +7,14 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user
-from db import get_pool
-from pagination import paginate
-from permissions import resolve_agent_for_actor, precompute_read_visibility, check_read_memory, can_read_memory
 from clusters import _parse_jsonb
+from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pagination import paginate
+from permissions import can_read_memory, check_read_memory, precompute_read_visibility, resolve_agent_for_actor
+from pydantic import BaseModel, ConfigDict, Field
 from shared_models import CaseResponse
-
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 

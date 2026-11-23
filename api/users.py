@@ -22,12 +22,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user
 from db import get_pool
-
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 # Tamano max del JSONB serialized -- DoS prevention.
 MAX_PREFS_SIZE = 32_000  # 32KB de JSON razonable para preferencias UI

@@ -11,12 +11,11 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from permissions import visible_project_ids
+from pydantic import BaseModel, Field
 
 log = logging.getLogger("ecodb.documents")
 

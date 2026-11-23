@@ -19,7 +19,7 @@ import logging
 import sys
 
 # Reuse all logic from ecodb_watcher — no duplication.
-from ecodb_watcher import poll_and_sync, WATCH_DIRS, WATCH_EXTENSIONS, STATE_FILE
+from ecodb_watcher import STATE_FILE, WATCH_DIRS, WATCH_EXTENSIONS, poll_and_sync
 
 if __name__ == "__main__":
     logging.basicConfig(

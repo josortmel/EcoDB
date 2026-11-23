@@ -7,11 +7,11 @@ frozen at current DB state. Run inside ecodb-api container.
 
 import asyncio
 import sys
-import yaml
 from pathlib import Path
 
 import asyncpg
 import httpx
+import yaml
 
 DATABASE_URL = __import__("os").environ["DATABASE_URL"]
 EMBEDDINGS_URL = __import__("os").environ.get("EMBEDDINGS_URL", "http://embeddings:8090")

@@ -8,13 +8,12 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pagination import paginate
 from permissions import resolve_agent_for_actor
+from pydantic import BaseModel, ConfigDict, Field
 
 log = logging.getLogger("ecodb.cells")
 
@@ -241,7 +240,7 @@ async def trigger_cell(
     # Custom (non-built-in) cell types route to the generic handler, which
     # requires an enabled cell_task_configs row with a prompt template.
     if cell_type not in _BUILTIN_CELL_TYPES:
-        from cell_worker import _load_cell_config, _run_generic_cell, _resolve_run_context, _active_cell
+        from cell_worker import _active_cell, _load_cell_config, _resolve_run_context, _run_generic_cell
 
         async with pool.acquire() as conn:
             cfg = await _load_cell_config(conn, agent_id, cell_type, None)
@@ -306,7 +305,7 @@ async def trigger_cell(
     if fn is None:
         raise HTTPException(422, f"invalid cell_type/level: {cell_type}/{level}")
 
-    from cell_worker import _resolve_run_context, _active_cell
+    from cell_worker import _active_cell, _resolve_run_context
 
     async def _run():
         async with _get_trigger_sem():

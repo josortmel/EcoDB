@@ -47,7 +47,6 @@ import torch
 from fastapi import FastAPI, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
-
 from reference_check import check_reference
 
 API_VERSION = "0.2.3"

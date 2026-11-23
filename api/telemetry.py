@@ -85,6 +85,7 @@ async def compute_use_score_llm(injection_text: str, response_text: str) -> dict
     Content is truncated and wrapped in XML tags before sending to prevent prompt injection.
     """
     import json as _json
+
     from llm_provider import get_llm_provider
 
     provider = get_llm_provider()

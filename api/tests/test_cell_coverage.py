@@ -14,8 +14,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import TEST_DB_URL  # noqa: E402
 

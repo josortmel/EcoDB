@@ -25,7 +25,6 @@ import asyncio
 import sys
 
 import asyncpg
-
 import settings
 from auth import generate_api_key
 

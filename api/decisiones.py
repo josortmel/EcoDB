@@ -12,13 +12,12 @@ import json
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
-
 import search
 import vigentes as _vig
 from auth import get_current_user
 from db import get_pool
 from embeddings_client import embed_text
+from fastapi import APIRouter, Depends, Query
 
 router = APIRouter(prefix="/decisiones", tags=["decisiones"])
 

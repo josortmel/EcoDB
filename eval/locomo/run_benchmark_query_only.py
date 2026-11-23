@@ -13,7 +13,6 @@ import json
 import math
 import os
 import sys
-import time
 from collections import defaultdict
 
 import httpx
@@ -220,7 +219,7 @@ def print_metrics(all_results: list[dict], label: str):
         vals = metrics_accum[key]
         print(f"  {key}: {sum(vals) / len(vals):.4f}")
 
-    print(f"\nBy category:")
+    print("\nBy category:")
     for cat_name in ["single-hop", "temporal", "multi-hop", "open-domain", "adversarial"]:
         if cat_name not in by_category:
             continue
@@ -271,13 +270,13 @@ def main():
                 qa_count = len(conv["qa"])
                 print(f"--- Conversation {conv_idx + 1}/{len(ws_map)}: {conv_id} (ws={ws_id}, {qa_count} QA) ---")
 
-                print(f"  Reconstructing session mapping from tags...")
+                print("  Reconstructing session mapping from tags...")
                 session_mapping = reconstruct_session_mapping(client, ws_id, conv_id, session_keys)
                 total_chunks = sum(len(v) for v in session_mapping.values())
                 print(f"  {len(session_mapping)} sessions, {total_chunks} chunks")
 
                 if not session_mapping:
-                    print(f"  SKIPPING — no sessions found in workspace")
+                    print("  SKIPPING — no sessions found in workspace")
                     continue
 
                 conv_results = search_and_evaluate(client, conv, ws_id, session_mapping, conv_id)

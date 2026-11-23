@@ -119,6 +119,7 @@ def test_schema_version_matches_db():
     Skipped automatically when postgres is not reachable (CI without postgres).
     """
     import asyncio
+
     import asyncpg
 
     async def _check():

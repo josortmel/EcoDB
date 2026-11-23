@@ -9,13 +9,12 @@ by the conftest guard) inside a transaction that is rolled back.
 
 import asyncio
 import sys
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import asyncpg
 import pytest
-
 from conftest import TEST_DB_URL
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

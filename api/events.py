@@ -12,12 +12,11 @@ import asyncio
 import json
 from typing import Literal
 
+from auth import get_current_user
+from db import get_pool
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
-
-from auth import get_current_user
-from db import get_pool
 
 _INTERNAL_BROADCAST_SECRET = __import__("os").environ.get("INTERNAL_BROADCAST_SECRET", "")
 

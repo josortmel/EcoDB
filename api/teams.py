@@ -48,13 +48,11 @@ import json
 from datetime import datetime
 
 from asyncpg.exceptions import ForeignKeyViolationError, UniqueViolationError
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 from auth import get_current_user, require_super
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException
 from permissions import validate_name_strip_blank
-
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_NAME_LEN = 200
 

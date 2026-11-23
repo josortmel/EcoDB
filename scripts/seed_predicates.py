@@ -9,11 +9,11 @@ Uso:
 """
 
 import asyncio
-import asyncpg
-import httpx
-import json
 import os
 import sys
+
+import asyncpg
+import httpx
 
 # #488: sin valor por defecto. localhost:5432 es el Postgres NATIVO de Windows, no EcoDB,
 # y un valor por defecto que apunta a otra base es como se cuelan los accidentes.
@@ -1438,7 +1438,7 @@ async def main():
     with_inverse = await conn.fetchval("SELECT count(*) FROM predicates_canonical WHERE inverse_of IS NOT NULL")
     symmetric_count = await conn.fetchval('SELECT count(*) FROM predicates_canonical WHERE "symmetric" = true')
 
-    print(f"\nFinal stats:")
+    print("\nFinal stats:")
     print(f"  Total approved: {total}")
     print(f"  With embedding: {with_embedding}")
     print(f"  With inverse: {with_inverse}")

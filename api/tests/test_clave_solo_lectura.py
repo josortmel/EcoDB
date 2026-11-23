@@ -10,9 +10,8 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from fastapi.testclient import TestClient
-
 from conftest import TEST_DB_URL
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")

@@ -13,7 +13,6 @@ import uuid
 from pathlib import Path
 
 import asyncpg
-
 from conftest import TEST_DB_URL
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

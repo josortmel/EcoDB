@@ -6,15 +6,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from clusters import _parse_jsonb
-
 from auth import get_current_user
-from clusters import ClusterSummary
+from clusters import ClusterSummary, _parse_jsonb
 from db import get_pool
-from permissions import precompute_read_visibility, check_read_memory, can_write_memory, resolve_agent_for_actor
+from fastapi import APIRouter, Depends, HTTPException, Query
+from permissions import can_write_memory, check_read_memory, precompute_read_visibility, resolve_agent_for_actor
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from shared_models import TensionAction
 
 

@@ -25,15 +25,14 @@ from datetime import date, datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator, model_validator
-
+import settings
 from auth import get_current_user
 from db import get_pool
 from embeddings_client import embed_image, embed_text
-from permissions import no_null_bytes as _no_null_bytes
+from fastapi import APIRouter, Depends, HTTPException
 from permissions import ids_legibles, visible_project_ids, visible_workspace_ids
-import settings
+from permissions import no_null_bytes as _no_null_bytes
+from pydantic import BaseModel, Field, field_validator, model_validator
 from settings import (
     ENABLE_BM25,
     ENABLE_BM25_EXPANSION,
@@ -41,8 +40,9 @@ from settings import (
     ENABLE_TRUST_TIERS,
     ENABLE_WEIGHT_DYNAMIC,
     GAMR_WEIGHTS_BM25,
+    RERANK_BLEND_ALPHA,
+    RERANK_MODE,
 )
-from settings import RERANK_BLEND_ALPHA, RERANK_MODE
 
 
 async def generate_hypothetical(query_text: str) -> str | None:

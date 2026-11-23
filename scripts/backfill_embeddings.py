@@ -18,7 +18,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "api"))
 
 import asyncpg  # noqa: E402
-
 from embeddings_client import embed_text  # noqa: E402
 
 

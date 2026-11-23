@@ -1,4 +1,8 @@
-import asyncio, asyncpg, os, json
+import asyncio
+import json
+import os
+
+import asyncpg
 
 GRAPH_NAME = "ecodb_graph"
 

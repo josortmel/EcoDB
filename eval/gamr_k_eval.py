@@ -5,9 +5,9 @@ Run from host: python eval/gamr_k_eval.py
 Requires: ECODB_EVAL_API_KEY or ECODB_API_KEY env var, API on http://localhost:8080
 """
 
+import json
 import os
 import sys
-import json
 import time
 from pathlib import Path
 

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -456,8 +455,9 @@ async def resolve_agent_for_actor(conn, actor: dict, agent_identifier: str) -> d
 
 async def resolve_cluster_for_actor(conn, actor: dict, cluster_id) -> dict:
     """Resolve cluster + verify agent ownership. 404 anti-discovery."""
-    from fastapi import HTTPException
     from uuid import UUID as _UUID
+
+    from fastapi import HTTPException
 
     cid = cluster_id if isinstance(cluster_id, _UUID) else _UUID(str(cluster_id))
     row = await conn.fetchrow(

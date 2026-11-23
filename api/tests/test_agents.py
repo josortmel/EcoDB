@@ -17,18 +17,16 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from fastapi.testclient import TestClient
-
 from conftest import TEST_DB_URL
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from main import create_app
 from auth import generate_api_key, hash_api_key
-
+from main import create_app
 
 # Identifier del agent test efímero — único, prefijo `pytest-` para no chocar
 # con agents reales del seed.

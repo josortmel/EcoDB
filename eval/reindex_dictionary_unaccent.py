@@ -13,7 +13,11 @@ Uso, dentro de ecodb-api (allí están el diccionario y el DATABASE_URL):
   python /tmp/reindex_dictionary_unaccent.py --apply    → escribe
 """
 
-import asyncio, os, sys, time, collections
+import asyncio
+import collections
+import os
+import sys
+import time
 
 sys.path.insert(0, "/app")
 import asyncpg

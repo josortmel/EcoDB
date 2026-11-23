@@ -3,7 +3,8 @@
 Run: docker cp this_file ecodb-api:/tmp/ && docker exec ecodb-api python /tmp/add_resolve_endpoint.py
 """
 
-import subprocess, textwrap
+import subprocess
+import textwrap
 
 ENDPOINT_CODE = textwrap.dedent('''
 

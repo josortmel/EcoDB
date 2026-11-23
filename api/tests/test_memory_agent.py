@@ -28,10 +28,9 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from conftest import TEST_DB_URL
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-
-from conftest import TEST_DB_URL
 
 # crypto reads ENCRYPTION_KEY at import — set it BEFORE importing main.
 os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
@@ -40,9 +39,9 @@ os.environ.setdefault("ENVIRONMENT", "development")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from main import create_app
-from auth import generate_api_key, hash_api_key
 import crypto
+from auth import generate_api_key, hash_api_key
+from main import create_app
 
 # Guarantee a usable Fernet regardless of import order across the test session.
 if not crypto.encryption_key_ok():
@@ -383,7 +382,8 @@ def zoom_env(client, ma_env):
     Plus one cluster for TEST_AGENT2 (cross-agent 404 check).
     Cleans memories before ma_env deletes the agent (FK has no cascade).
     """
-    from datetime import date, datetime, time, timedelta, timezone as tz
+    from datetime import date, datetime, time, timedelta
+    from datetime import timezone as tz
 
     today = date.today()
     aid = ma_env["agent_id"]
@@ -506,7 +506,8 @@ def test_progressive_recent_days_after_last_weekly(client, ma_env, zoom_env):
 def test_progressive_recent_days_hides_closed_week_outliers(client, ma_env, zoom_env):
     """A memory inside a consolidated week's period but NOT woven into any
     cluster (outlier) must still be hidden — closed weeks are never re-read."""
-    from datetime import date, datetime, time, timedelta, timezone as tz
+    from datetime import date, datetime, time, timedelta
+    from datetime import timezone as tz
 
     today = date.today()
     created = datetime.combine(today - timedelta(days=6), time(12, 0), tzinfo=tz.utc)

@@ -36,21 +36,21 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from asyncpg.exceptions import ForeignKeyViolationError, UniqueViolationError
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 from auth import get_current_user
 from db import get_pool
 from embeddings_client import embed_text
+from fastapi import APIRouter, Depends, HTTPException, Query
 from permissions import (
     can_write_memory,
     ids_legibles,
-    no_null_bytes as _no_null_bytes,
     visible_project_ids,
     visible_workspace_ids,
 )
+from permissions import (
+    no_null_bytes as _no_null_bytes,
+)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from settings import ENABLE_AUTO_LINK, ENABLE_POST_HOC_CLASSIFIER
-
 
 # Limites de tamaño (VS1 adv-seg L1 — DoS prevention) y validacion de null bytes
 # (VS3 adv-seg L1 — soft-delete unbreakable). Aplicados a TEXT y TEXT[].
@@ -506,8 +506,8 @@ async def create_memory(
 
     # FASE 2 — embed FUERA del pool. Si falla, lanzamos 503 sin tocar DB.
     # . Imagen si presente.
-    import time as _time
     import logging as _logging
+    import time as _time
 
     _perf_log = _logging.getLogger("ecodb.perf")
     _t0 = _time.time()
@@ -1483,6 +1483,7 @@ async def preview_memory(
 ) -> dict:
     """Dry-run GLiNER entity extraction without persisting. For Templates screen."""
     import logging as _logging
+
     from gliner_service import extract_entities
 
     try:

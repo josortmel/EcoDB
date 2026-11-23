@@ -9,7 +9,6 @@ Usage:
 
 import functools
 import json
-import math
 import os
 import subprocess
 import sys
@@ -195,7 +194,7 @@ def main():
 
     # Final report
     print(f"\n{'=' * 60}")
-    print(f"LoCoMo QA Evaluation Results")
+    print("LoCoMo QA Evaluation Results")
     print(f"{'=' * 60}")
     print(f"Total evaluated: {total_evaluated}, errors: {total_errors}")
     print()
@@ -204,7 +203,7 @@ def main():
     if overall:
         print(f"Overall F1: {sum(overall) / len(overall):.4f} ({len(overall)} queries)")
 
-    print(f"\nBy category:")
+    print("\nBy category:")
     for cat_name in ["single-hop", "temporal", "multi-hop", "open-domain", "adversarial"]:
         vals = scores_accum.get(cat_name, [])
         if vals:

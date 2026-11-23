@@ -1,10 +1,11 @@
 """Sync AGE graph with SQL tables post-purge."""
 
 import asyncio
-import asyncpg
 import json
 import os
 import sys
+
+import asyncpg
 
 # #488: sin valor por defecto. localhost:5432 es el Postgres NATIVO de Windows, no EcoDB,
 # y un valor por defecto que apunta a otra base es como se cuelan los accidentes.
@@ -77,7 +78,7 @@ async def main():
         "SELECT * FROM cypher('ecodb_graph', $$MATCH ()-[r]->() RETURN count(r)$$) AS (c agtype)"
     )
 
-    print(f"\nDESPUES:")
+    print("\nDESPUES:")
     print(f"  AGE: {age_nodes_after} nodos / {age_edges_after} edges")
     print(f"  SQL: {sql_nodes} nodos / {sql_triples} triples")
     print(f"  Skipped edges: {skipped}")

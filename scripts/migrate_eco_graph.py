@@ -29,11 +29,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from typing import Optional
-
-import os
 
 import asyncpg
 import httpx
@@ -130,13 +129,13 @@ async def main(dry_run: bool) -> int:
     )
     n_age_nodes = int(str(age_count["c"]).strip('"').strip())
 
-    print(f"ORIGEN eco_graph (5433):")
+    print("ORIGEN eco_graph (5433):")
     print(f"  nodos: {n_nodos}")
     print(f"  tripletas: {n_tripletas}")
     print(f"  literales unicos: {n_literales}")
     print(f"  predicados unicos: {n_predicados}")
     print(f"  autores vacios -> MIGRACION_ECO_GRAPH_2026-05-08: {n_autores_vacios}")
-    print(f"DESTINO ecodb (5435):")
+    print("DESTINO ecodb (5435):")
     print(f"  nodes: {n_dest_nodes}, triples: {n_dest_triples}, predicate_embeddings: {n_dest_pe}")
     print(f"  AGE ecodb_graph nodes: {n_age_nodes}")
     print()
@@ -148,23 +147,23 @@ async def main(dry_run: bool) -> int:
         return 1
 
     if dry_run:
-        print(f"=== DRY RUN ===")
+        print("=== DRY RUN ===")
         print(f"Migraria: {n_nodos} nodos + {n_literales} literales = {n_nodos + n_literales} nodes EcoDB")
         print(f"           {n_tripletas} tripletas -> triples + aristas AGE")
         print(f"           {n_predicados} predicados unicos -> predicate_embeddings")
         nodos = await orig.fetch("SELECT id, nombre, tipo, descripcion FROM nodos ORDER BY id LIMIT 3")
-        print(f"\nSample 3 primeros nodos:")
+        print("\nSample 3 primeros nodos:")
         for n in nodos:
             print(f"  id={n['id']} nombre={n['nombre']!r} tipo={n['tipo']!r} desc={(n['descripcion'] or '')[:50]!r}")
         literales = await orig.fetch("""
             SELECT DISTINCT objeto_literal FROM tripletas
             WHERE objeto_literal IS NOT NULL AND objeto_id IS NULL ORDER BY objeto_literal LIMIT 3
         """)
-        print(f"\nSample 3 primeros literales:")
+        print("\nSample 3 primeros literales:")
         for l in literales:
             print(f"  literal={l['objeto_literal']!r}")
         tripletas = await orig.fetch("SELECT * FROM tripletas ORDER BY id LIMIT 1")
-        print(f"\nSample primera tripleta:")
+        print("\nSample primera tripleta:")
         for t in tripletas:
             print(f"  id={t['id']} sujeto_id={t['sujeto_id']} predicado={t['predicado']!r}")
             print(f"  objeto_id={t['objeto_id']} literal={t['objeto_literal']!r}")
@@ -194,7 +193,7 @@ async def main(dry_run: bool) -> int:
         print(f"  insertados: {len(node_id_map)} (en {time.time() - t_start:.1f}s)")
 
         # FASE 2 — Crear nodos artificiales tipo literal
-        print(f"\n=== FASE 2 — crear nodos literales ===")
+        print("\n=== FASE 2 — crear nodos literales ===")
         literales_rows = await orig.fetch("""
             SELECT DISTINCT objeto_literal FROM tripletas
             WHERE objeto_literal IS NOT NULL AND objeto_id IS NULL
@@ -352,7 +351,7 @@ async def main(dry_run: bool) -> int:
         print(f"  done en {time.time() - t_pred:.1f}s")
 
     # === Verificacion final ===
-    print(f"\n=== VERIFICACION FINAL ===")
+    print("\n=== VERIFICACION FINAL ===")
     n_nodes_final = await dest.fetchval("SELECT COUNT(*) FROM nodes")
     n_triples_final = await dest.fetchval("SELECT COUNT(*) FROM triples")
     n_pe_final = await dest.fetchval("SELECT COUNT(*) FROM predicate_embeddings")

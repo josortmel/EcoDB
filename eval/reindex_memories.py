@@ -1,4 +1,9 @@
-import asyncio, asyncpg, os, sys, time
+import asyncio
+import os
+import sys
+import time
+
+import asyncpg
 
 sys.path.insert(0, "/app")
 
@@ -8,8 +13,8 @@ async def reindex():
     pool = await asyncpg.create_pool(url)
 
     # Load dictionary cache first
-    from gliner_service import extract_entities, load_dictionary_to_cache
     from entity_normalization import normalize_name
+    from gliner_service import extract_entities, load_dictionary_to_cache
 
     cache_count = await load_dictionary_to_cache(pool)
     print(f"Dictionary cache loaded: {cache_count} entries")

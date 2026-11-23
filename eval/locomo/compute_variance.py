@@ -1,4 +1,5 @@
-import json, statistics
+import json
+import statistics
 
 
 def load_metrics(path):
