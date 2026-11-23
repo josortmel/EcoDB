@@ -111,9 +111,9 @@ def test_multiple_entities_in_one_text():
     """Múltiples entidades, todas matcheadas por el dict."""
     gliner_service._dictionary_cache = _build_cache([
         ("alan", "persona"),
-        ("sevilla", "lugar"),
+        ("lisboa", "lugar"),
     ])
-    entities, residual = _match_dictionary("alan vive en sevilla")
+    entities, residual = _match_dictionary("alan vive en lisboa")
     assert len(entities) == 2
     labels = {e["label"] for e in entities}
     assert labels == {"persona", "lugar"}
@@ -130,7 +130,7 @@ def test_empty_text_returns_empty():
 def test_empty_dictionary_returns_text_unchanged():
     """Diccionario vacío → no matches, residual igual al texto original."""
     gliner_service._dictionary_cache = []
-    text = "alan trabajó en sevilla"
+    text = "alan trabajó en lisboa"
     entities, residual = _match_dictionary(text)
     assert entities == []
     assert residual == text

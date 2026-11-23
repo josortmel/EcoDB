@@ -18,10 +18,9 @@ import os
 import sys
 from datetime import datetime, timezone
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://ecodb:ecodb_dev_pass@localhost:5434/ecodb"
-)
+# #488/#1362: sin valor por defecto. Uno con contraseña y el puerto de una base antigua es como se cuelan los
+# accidentes, y además dejaba una contraseña escrita en el repo público.
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 MAX_WORDS = 8
 
@@ -113,6 +112,8 @@ async def execute_purge(conn, node_ids):
 async def main():
     execute = "--execute" in sys.argv
 
+    if not DATABASE_URL:
+        sys.exit("DATABASE_URL no esta puesta (desde el host: postgresql://ecodb:<clave>@127.0.0.1:5435/ecodb)")
     conn = await asyncpg.connect(DATABASE_URL)
 
     # Stats antes
