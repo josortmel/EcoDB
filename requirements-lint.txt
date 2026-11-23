@@ -2,3 +2,4 @@
 #   pip install -r requirements-lint.txt   (or: uvx ruff@0.17.6 ...)
 # Their settings live in pyproject.toml.
 ruff==0.17.6
+vulture==2.16

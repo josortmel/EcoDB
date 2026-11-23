@@ -47,6 +47,35 @@ jobs:
         if: ${{ !cancelled() && steps.lint_tools.outcome == 'success' }}
         run: ruff check .
 
+      # Dead code in what runs in production (not tests, scripts or eval). Functions called through a decorator
+      # (routes, MCP tools, pydantic validators) are not dead. It BLOCKS at 80 % confidence (unused imports and
+      # locals, unreachable code: where real faults hide); the 60 % list (mostly pydantic fields FastAPI reads)
+      # is printed as a report until it has its whitelist.
+      # vulture exits 0 (clean) or 3 (found something); anything else (not installed, crash) is an error, so a
+      # vulture that did not run can never pass as «no dead code» (the lesson of FarOS #1361).
+      - name: vulture (dead code)
+        if: ${{ !cancelled() && steps.lint_tools.outcome == 'success' }}
+        shell: bash
+        run: |
+          set +e
+          args=(api mcp embeddings ner watchdog alerting --exclude "*/tests/*"
+                --ignore-decorators "@router.*,@app.*,@mcp.*,@pytest.*,@field_validator,@model_validator,@validator")
+          vulture "${args[@]}" --min-confidence 60 > vulture-60.txt 2>&1
+          echo "report at 60 % confidence: $(grep -c . vulture-60.txt) findings (not blocking)"
+          vulture "${args[@]}" --min-confidence 80 > vulture-80.txt 2>&1
+          status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+              cat vulture-80.txt
+              echo "::error::vulture did not run (exit code $status)"
+              exit 1
+          fi
+          if [ "$status" -eq 3 ]; then
+              cat vulture-80.txt
+              echo "::error::dead code at 80 % confidence"
+              exit 1
+          fi
+          echo "no dead code at 80 % confidence"
+
       # The compose file asks for these two with ${...:?}; the test database only needs them to exist. Random per
       # run, never written in the repo (the privacy pre-push refuses any password-looking value in clear).
       - name: Start the throwaway test database
@@ -63,7 +92,7 @@ jobs:
           TEST_DB_PORT: "5436"
           TEST_API_URL: http://127.0.0.1:1
           # What runs today; if tests are removed on purpose, lower it in the same PR.
-          MIN_TESTS: "704"
+          MIN_TESTS: "705"
           OUT: test-results
         run: bash scripts/ci/tests_api.sh
 
