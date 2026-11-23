@@ -39,7 +39,8 @@ def test_head_health_returns_200():
 
 def test_health_returns_json():
     response = client_prod.get("/health")
-    assert response.headers["content-type"] == "application/json"
+    # SecurityHeadersMiddleware (main.py) adds the charset to every JSON response on purpose (caefa98, 11-jun).
+    assert response.headers["content-type"] == "application/json; charset=utf-8"
 
 
 def test_health_status_ok():

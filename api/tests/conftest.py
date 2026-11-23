@@ -12,10 +12,19 @@ Pure tests (no DB) run anywhere. (C18, after the 2026-09-25 live-run incident.)
 """
 import functools
 import os
+import sys
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import asyncpg
 import pytest
+
+# The api modules (reranker, search, ...) are imported by bare name. Most test files insert api/ on sys.path
+# themselves; the ones that didn't only worked when an earlier file in the same process had done it, and failed
+# alone ("No module named 'reranker'", #1362). One place for all of them.
+_API_DIR = str(Path(__file__).resolve().parent.parent)
+if _API_DIR not in sys.path:
+    sys.path.insert(0, _API_DIR)
 
 TEST_DB_HOST = os.environ.get("TEST_DB_HOST", "localhost")
 TEST_DB_PORT = os.environ.get("TEST_DB_PORT", "5436")
