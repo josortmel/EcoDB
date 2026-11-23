@@ -7,6 +7,7 @@ el siguiente reconcile. Igual al renombrar y al reactivar. Ahora el valor viaja 
 El test aplica sql/trigger_age_sync.sql a la base de PRUEBAS (como hace migrations.py al arrancar) y comprueba
 los vértices. Solo contra ecodb-test-pg (5436).
 """
+
 import asyncio
 import json
 import sys
@@ -23,14 +24,20 @@ SQL = Path(__file__).resolve().parents[2] / "sql" / "trigger_age_sync.sql"
 async def _vertice(conn, sid):
     rows = await conn.fetch(
         "SELECT * FROM cypher('ecodb_graph', $$ MATCH (n:Entity {sql_id: $sid}) RETURN n.name $$, $1::agtype)"
-        " AS (name agtype)", json.dumps({"sid": sid}))
+        " AS (name agtype)",
+        json.dumps({"sid": sid}),
+    )
     return [json.loads(str(r["name"])) for r in rows]
 
 
 async def _escenario():
     tag = f"t447-{uuid.uuid4().hex[:6]}"
-    nombres = {"apostrofo": f"O'Brien {tag}", "barra": f"C:\\ruta\\{tag}", "comillas": f'dijo "hola" {tag}',
-               "inyeccion": f"x'}}) DETACH DELETE n //{tag}"}
+    nombres = {
+        "apostrofo": f"O'Brien {tag}",
+        "barra": f"C:\\ruta\\{tag}",
+        "comillas": f'dijo "hola" {tag}',
+        "inyeccion": f"x'}}) DETACH DELETE n //{tag}",
+    }
     conn = await asyncpg.connect(TEST_DB_URL)
     res, ids = {}, []
     try:

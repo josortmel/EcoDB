@@ -1,4 +1,5 @@
 """Shared Pydantic models used across multiple endpoints."""
+
 from __future__ import annotations
 
 from datetime import datetime

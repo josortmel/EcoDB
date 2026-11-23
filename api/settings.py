@@ -13,6 +13,7 @@ NEVER use the JWT_SECRET / API_KEY_PEPPER defaults in production.
 The Docker image will FAIL to start if ENVIRONMENT=production and secrets
 are still set to their development defaults.
 """
+
 import os
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
@@ -40,9 +41,7 @@ API_KEY_PREFIX = "ecodb_"  # prefijo visible para identificar API keys de ecodb
 
 # CORS — restrictive policy, no wildcard, no credentials.
 _default_origins = "http://localhost:8080,http://localhost:8091"
-CORS_ORIGINS = [
-    o.strip() for o in os.environ.get("CORS_ORIGINS", _default_origins).split(",") if o.strip()
-]
+CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", _default_origins).split(",") if o.strip()]
 
 # Embeddings service — Jina v4 INT8 running in a separate container.
 # Default: localhost:8090 for tests; in docker-compose it will be
@@ -108,6 +107,7 @@ def validate_production_secrets() -> None:
     # EMBEDDINGS_URL must not point to an external host in production —
     # SSRF vector that could exfiltrate memory content.
     from urllib.parse import urlparse
+
     parsed = urlparse(EMBEDDINGS_URL)
     if not parsed.hostname or parsed.hostname not in _EMBEDDINGS_HOST_ALLOWLIST:
         raise RuntimeError(
@@ -126,20 +126,21 @@ def validate_production_secrets() -> None:
         parsed_ds = urlparse(DEEPSEEK_URL)
         if not parsed_ds.hostname or not parsed_ds.hostname.endswith("deepseek.com"):
             raise RuntimeError(
-                f"DEEPSEEK_URL host not allowed in production: {parsed_ds.hostname!r}. "
-                f"Must end with deepseek.com"
+                f"DEEPSEEK_URL host not allowed in production: {parsed_ds.hostname!r}. Must end with deepseek.com"
             )
     import crypto
+
     if not crypto.encryption_key_ok():
         raise RuntimeError(
             "ENCRYPTION_KEY not set or invalid in ENVIRONMENT=production. "
             "Required to encrypt LLM provider keys. Generate with: "
-            "python -c \"from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())\""
+            'python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())"'
         )
     _broadcast_secret = os.environ.get("INTERNAL_BROADCAST_SECRET", "")
     if not _broadcast_secret or len(_broadcast_secret) < 16:
         import logging
+
         logging.getLogger("ecodb.security").warning(
             "INTERNAL_BROADCAST_SECRET empty or too short in production. "
             "Worker SSE events will be silently dropped. "
@@ -190,7 +191,7 @@ COOCCURRENCE_THRESHOLD = int(os.environ.get("COOCCURRENCE_THRESHOLD", "3"))
 NER_SERVICE_URL = os.environ.get("NER_SERVICE_URL", "http://ner:8091")
 
 GAMR_WEIGHTS_BM25: dict[str, dict[str, float]] = {
-    "factual":    {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},
+    "factual": {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},
     "historical": {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.02, "bm25": 0.10},
     "analytical": {"semantic": 0.70, "graph": 0.05, "weight": 0.10, "freshness": 0.05, "bm25": 0.10},
     "contextual": {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},

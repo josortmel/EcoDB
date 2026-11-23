@@ -3,6 +3,7 @@ the cluster must stop claiming the cell's model. metadata.cell_model is removed,
 cell_model_before_owner (only GET /clusters/{id}/modelo shows either), and
 narrated_by="owner" is set. Router-only, fake conn — no DB.
 """
+
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -62,6 +63,6 @@ def test_owner_narrate_drops_cell_model_claim(monkeypatch):
     assert "- 'cell_model'" in sql
     assert "'narrated_by', 'owner'" in sql
     assert "cell_model_before_owner" in sql
-    assert "- 'cell_generated'" in sql                   # C23b: authorship claim moves too
+    assert "- 'cell_generated'" in sql  # C23b: authorship claim moves too
     assert "cell_generated_before_owner" in sql
     assert args[0] == "mi versión"

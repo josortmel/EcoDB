@@ -28,6 +28,7 @@ Hardening adv-code L1:
 Sin auth — servicio interno (red Docker privada). Tarea 1.14 lo aisla en
 ecodb-net sin exponer puerto 8090 al host.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -69,9 +70,7 @@ JINA_API_KEY = os.environ.get("JINA_API_KEY", "")
 JINA_API_TIMEOUT = float(os.environ.get("JINA_API_TIMEOUT", "30.0"))
 
 if EMBEDDING_BACKEND not in ("local", "cloud"):
-    raise RuntimeError(
-        f"EMBEDDING_BACKEND debe ser 'local' o 'cloud', got: {EMBEDDING_BACKEND!r}"
-    )
+    raise RuntimeError(f"EMBEDDING_BACKEND debe ser 'local' o 'cloud', got: {EMBEDDING_BACKEND!r}")
 if EMBEDDING_BACKEND == "cloud" and not JINA_API_KEY:
     raise RuntimeError("EMBEDDING_BACKEND=cloud requiere JINA_API_KEY env var")
 
@@ -114,12 +113,8 @@ if EMBEDDING_BACKEND == "cloud":
     _parsed = urlparse(JINA_API_URL)
     if _parsed.scheme != "https":
         raise RuntimeError(f"JINA_API_URL debe usar https://, got: {_parsed.scheme!r}")
-    if not any(_parsed.hostname == h or (_parsed.hostname or "").endswith("." + h)
-               for h in _JINA_HOST_ALLOWLIST):
-        raise RuntimeError(
-            f"JINA_API_URL host no permitido: {_parsed.hostname!r}. "
-            f"Allowlist: {_JINA_HOST_ALLOWLIST}"
-        )
+    if not any(_parsed.hostname == h or (_parsed.hostname or "").endswith("." + h) for h in _JINA_HOST_ALLOWLIST):
+        raise RuntimeError(f"JINA_API_URL host no permitido: {_parsed.hostname!r}. Allowlist: {_JINA_HOST_ALLOWLIST}")
 
 # Globals — el modelo se carga UNA vez al lifespan startup (solo backend=local).
 _model = None
@@ -128,12 +123,13 @@ _model = None
 # #547 / L47: PyTorch keeps freed blocks reserved, so the embedder grew ~3.9 GB of cache over
 # a day on the GPU it shares with the house (16-oct). Hand it back after a request when the
 # reserved-but-unused part passes the slack; after a CUDA OOM this is also what lets it recover.
-_CACHE_SLACK_BYTES = int(os.environ.get("EMBED_CACHE_SLACK_MIB", "256")) * 1024 ** 2
+_CACHE_SLACK_BYTES = int(os.environ.get("EMBED_CACHE_SLACK_MIB", "256")) * 1024**2
 
 
 def _release_cache() -> None:
     if torch.cuda.is_available() and (
-            torch.cuda.memory_reserved() - torch.cuda.memory_allocated() > _CACHE_SLACK_BYTES):
+        torch.cuda.memory_reserved() - torch.cuda.memory_allocated() > _CACHE_SLACK_BYTES
+    ):
         torch.cuda.empty_cache()
 
 
@@ -157,6 +153,7 @@ async def lifespan(app: FastAPI):
     t0 = time.time()
     try:
         from transformers import AutoModel, BitsAndBytesConfig
+
         if torch.cuda.is_available():
             print(f"[startup] backend=local → cargando modelo {MODEL_ID} con bitsandbytes INT8...", flush=True)
             config = BitsAndBytesConfig(load_in_8bit=True)
@@ -183,7 +180,7 @@ async def lifespan(app: FastAPI):
         print(f"[startup] vector de referencia: coseno {score:.4f}", flush=True)
         _model = model
         if torch.cuda.is_available():
-            mem_used_mib = torch.cuda.memory_allocated() // (1024 ** 2)
+            mem_used_mib = torch.cuda.memory_allocated() // (1024**2)
             print(f"[startup] VRAM usada tras carga: {mem_used_mib} MiB", flush=True)
     except Exception as e:
         print(f"[startup] FALLO carga del modelo: {e}", flush=True)
@@ -207,6 +204,7 @@ app = FastAPI(
 # Pydantic models
 # ---------------------------------------------------------------------------
 
+
 class EmbedTextRequest(BaseModel):
     texts: list[str] = Field(..., min_length=1, max_length=MAX_BATCH_TEXT)
     task: str = Field("retrieval", pattern="^(retrieval|text-matching|code)$")
@@ -227,8 +225,12 @@ class EmbedTextRequest(BaseModel):
 
 
 class EmbedImageRequest(BaseModel):
-    images: list[str] = Field(..., min_length=1, max_length=MAX_BATCH_IMAGE,
-                              description="Cada imagen como data URI base64 (local) o URL http(s)/data URI (cloud)")
+    images: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_BATCH_IMAGE,
+        description="Cada imagen como data URI base64 (local) o URL http(s)/data URI (cloud)",
+    )
     task: str = Field("retrieval", pattern="^(retrieval|text-matching|code)$")
     truncate_dim: int = Field(EMBEDDING_DIM, ge=64, le=2048)
 
@@ -242,9 +244,7 @@ class EmbedImageRequest(BaseModel):
             if not img:
                 raise ValueError("image reference cannot be empty")
             if len(img) > MAX_IMAGE_REF_LEN:
-                raise ValueError(
-                    f"image reference exceeds max length {MAX_IMAGE_REF_LEN} chars"
-                )
+                raise ValueError(f"image reference exceeds max length {MAX_IMAGE_REF_LEN} chars")
         return v
 
 
@@ -276,9 +276,11 @@ class HealthDetailedResponse(HealthResponse):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health")
 async def health():
     from fastapi.responses import JSONResponse
+
     if EMBEDDING_BACKEND == "cloud":
         return {"status": "ok", "backend": "cloud", "model_functional": True}
     if _model is None:
@@ -325,8 +327,8 @@ async def health():
 async def health_detailed() -> HealthDetailedResponse:
     vram_used = vram_total = vram_free = None
     if EMBEDDING_BACKEND == "local" and torch.cuda.is_available():
-        vram_used = torch.cuda.memory_allocated() // (1024 ** 2)
-        vram_total = torch.cuda.get_device_properties(0).total_memory // (1024 ** 2)
+        vram_used = torch.cuda.memory_allocated() // (1024**2)
+        vram_total = torch.cuda.get_device_properties(0).total_memory // (1024**2)
         vram_free = vram_total - vram_used
     is_cloud = EMBEDDING_BACKEND == "cloud"
     return HealthDetailedResponse(
@@ -346,6 +348,7 @@ async def health_detailed() -> HealthDetailedResponse:
 # ---------------------------------------------------------------------------
 # Cloud backend (API Jina) — Tarea 1.9
 # ---------------------------------------------------------------------------
+
 
 def _map_task_for_cloud(task: str, prompt_name: str | None) -> str:
     """Mapping local→cloud: la API de Jina usa task con dot notation.
@@ -452,6 +455,7 @@ async def _embed_image_cloud(body: EmbedImageRequest, t0: float) -> EmbedRespons
 # Embedding endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.post("/embed/text", response_model=EmbedResponse)
 async def embed_text(body: EmbedTextRequest) -> EmbedResponse:
     t0 = time.time()
@@ -516,7 +520,7 @@ async def embed_image(body: EmbedImageRequest) -> EmbedResponse:
         else:
             raise HTTPException(
                 422,
-                "image must be data:image/ base64 URI in local backend; use EMBEDDING_BACKEND=cloud for http(s) URLs"
+                "image must be data:image/ base64 URI in local backend; use EMBEDDING_BACKEND=cloud for http(s) URLs",
             )
 
     try:

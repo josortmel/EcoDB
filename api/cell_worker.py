@@ -7,6 +7,7 @@ Standalone Docker process. 3 cells in one service:
 
 Monthly/quarterly/yearly consolidation stacks on top of weeklies.
 """
+
 import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 import asyncio
 import hashlib
@@ -67,6 +68,7 @@ class _SafeFormatter(_string.Formatter):
     Prevents secret exfiltration via `{val.__class__.__mro__...__globals__}` traversal
     when formatting DB-stored prompt templates (VS_L3_1). Unknown keys render empty.
     """
+
     def get_field(self, field_name, args, kwargs):
         if "." in field_name or "[" in field_name:
             raise ValueError(f"attribute/index access not allowed in template: {field_name!r}")
@@ -93,6 +95,7 @@ def _vec_literal(arr) -> str:
 # Infrastructure
 # ---------------------------------------------------------------------------
 
+
 def _lock_key(agent_id, cell_type, p_start, p_end):
     raw = f"{agent_id}:{cell_type}:{p_start}:{p_end}"
     return int(hashlib.sha256(raw.encode()).hexdigest()[:15], 16)
@@ -104,7 +107,8 @@ RETRY_WINDOW_HOURS = int(os.environ.get("CELL_RETRY_WINDOW_HOURS", "48"))
 async def consolidation_gaps(conn, weeks: int = 8) -> list[dict]:
     """#236: closed weeks (within the last `weeks`) where an agent wrote memories but has no
     active weekly cluster covering them — the hole the boot would silently skip."""
-    rows = await conn.fetch("""
+    rows = await conn.fetch(
+        """
         WITH wk AS (
             SELECT m.agent_id, date_trunc('week', m.created_at)::date AS week_start, count(*) AS n
             FROM memories m
@@ -121,19 +125,26 @@ async def consolidation_gaps(conn, weeks: int = 8) -> list[dict]:
                           WHERE mc.agent_id = wk.agent_id AND mc.level = 'weekly' AND mc.status = 'active'
                             AND mc.period_start <= wk.week_start + 6 AND mc.period_end >= wk.week_start)
         ORDER BY 1, 2
-    """, weeks)
+    """,
+        weeks,
+    )
     return [dict(r) for r in rows]
 
 
-async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end,
-                             cluster_level=None):
-    rows = await conn.fetch("""
+async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end, cluster_level=None):
+    rows = await conn.fetch(
+        """
         SELECT status, items_created FROM cell_runs
         WHERE agent_id=$1 AND cell_type=$2
           AND status IN ('completed', 'running')
           AND metrics->>'period_start' = $3
           AND metrics->>'period_end' = $4
-    """, agent_id, cell_type, str(p_start), str(p_end))
+    """,
+        agent_id,
+        cell_type,
+        str(p_start),
+        str(p_end),
+    )
     if not rows:
         return False
     if any(r["status"] == "running" for r in rows):
@@ -145,12 +156,21 @@ async def _check_idempotency(conn, agent_id, cell_type, p_start, p_end,
     # real state. (Day 101: May's monthly was deleted for regeneration but
     # the day-99 completed run silently blocked the re-run, so the quarterly
     # was built from 2 months instead of 3.)
-    return await conn.fetchval("""
+    return (
+        await conn.fetchval(
+            """
         SELECT 1 FROM memory_clusters
         WHERE agent_id=$1 AND level=$2 AND status='active'
           AND period_start=$3 AND period_end=$4
         LIMIT 1
-    """, agent_id, cluster_level, p_start, p_end) is not None
+    """,
+            agent_id,
+            cluster_level,
+            p_start,
+            p_end,
+        )
+        is not None
+    )
 
 
 def _reflection_text(value):
@@ -166,8 +186,8 @@ def _reflection_text(value):
 def _reflection_member_ids(memories):
     """#393: the reflection cluster's 2 members are the week's own heaviest memories (it used to take the
     agent's heaviest of all time, so the same April memories hung from every week)."""
-    top = sorted(memories, key=lambda m: m.get('weight') or 0, reverse=True)[:2]
-    return [m['id'] for m in top]
+    top = sorted(memories, key=lambda m: m.get("weight") or 0, reverse=True)[:2]
+    return [m["id"] for m in top]
 
 
 async def _weekly_done(conn, agent_id, week_start, week_end) -> bool:
@@ -176,21 +196,38 @@ async def _weekly_done(conn, agent_id, week_start, week_end) -> bool:
     progress, an active weekly cluster inside the week (the #393 halves count), or an empty week already run
     (completed with 0 items and no split). A week whose clusters were superseded to rebuild it runs again;
     before, any completed run blocked it for ever, and the split marker's whole-week run did too."""
-    if await conn.fetchval("""
+    if await conn.fetchval(
+        """
         SELECT 1 FROM cell_runs WHERE agent_id=$1 AND cell_type='consolidation' AND status='running'
           AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3 LIMIT 1
-    """, agent_id, str(week_start), str(week_end)):
+    """,
+        agent_id,
+        str(week_start),
+        str(week_end),
+    ):
         return True
-    if await conn.fetchval("""
+    if await conn.fetchval(
+        """
         SELECT 1 FROM memory_clusters WHERE agent_id=$1 AND level='weekly' AND status='active'
           AND period_start >= $2 AND period_end <= $3 LIMIT 1
-    """, agent_id, week_start, week_end):
+    """,
+        agent_id,
+        week_start,
+        week_end,
+    ):
         return True
-    return bool(await conn.fetchval("""
+    return bool(
+        await conn.fetchval(
+            """
         SELECT 1 FROM cell_runs WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
           AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3
           AND COALESCE(items_created, 0) = 0 AND NOT (metrics ? 'split_into') LIMIT 1
-    """, agent_id, str(week_start), str(week_end)))
+    """,
+            agent_id,
+            str(week_start),
+            str(week_end),
+        )
+    )
 
 
 async def _mark_split_complete(conn, agent_id, p_start, mid, p_end):
@@ -199,45 +236,65 @@ async def _mark_split_complete(conn, agent_id, p_start, mid, p_end):
     the whole week on every restart (~8 min of LLM each time; 10 times with Eco). When BOTH halves are
     completed, record the whole week as completed by split (items_created=0, metrics.split_into).
     Idempotent: does nothing if the week is already recorded. Returns True if the week counts as done."""
+
     async def _completed(a, b):
-        return await conn.fetchval("""
+        return (
+            await conn.fetchval(
+                """
             SELECT 1 FROM cell_runs WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
               AND metrics->>'period_start'=$2 AND metrics->>'period_end'=$3 LIMIT 1
-        """, agent_id, str(a), str(b)) is not None
+        """,
+                agent_id,
+                str(a),
+                str(b),
+            )
+            is not None
+        )
+
     if await _completed(p_start, p_end):
         return True
     second = mid + timedelta(days=1)
     if not (await _completed(p_start, mid) and await _completed(second, p_end)):
         return False
-    run_id = await _create_run(conn, 'consolidation', agent_id, p_start, p_end)
-    await conn.execute("UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1", run_id,
-                       json.dumps({"split_into": [[str(p_start), str(mid)], [str(second), str(p_end)]]}))
+    run_id = await _create_run(conn, "consolidation", agent_id, p_start, p_end)
+    await conn.execute(
+        "UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1",
+        run_id,
+        json.dumps({"split_into": [[str(p_start), str(mid)], [str(second), str(p_end)]]}),
+    )
     await _complete_run(conn, run_id, 0)
     return True
 
 
 async def _resolve_context(conn, agent_id):
-    ws = await conn.fetchrow("""
+    ws = await conn.fetchrow(
+        """
         SELECT workspace_id, COUNT(*) AS cnt FROM memories
         WHERE agent_id=$1 GROUP BY workspace_id ORDER BY cnt DESC LIMIT 1
-    """, agent_id)
+    """,
+        agent_id,
+    )
     if ws is None:
         return None, None, None
     ws_id = ws["workspace_id"]
-    org_id = await conn.fetchval(
-        "SELECT organization_id FROM workspaces WHERE id=$1", ws_id)
-    ident = await conn.fetchval(
-        "SELECT identifier FROM agents WHERE id=$1", agent_id)
+    org_id = await conn.fetchval("SELECT organization_id FROM workspaces WHERE id=$1", ws_id)
+    ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
     return ws_id, org_id, ident
 
 
 async def _create_run(conn, cell_type, agent_id, p_start, p_end):
     _responded_models.set({"responded_models": set(), "system_fingerprints": set()})  # #716: new run
-    return await conn.fetchval("""
+    return await conn.fetchval(
+        """
         INSERT INTO cell_runs (cell_type, agent_id, model, prompt_version, metrics)
         VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id
-    """, cell_type, agent_id, _active_model(), _active_prompt_version(),
-        json.dumps({"period_start": str(p_start), "period_end": str(p_end)}))
+    """,
+        cell_type,
+        agent_id,
+        _active_model(),
+        _active_prompt_version(),
+        json.dumps({"period_start": str(p_start), "period_end": str(p_end)}),
+    )
 
 
 async def _complete_run(conn, run_id, items_created):
@@ -245,13 +302,19 @@ async def _complete_run(conn, run_id, items_created):
     mdl = _active_model()
     seen = _responded_models.get() or {}  # #716: what the API said answered
     answered = {k: sorted(v) for k, v in seen.items() if v}
-    await conn.execute("""
+    await conn.execute(
+        """
         UPDATE cell_runs SET finished_at=NOW(), status='completed',
           items_created=$2, prompt_version=$3, model=$4,
           metrics = CASE WHEN $5::jsonb IS NULL THEN metrics ELSE metrics || $5::jsonb END
         WHERE id=$1 AND status='running'
-    """, run_id, items_created, pv, mdl,
-        json.dumps(answered) if answered else None)
+    """,
+        run_id,
+        items_created,
+        pv,
+        mdl,
+        json.dumps(answered) if answered else None,
+    )
 
 
 async def _fail_run(conn, run_id, error):
@@ -261,14 +324,15 @@ async def _fail_run(conn, run_id, error):
         msg = str(error) or type(error).__name__
     else:
         msg = str(error) or "unknown (empty error message)"
-    await conn.execute("""
+    await conn.execute(
+        """
         UPDATE cell_runs SET finished_at=NOW(), status='failed',
           errors = errors || jsonb_build_array($2::jsonb)
         WHERE id=$1 AND status='running'
-    """, run_id, json.dumps({
-        "error": msg[:500],
-        "at": datetime.now(timezone.utc).isoformat()
-    }))
+    """,
+        run_id,
+        json.dumps({"error": msg[:500], "at": datetime.now(timezone.utc).isoformat()}),
+    )
 
 
 async def _broadcast_sse(event_type, data, org_id=None):
@@ -278,20 +342,26 @@ async def _broadcast_sse(event_type, data, org_id=None):
             await client.post(
                 f"{API_URL}/api/v1/events/broadcast",
                 json={"event_type": event_type, "data": data, "org_id": org_id},
-                headers=headers)
+                headers=headers,
+            )
     except Exception:
         pass
 
 
 async def _load_cell_config(conn, agent_id, cell_type, level=None):
     """Load config from DB. Fallback to env vars if no row."""
-    row = await conn.fetchrow("""
+    row = await conn.fetchrow(
+        """
         SELECT ctc.*, cpt.content AS prompt_content, cpt.name AS prompt_name
         FROM cell_task_configs ctc
         LEFT JOIN cell_prompt_templates cpt ON cpt.id = ctc.prompt_template_id
         WHERE ctc.agent_id = $1 AND ctc.cell_type = $2
           AND (ctc.level IS NOT DISTINCT FROM $3) AND ctc.enabled = true
-    """, agent_id, cell_type, level)
+    """,
+        agent_id,
+        cell_type,
+        level,
+    )
     if row is None:
         return {
             "model": CELL_MODEL,
@@ -307,28 +377,46 @@ async def _load_cell_config(conn, agent_id, cell_type, level=None):
 
 
 async def _fetch_memories(conn, agent_id, ws_id, start, end):
-    count = await conn.fetchval("""
+    count = await conn.fetchval(
+        """
         SELECT COUNT(*) FROM memories
         WHERE agent_id=$1 AND workspace_id=$2
           AND created_at BETWEEN $3 AND $4
-    """, agent_id, ws_id, start, end)
+    """,
+        agent_id,
+        ws_id,
+        start,
+        end,
+    )
     if count > MAX_MEMORIES:
-        log.warning("Agent %d: %d mems in window, sampling %d by weight",
-                   agent_id, count, MAX_MEMORIES)
-        return await conn.fetch("""
+        log.warning("Agent %d: %d mems in window, sampling %d by weight", agent_id, count, MAX_MEMORIES)
+        return await conn.fetch(
+            """
             SELECT m.*, a.identifier AS agent_identifier
             FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
             WHERE m.agent_id=$1 AND m.workspace_id=$2
               AND m.created_at BETWEEN $3 AND $4
             ORDER BY m.weight DESC, m.created_at DESC LIMIT $5
-        """, agent_id, ws_id, start, end, MAX_MEMORIES)
-    return await conn.fetch("""
+        """,
+            agent_id,
+            ws_id,
+            start,
+            end,
+            MAX_MEMORIES,
+        )
+    return await conn.fetch(
+        """
         SELECT m.*, a.identifier AS agent_identifier
         FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
         WHERE m.agent_id=$1 AND m.workspace_id=$2
           AND m.created_at BETWEEN $3 AND $4
         ORDER BY m.created_at
-    """, agent_id, ws_id, start, end)
+    """,
+        agent_id,
+        ws_id,
+        start,
+        end,
+    )
 
 
 async def _llm_retry(func, *args):
@@ -338,8 +426,7 @@ async def _llm_retry(func, *args):
         except Exception as e:
             if attempt < MAX_LLM_RETRIES - 1:
                 delay = LLM_DELAYS[attempt]
-                log.warning("LLM attempt %d failed: %r, retry in %ds",
-                           attempt + 1, e, delay)
+                log.warning("LLM attempt %d failed: %r, retry in %ds", attempt + 1, e, delay)
                 await asyncio.sleep(delay)
             else:
                 raise
@@ -347,12 +434,15 @@ async def _llm_retry(func, *args):
 
 async def recover_stuck_runs(pool, timeout_min=60):
     async with pool.acquire() as conn:
-        result = await conn.execute("""
+        result = await conn.execute(
+            """
             UPDATE cell_runs SET status='failed', finished_at=NOW(),
               errors = errors || '["stuck_recovery"]'::jsonb
             WHERE status='running'
               AND started_at < NOW() - ($1 || ' minutes')::interval
-        """, str(timeout_min))
+        """,
+            str(timeout_min),
+        )
         count = int(result.split()[-1]) if result else 0
         if count:
             log.warning("Recovered %d stuck cell runs", count)
@@ -362,6 +452,7 @@ async def recover_stuck_runs(pool, timeout_min=60):
 # LLM calls (LangChain — replaces raw httpx to DeepSeek)
 # ---------------------------------------------------------------------------
 
+
 async def _llm_call(system_prompt: str, user_prompt: str) -> str:
     # If a per-run config is active (set by _run_from_config/trigger), route to its
     # provider+model with its resolved key. This makes builtin cells honor the
@@ -369,15 +460,14 @@ async def _llm_call(system_prompt: str, user_prompt: str) -> str:
     _ctx = _active_cell.get()
     if _ctx and _ctx.get("key"):
         return await _llm_call_with_key(
-            system_prompt, user_prompt,
-            _ctx.get("provider", "deepseek"),
-            _ctx.get("model", CELL_MODEL),
-            _ctx["key"])
+            system_prompt, user_prompt, _ctx.get("provider", "deepseek"), _ctx.get("model", CELL_MODEL), _ctx["key"]
+        )
 
     global _CELL_LLM
     if _CELL_LLM is None:
         try:
             from ecodb_langchain.cell_agent import make_cell_llm, acell_llm_call as _acell
+
             _CELL_LLM = make_cell_llm()
             _llm_call._acell = _acell
             log.info("Cell LLM: using LangChain engine")
@@ -418,16 +508,14 @@ async def _get_provider_key(conn, provider: str) -> str:
     On decrypt failure (rotated ENCRYPTION_KEY), falls through to env var if available,
     else raises a diagnostic error pointing at the rotation cause (VS_L4_1).
     """
-    row = await conn.fetchrow(
-        "SELECT api_key_encrypted FROM llm_provider_keys WHERE provider=$1",
-        provider)
+    row = await conn.fetchrow("SELECT api_key_encrypted FROM llm_provider_keys WHERE provider=$1", provider)
     if row:
         import crypto
+
         try:
             return crypto.decrypt(row["api_key_encrypted"])
         except Exception as dec_err:
-            log.error("Provider key for '%s' cannot be decrypted (ENCRYPTION_KEY rotated?): %s",
-                      provider, dec_err)
+            log.error("Provider key for '%s' cannot be decrypted (ENCRYPTION_KEY rotated?): %s", provider, dec_err)
             # Fall through to env var rather than hard-fail all cell runs.
     env_key = os.environ.get(f"{provider.upper()}_API_KEY", "")
     if not env_key:
@@ -437,7 +525,8 @@ async def _get_provider_key(conn, provider: str) -> str:
             raise RuntimeError(
                 f"Provider key for '{provider}' cannot be decrypted — ENCRYPTION_KEY may have "
                 f"been rotated. Re-encrypt stored keys or restore the original key. "
-                f"No env-var fallback ({provider.upper()}_API_KEY) is set.")
+                f"No env-var fallback ({provider.upper()}_API_KEY) is set."
+            )
         raise RuntimeError(f"No API key for provider '{provider}' — neither DB nor env var")
     return env_key
 
@@ -451,6 +540,7 @@ _PROVIDER_URLS = {
 # a cell run; read by _llm_call and the prompt builders. Holds the RESOLVED config:
 # {"provider", "model", "key" (decrypted), "template" (str|None)}. None → default path.
 import contextvars as _contextvars
+
 _active_cell: "_contextvars.ContextVar[dict | None]" = _contextvars.ContextVar("active_cell", default=None)
 # #716: what answered each LLM call. DeepSeek ships new builds under the SAME name
 # (V4.1-Flash-1017 on 17-oct, still «deepseek-flash»), and its `model` field echoes the alias
@@ -501,12 +591,10 @@ def _active_prompt(default_prompt: str) -> str:
     return default_prompt
 
 
-async def _llm_call_with_key(system_prompt: str, user_prompt: str,
-                              provider: str, model: str, key: str) -> str:
+async def _llm_call_with_key(system_prompt: str, user_prompt: str, provider: str, model: str, key: str) -> str:
     """Provider routing given an already-resolved key (no DB lookup)."""
     if provider == "anthropic":
-        headers = {"x-api-key": key, "content-type": "application/json",
-                   "anthropic-version": "2023-06-01"}
+        headers = {"x-api-key": key, "content-type": "application/json", "anthropic-version": "2023-06-01"}
         body = {
             "model": model,
             "max_tokens": CELL_LLM_MAX_TOKENS,
@@ -515,8 +603,7 @@ async def _llm_call_with_key(system_prompt: str, user_prompt: str,
             "temperature": 0.3,
         }
         async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
-            resp = await client.post(f"{_PROVIDER_URLS['anthropic']}/v1/messages",
-                                     json=body, headers=headers)
+            resp = await client.post(f"{_PROVIDER_URLS['anthropic']}/v1/messages", json=body, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             _note_responded_model(data)
@@ -541,14 +628,14 @@ async def _llm_call_with_key(system_prompt: str, user_prompt: str,
         return data["choices"][0]["message"]["content"]
 
 
-async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
-                            provider: str = "deepseek", model: str = CELL_MODEL) -> str:
+async def _llm_call_routed(
+    conn, system_prompt: str, user_prompt: str, provider: str = "deepseek", model: str = CELL_MODEL
+) -> str:
     """Route LLM call to correct provider with DB key lookup."""
     key = await _get_provider_key(conn, provider)
 
     if provider == "anthropic":
-        headers = {"x-api-key": key, "content-type": "application/json",
-                   "anthropic-version": "2023-06-01"}
+        headers = {"x-api-key": key, "content-type": "application/json", "anthropic-version": "2023-06-01"}
         body = {
             "model": model,
             "max_tokens": CELL_LLM_MAX_TOKENS,
@@ -557,8 +644,7 @@ async def _llm_call_routed(conn, system_prompt: str, user_prompt: str,
             "temperature": 0.3,
         }
         async with httpx.AsyncClient(timeout=CELL_LLM_TIMEOUT) as client:
-            resp = await client.post(f"{_PROVIDER_URLS['anthropic']}/v1/messages",
-                                     json=body, headers=headers)
+            resp = await client.post(f"{_PROVIDER_URLS['anthropic']}/v1/messages", json=body, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             _note_responded_model(data)
@@ -592,11 +678,15 @@ _STYLE_NOTES = {
 }
 
 
-def _build_cell_system_prompt(agent_identifier: str, identity_text: str,
-                               high_weight_mems: list, prev_narratives: list,
-                               calibration_texts: list = None,
-                               voice_samples: list = None,
-                               cross_agent_context: dict = None) -> str:
+def _build_cell_system_prompt(
+    agent_identifier: str,
+    identity_text: str,
+    high_weight_mems: list,
+    prev_narratives: list,
+    calibration_texts: list = None,
+    voice_samples: list = None,
+    cross_agent_context: dict = None,
+) -> str:
     hw_section = ""
     if high_weight_mems:
         hw_lines = []
@@ -763,10 +853,17 @@ Return JSON:
 "lo_que_evitas": "1-2 observaciones sobre patrones puntos ciegos o contradicciones. Con dientes. Sin amabilidad."}}"""
 
 
-async def _label_clusters_llm(memories, labels, identity, agent_identifier,
-                               high_weight_mems=None, prev_narratives=None,
-                               calibration_texts=None, voice_samples=None,
-                               cross_agent_context=None):
+async def _label_clusters_llm(
+    memories,
+    labels,
+    identity,
+    agent_identifier,
+    high_weight_mems=None,
+    prev_narratives=None,
+    calibration_texts=None,
+    voice_samples=None,
+    cross_agent_context=None,
+):
     identity_text = "\n---\n".join(r["content"] for r in identity) if identity else "(no identity fragments)"
     cluster_groups = {}
     for idx, label in enumerate(labels):
@@ -777,19 +874,21 @@ async def _label_clusters_llm(memories, labels, identity, agent_identifier,
 
     mem_texts = []
     for i, m in enumerate(memories):
-        w = m.get('weight', 0.5)
-        created = str(m.get('created_at', ''))[:19]
-        author = m.get('agent_identifier', '') or ''
-        content = m['content'] if w >= 0.7 else m['content'][:800]
-        mem_texts.append(
-            f"[{i}] (w={w:.2f}, {m['type']}, author={author}, created={created}) "
-            f"{_sanitize(content)}")
+        w = m.get("weight", 0.5)
+        created = str(m.get("created_at", ""))[:19]
+        author = m.get("agent_identifier", "") or ""
+        content = m["content"] if w >= 0.7 else m["content"][:800]
+        mem_texts.append(f"[{i}] (w={w:.2f}, {m['type']}, author={author}, created={created}) {_sanitize(content)}")
 
     system_prompt = _build_cell_system_prompt(
-        agent_identifier, identity_text,
-        high_weight_mems or [], prev_narratives or [],
-        calibration_texts or [], voice_samples or [],
-        cross_agent_context or {})
+        agent_identifier,
+        identity_text,
+        high_weight_mems or [],
+        prev_narratives or [],
+        calibration_texts or [],
+        voice_samples or [],
+        cross_agent_context or {},
+    )
 
     async def _ask(groups):
         # #808: only the memories of these groups go in, each with its ORIGINAL index, so a half's
@@ -814,13 +913,20 @@ Reflect on each cluster. What happened? What mattered? What do you want your fut
                 raise
             keys = list(groups)
             half = len(keys) // 2
-            log.warning("#808 cell answer unreadable for %d clusters of %s: asking in halves (%d + %d)",
-                        len(keys), agent_identifier, half, len(keys) - half)
+            log.warning(
+                "#808 cell answer unreadable for %d clusters of %s: asking in halves (%d + %d)",
+                len(keys),
+                agent_identifier,
+                half,
+                len(keys) - half,
+            )
             a = await _ask({k: groups[k] for k in keys[:half]})
             b = await _ask({k: groups[k] for k in keys[half:]})
-            return {"clusters": (a.get("clusters") or []) + (b.get("clusters") or []),
-                    "arcos_que_cruzan": a.get("arcos_que_cruzan") or b.get("arcos_que_cruzan"),
-                    "lo_que_evitas": a.get("lo_que_evitas") or b.get("lo_que_evitas")}
+            return {
+                "clusters": (a.get("clusters") or []) + (b.get("clusters") or []),
+                "arcos_que_cruzan": a.get("arcos_que_cruzan") or b.get("arcos_que_cruzan"),
+                "lo_que_evitas": a.get("lo_que_evitas") or b.get("lo_que_evitas"),
+            }
 
     parsed = await _ask(cluster_groups)
     result = []
@@ -831,8 +937,11 @@ Reflect on each cluster. What happened? What mattered? What do you want your fut
         member_ids = [memories[i]["id"] for i in indices if 0 <= i < len(memories)]
         if len(member_ids) < MIN_CLUSTER_SIZE:
             continue
-        raw_embs = [_parse_embedding(memories[i]["embedding"]) for i in indices
-                    if i < len(memories) and memories[i].get("embedding")]
+        raw_embs = [
+            _parse_embedding(memories[i]["embedding"])
+            for i in indices
+            if i < len(memories) and memories[i].get("embedding")
+        ]
         embeddings = [e for e in raw_embs if e is not None]
         centroid = None
         if embeddings:
@@ -840,15 +949,17 @@ Reflect on each cluster. What happened? What mattered? What do you want your fut
         meta = {"confidence": cl.get("confidence", 0.5)}
         if cl.get("anti_lens"):
             meta["anti_lens"] = cl["anti_lens"]
-        result.append({
-            "label": cl.get("label", "unlabeled")[:200],
-            "detail": cl.get("detail"),
-            "narrative": cl.get("narrative"),
-            "centroid": centroid,
-            "member_ids": member_ids,
-            "pattern_flags": {},
-            "metadata": meta,
-        })
+        result.append(
+            {
+                "label": cl.get("label", "unlabeled")[:200],
+                "detail": cl.get("detail"),
+                "narrative": cl.get("narrative"),
+                "centroid": centroid,
+                "member_ids": member_ids,
+                "pattern_flags": {},
+                "metadata": meta,
+            }
+        )
     # Dedup: member overlap >80% OR centroid similarity >0.92
     deduped = []
     for c in result:
@@ -869,8 +980,7 @@ Reflect on each cluster. What happened? What mattered? What do you want your fut
                     break
         if not duplicate:
             deduped.append(c)
-    return (deduped, _reflection_text(parsed.get("arcos_que_cruzan")),
-            _reflection_text(parsed.get("lo_que_evitas")))
+    return (deduped, _reflection_text(parsed.get("arcos_que_cruzan")), _reflection_text(parsed.get("lo_que_evitas")))
 
 
 LOOSE_LABEL = "Sueltas de la semana"
@@ -904,15 +1014,17 @@ def _cover_uncovered(memories, clusters):
         added.append(str(m["id"]))
     if rest:
         embs = [e for e in (_parse_embedding(m.get("embedding")) for m in rest) if e is not None and e.size]
-        clusters = list(clusters) + [{
-            "label": LOOSE_LABEL,
-            "detail": "\n".join(f"- {str(m.get('content') or '')[:300]}" for m in rest),
-            "narrative": None,
-            "centroid": _vec_literal(np.mean(embs, axis=0)) if embs and len({e.shape for e in embs}) == 1 else None,
-            "member_ids": [m["id"] for m in rest],
-            "pattern_flags": {},
-            "metadata": {"assigned_by": "coverage", "coverage_added": [str(m["id"]) for m in rest]},
-        }]
+        clusters = list(clusters) + [
+            {
+                "label": LOOSE_LABEL,
+                "detail": "\n".join(f"- {str(m.get('content') or '')[:300]}" for m in rest),
+                "narrative": None,
+                "centroid": _vec_literal(np.mean(embs, axis=0)) if embs and len({e.shape for e in embs}) == 1 else None,
+                "member_ids": [m["id"] for m in rest],
+                "pattern_flags": {},
+                "metadata": {"assigned_by": "coverage", "coverage_added": [str(m["id"]) for m in rest]},
+            }
+        ]
         added += [str(m["id"]) for m in rest]
     return clusters, added
 
@@ -925,13 +1037,19 @@ async def _decisiones_en_vigor(conn, agent_id, p_start, p_end):
     and author, for templates that carry {decisiones_en_vigor}. The section is built from these and
     not from what the model takes for a rule; a memory whose metadata has superseded_by is left out,
     because an obsolete rule in the section does more harm than none (Prima, arXiv 2610.36308)."""
-    rows = await conn.fetch("""
+    rows = await conn.fetch(
+        """
         SELECT m.id, m.created_at, m.content, m.metadata, a.identifier AS autor
         FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
         WHERE m.agent_id = $1 AND m.type::text = ANY($2::text[]) AND m.staleness <> 'archived'
           AND m.created_at >= $3::date AND m.created_at < $4::date + 1
         ORDER BY m.created_at
-    """, agent_id, ["decision", "acuerdo"], p_start, p_end)
+    """,
+        agent_id,
+        ["decision", "acuerdo"],
+        p_start,
+        p_end,
+    )
     lines = []
     for r in rows:
         meta = r["metadata"] or {}
@@ -946,10 +1064,13 @@ async def _decisiones_en_vigor(conn, agent_id, p_start, p_end):
 
 async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
     ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
-    identity = await conn.fetch("""
+    identity = await conn.fetch(
+        """
         SELECT content FROM agent_identity WHERE agent_id=$1
         ORDER BY version DESC, fragment_idx
-    """, agent_id)
+    """,
+        agent_id,
+    )
     identity_text = "\n---\n".join(r["content"] for r in identity) if identity else "(no identity)"
     style = _STYLE_NOTES.get(ident, "")
 
@@ -957,8 +1078,7 @@ async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
     period_name = level_names.get(level, level)
     # Sources are one level below: a quarterly eats monthlies, not weeklies.
     # The user prompt must agree with the template ("recibes las MENSUALES").
-    source_names = {"monthly": "semanales", "quarterly": "mensuales",
-                    "yearly": "trimestrales"}
+    source_names = {"monthly": "semanales", "quarterly": "mensuales", "yearly": "trimestrales"}
     source_name = source_names.get(level, "previas")
 
     cluster_texts = []
@@ -966,20 +1086,25 @@ async def _label_higher_cluster(clusters, level, agent_id, conn, p_start=None):
         narrative = c.get("narrative") or c.get("detail") or "(sin narrativa)"
         cluster_texts.append(f"=== {c['label']} ({c['period_start']} a {c['period_end']}) ===\n{narrative}")
 
-    prev_monthly = await conn.fetchrow("""
+    prev_monthly = await conn.fetchrow(
+        """
         SELECT label, narrative, period_start, period_end FROM memory_clusters
         WHERE agent_id=$1 AND level=$2 AND status='active' AND narrative IS NOT NULL
           AND period_end < $3
         ORDER BY period_end DESC LIMIT 1
-    """, agent_id, level, p_start)
+    """,
+        agent_id,
+        level,
+        p_start,
+    )
     prev_monthly_section = ""
     if prev_monthly and prev_monthly["narrative"]:
         prev_monthly_section = f"""
 
 ## Narrativa del {period_name} anterior (para continuidad longitudinal)
 
-=== {prev_monthly['label']} ({prev_monthly['period_start']} a {prev_monthly['period_end']}) ===
-{prev_monthly['narrative']}
+=== {prev_monthly["label"]} ({prev_monthly["period_start"]} a {prev_monthly["period_end"]}) ===
+{prev_monthly["narrative"]}
 
 Si detectas patrones que aparecen en AMBOS periodos, escalalo: "esto no es un punto ciego de este {period_name} — es un patron de dos {period_name}s." La metacognicion longitudinal es la mas valiosa."""
 
@@ -988,7 +1113,8 @@ Si detectas patrones que aparecen en AMBOS periodos, escalalo: "esto no es un pu
         decisiones = ""
         if _DECISIONES_PLACEHOLDER in _ctx["template"]:
             decisiones = await _decisiones_en_vigor(
-                conn, agent_id, min(c["period_start"] for c in clusters), max(c["period_end"] for c in clusters))
+                conn, agent_id, min(c["period_start"] for c in clusters), max(c["period_end"] for c in clusters)
+            )
         system_prompt = _safe_format(
             _ctx["template"],
             agent_identifier=ident,
@@ -998,7 +1124,9 @@ Si detectas patrones que aparecen en AMBOS periodos, escalalo: "esto no es un pu
             prev_monthly_section=prev_monthly_section,
             decisiones_en_vigor=decisiones,
         )
-        user_prompt = f"Estas son tus narrativas {source_name} del {period_name}:\n\n" + "\n\n---\n\n".join(cluster_texts)
+        user_prompt = f"Estas son tus narrativas {source_name} del {period_name}:\n\n" + "\n\n---\n\n".join(
+            cluster_texts
+        )
         raw = await _llm_call(system_prompt, user_prompt)
         return json.loads(raw)
 
@@ -1067,31 +1195,32 @@ async def _week_rollup_template(conn, agent_id):
     the weekly config's prompt_template_id does not reach it. An agent can override it with
     `config.week_rollup_template_id` in its weekly consolidation row; without it, the shared
     template by name, as before."""
-    cfg = await _load_cell_config(conn, agent_id, 'consolidation', 'weekly')
+    cfg = await _load_cell_config(conn, agent_id, "consolidation", "weekly")
     tid = (cfg.get("config") or {}).get("week_rollup_template_id")
     if tid:
         own = await conn.fetchval("SELECT content FROM cell_prompt_templates WHERE id=$1", int(tid))
         if own:
             return own
         log.warning("week rollup template %s of agent %d not found: using the shared one", tid, agent_id)
-    return await conn.fetchval(
-        "SELECT content FROM cell_prompt_templates WHERE name='CellAgent Week Rollup'")
+    return await conn.fetchval("SELECT content FROM cell_prompt_templates WHERE name='CellAgent Week Rollup'")
 
 
 async def _label_week_rollup(clusters, agent_id, conn):
     ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
-    identity = await conn.fetch("""
+    identity = await conn.fetch(
+        """
         SELECT content FROM agent_identity WHERE agent_id=$1
         ORDER BY version DESC, fragment_idx
-    """, agent_id)
+    """,
+        agent_id,
+    )
     identity_text = "\n---\n".join(r["content"] for r in identity) if identity else "(no identity)"
     style = _STYLE_NOTES.get(ident, "")
 
     template = await _week_rollup_template(conn, agent_id)
     decisiones = ""
     if template and _DECISIONES_PLACEHOLDER in template:
-        decisiones = await _decisiones_en_vigor(
-            conn, agent_id, clusters[0]["period_start"], clusters[0]["period_end"])
+        decisiones = await _decisiones_en_vigor(conn, agent_id, clusters[0]["period_start"], clusters[0]["period_end"])
     system_prompt = _safe_format(
         template or _WEEK_ROLLUP_FALLBACK,
         agent_identifier=ident,
@@ -1100,8 +1229,8 @@ async def _label_week_rollup(clusters, agent_id, conn):
         decisiones_en_vigor=decisiones,
     )
     cluster_texts = [
-        f"=== {c['label']} ===\n{c.get('narrative') or c.get('detail') or '(sin narrativa)'}"
-        for c in clusters]
+        f"=== {c['label']} ===\n{c.get('narrative') or c.get('detail') or '(sin narrativa)'}" for c in clusters
+    ]
     # #702: the memories coverage added to a cluster after its narrative was written; the rollup sees them
     # so it can name the ones that weigh.
     added = []
@@ -1113,19 +1242,24 @@ async def _label_week_rollup(clusters, agent_id, conn):
             added += meta.get("coverage_added") or []
     if added:
         rows = await conn.fetch("SELECT content, weight FROM memories WHERE id = ANY($1::uuid[])", added)
-        cluster_texts.append("=== También de esta semana (no estaban en ningún relato) ===\n" + "\n".join(
-            f"- (w={r['weight']:.2f}) {str(r['content'])[:300]}" for r in rows))
+        cluster_texts.append(
+            "=== También de esta semana (no estaban en ningún relato) ===\n"
+            + "\n".join(f"- (w={r['weight']:.2f}) {str(r['content'])[:300]}" for r in rows)
+        )
     user_prompt = (
         f"Estos son los clusters tematicos de tu semana "
-        f"{clusters[0]['period_start']} a {clusters[0]['period_end']}:\n\n"
-        + "\n\n---\n\n".join(cluster_texts))
+        f"{clusters[0]['period_start']} a {clusters[0]['period_end']}:\n\n" + "\n\n---\n\n".join(cluster_texts)
+    )
     raw = await _llm_call(system_prompt, user_prompt)
     data = json.loads(raw)
     # #813: an answer without narrative or label was stored as an «unlabeled» rollup with no
     # narrative, and the monthly lost that week. Raising makes _llm_retry ask again; if it never
     # comes, _ensure_week_rollup inserts nothing and the next pass rebuilds it.
-    if not isinstance(data, dict) or not str(data.get("narrative") or "").strip() \
-            or not str(data.get("label") or "").strip():
+    if (
+        not isinstance(data, dict)
+        or not str(data.get("narrative") or "").strip()
+        or not str(data.get("label") or "").strip()
+    ):
         raise ValueError("week rollup answer has no narrative or no label")
     return data
 
@@ -1140,27 +1274,35 @@ async def _ensure_week_rollup(conn, agent_id, week_start, week_end):
     Idempotent; safe to call on every consolidation pass (backfill included).
     """
     try:
-        if await conn.fetchval("""
+        if await conn.fetchval(
+            """
             SELECT 1 FROM memory_clusters
             WHERE agent_id=$1 AND level='weekly' AND status='active'
               AND period_start=$2 AND period_end=$3 AND source_ids IS NOT NULL
             LIMIT 1
-        """, agent_id, week_start, week_end):
+        """,
+            agent_id,
+            week_start,
+            week_end,
+        ):
             return None
-        sources = await conn.fetch("""
+        sources = await conn.fetch(
+            """
             SELECT * FROM memory_clusters
             WHERE agent_id=$1 AND level='weekly' AND status='active'
               AND period_start=$2 AND period_end=$3 AND source_ids IS NULL
             ORDER BY created_at
-        """, agent_id, week_start, week_end)
+        """,
+            agent_id,
+            week_start,
+            week_end,
+        )
         if not sources:
             return None
 
-        label_data = await _llm_retry(
-            _label_week_rollup, [dict(s) for s in sources], agent_id, conn)
+        label_data = await _llm_retry(_label_week_rollup, [dict(s) for s in sources], agent_id, conn)
 
-        pairs = [(_parse_embedding(s["centroid"]), len(s["member_ids"]))
-                 for s in sources if s["centroid"]]
+        pairs = [(_parse_embedding(s["centroid"]), len(s["member_ids"])) for s in sources if s["centroid"]]
         pairs = [(c, sz) for c, sz in pairs if c is not None]
         centroid = None
         if pairs:
@@ -1170,38 +1312,41 @@ async def _ensure_week_rollup(conn, agent_id, week_start, week_end):
                 weighted += c * s
             centroid = _vec_literal(weighted / total)
 
-        all_members = list(set(
-            mid for s in sources for mid in s["member_ids"]))[:500]
-        ident = await conn.fetchval(
-            "SELECT identifier FROM agents WHERE id=$1", agent_id)
+        all_members = list(set(mid for s in sources for mid in s["member_ids"]))[:500]
+        ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
         meta = label_data.get("metadata", {})
-        meta['cell_generated'] = True
-        meta['cell_model'] = _active_model()
-        meta['cell_agent'] = f"{ident}.memoria"
-        meta['week_rollup'] = True
+        meta["cell_generated"] = True
+        meta["cell_model"] = _active_model()
+        meta["cell_agent"] = f"{ident}.memoria"
+        meta["week_rollup"] = True
 
-        rollup_id = await conn.fetchval("""
+        rollup_id = await conn.fetchval(
+            """
             INSERT INTO memory_clusters
                 (agent_id, workspace_id, level, label, detail,
                  narrative, narrated_at, centroid, member_ids, source_ids,
                  metadata, period_start, period_end, status)
             VALUES ($1,$2,'weekly',$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,'active')
             RETURNING id
-        """, agent_id, sources[0]["workspace_id"],
+        """,
+            agent_id,
+            sources[0]["workspace_id"],
             label_data.get("label", "unlabeled"),
             label_data.get("detail"),
             label_data.get("narrative"),
-            centroid, all_members,
+            centroid,
+            all_members,
             [s["id"] for s in sources],
-            json.dumps(meta), week_start, week_end)
-        log.info("Week rollup created for agent %d %s-%s (%d sources)",
-                 agent_id, week_start, week_end, len(sources))
+            json.dumps(meta),
+            week_start,
+            week_end,
+        )
+        log.info("Week rollup created for agent %d %s-%s (%d sources)", agent_id, week_start, week_end, len(sources))
         return rollup_id
     except Exception:
         # The rollup is an enhancement layer — its failure must never sink
         # the thematic consolidation that already succeeded.
-        log.exception("Week rollup failed for agent %d %s-%s",
-                      agent_id, week_start, week_end)
+        log.exception("Week rollup failed for agent %d %s-%s", agent_id, week_start, week_end)
         return None
 
 
@@ -1221,12 +1366,14 @@ async def _extract_temporal_signals(recent_memories):
                 start = datetime.fromisoformat(parsed["start"])
                 end = datetime.fromisoformat(parsed["end"])
                 if end > start:
-                    results.append({
-                        "memory_id": mem["id"],
-                        "start": start,
-                        "end": end,
-                        "confidence": float(parsed.get("confidence", 0.5)),
-                    })
+                    results.append(
+                        {
+                            "memory_id": mem["id"],
+                            "start": start,
+                            "end": end,
+                            "confidence": float(parsed.get("confidence", 0.5)),
+                        }
+                    )
             except (ValueError, TypeError):
                 pass
     return results
@@ -1274,18 +1421,23 @@ TENSION_LIVE_WEEK_DAYS = 8
 
 
 async def _check_tension_cooldown(conn, agent_id, observed_trait):
-    recent = await conn.fetchval("""
+    recent = await conn.fetchval(
+        """
         SELECT id FROM memories
         WHERE agent_id=$1 AND 'identity_tension' = ANY(tags)
           AND metadata->>'observed_trait' = $2
           AND metadata->>'tension_status' = 'dismissed'
           AND (metadata->>'tension_cooldown_until')::timestamptz > NOW()
-    """, agent_id, observed_trait)
+    """,
+        agent_id,
+        observed_trait,
+    )
     return recent is not None
 
 
-async def _detect_identity_tensions(conn, agent_id, ws_id, identity_fragments, memories,
-                                    week_start=None, week_end=None):
+async def _detect_identity_tensions(
+    conn, agent_id, ws_id, identity_fragments, memories, week_start=None, week_end=None
+):
     """Compare observed behavior (from memories) vs declared identity (from fragments).
     Creates at most MAX_NEW_TENSIONS_PER_RUN tension memories.
     #816: with a week, only a recently closed one, and never a second one for the same week."""
@@ -1296,11 +1448,15 @@ async def _detect_identity_tensions(conn, agent_id, ws_id, identity_fragments, m
         if w_end < date.today() - timedelta(days=TENSION_LIVE_WEEK_DAYS):
             log.info("Agent %d %s-%s is a rebuilt week: no identity tension", agent_id, week_start, week_end)
             return 0
-        if await conn.fetchval("""
+        if await conn.fetchval(
+            """
             SELECT 1 FROM memories
             WHERE agent_id=$1 AND 'identity_tension' = ANY(tags) AND metadata->>'week_start' = $2
             LIMIT 1
-        """, agent_id, str(week_start)):
+        """,
+            agent_id,
+            str(week_start),
+        ):
             return 0
 
     def _sanitize_for_prompt(text):
@@ -1313,10 +1469,10 @@ async def _detect_identity_tensions(conn, agent_id, ws_id, identity_fragments, m
         t = m["type"]
         type_counts[t] = type_counts.get(t, 0) + 1
     total = sum(type_counts.values())
-    observed_profile = ", ".join(f"{t}:{c}/{total}" for t, c in
-                                sorted(type_counts.items(), key=lambda x: -x[1]))
+    observed_profile = ", ".join(f"{t}:{c}/{total}" for t, c in sorted(type_counts.items(), key=lambda x: -x[1]))
 
     import secrets
+
     _delim = f"IDENTITY_{secrets.token_hex(8)}"
     prompt = f"""Compare this agent's observed behavior with their declared identity.
 
@@ -1339,9 +1495,7 @@ Rules:
 - Do NOT create tensions for normal variation"""
 
     try:
-        raw = await _llm_call(
-            "You are an identity divergence detector. Stateless. Observational only.",
-            prompt)
+        raw = await _llm_call("You are an identity divergence detector. Stateless. Observational only.", prompt)
         parsed = json.loads(raw)
     except Exception:
         return 0
@@ -1359,15 +1513,14 @@ Rules:
             t_type = "contradiction"
         if await _check_tension_cooldown(conn, agent_id, observed):
             continue
-        proj_id = await conn.fetchval(
-            "SELECT id FROM projects WHERE workspace_id=$1 AND is_common=true LIMIT 1",
-            ws_id)
+        proj_id = await conn.fetchval("SELECT id FROM projects WHERE workspace_id=$1 AND is_common=true LIMIT 1", ws_id)
         if proj_id is None:
             log.warning("Agent %d ws %d: no is_common project, skipping tension", agent_id, ws_id)
             continue
         evidence_ids = [str(m["id"]) for m in memories[:5]]
         content = f"Identity tension: {observed} vs {tension.get('declared_trait', '')}"
-        await conn.execute("""
+        await conn.execute(
+            """
             INSERT INTO memories
                 (user_id, agent_id, workspace_id, project_id,
                  type, content, metadata, weight, weight_base, tags, embedding)
@@ -1381,17 +1534,23 @@ Rules:
               ARRAY['identity_tension'],
               $6::vector
             )
-        """, agent_id, ws_id, proj_id,
+        """,
+            agent_id,
+            ws_id,
+            proj_id,
             content,
-            json.dumps({
-                "observed_trait": observed,
-                "declared_trait": tension.get("declared_trait", ""),
-                "tension_type": t_type,
-                "evidence_memory_ids": evidence_ids,
-                "tension_status": "open",
-                **({"week_start": str(week_start), "week_end": str(week_end)} if week_start else {}),
-            }),
-            await _embed_for_memory(content))
+            json.dumps(
+                {
+                    "observed_trait": observed,
+                    "declared_trait": tension.get("declared_trait", ""),
+                    "tension_type": t_type,
+                    "evidence_memory_ids": evidence_ids,
+                    "tension_status": "open",
+                    **({"week_start": str(week_start), "week_end": str(week_end)} if week_start else {}),
+                }
+            ),
+            await _embed_for_memory(content),
+        )
         created += 1
     return created
 
@@ -1400,11 +1559,12 @@ Rules:
 # Distance matrix
 # ---------------------------------------------------------------------------
 
+
 def _parse_embedding(raw):
     if raw is None:
         return None
     if isinstance(raw, str):
-        return np.fromstring(raw.strip('[]'), sep=',')
+        return np.fromstring(raw.strip("[]"), sep=",")
     if isinstance(raw, (list, tuple)):
         return np.array(raw, dtype=np.float32)
     return np.asarray(raw)
@@ -1424,8 +1584,8 @@ async def _compute_distances(conn, memories):
         cos_sim[i][i] = 1.0
 
     entity_rows = await conn.fetch(
-        "SELECT memory_id, entity_node_id FROM memory_entity_links WHERE memory_id = ANY($1::uuid[])",
-        mem_ids)
+        "SELECT memory_id, entity_node_id FROM memory_entity_links WHERE memory_id = ANY($1::uuid[])", mem_ids
+    )
     entity_sets = {idx: set() for idx in range(n)}
     mid_to_idx = {mid: idx for idx, mid in enumerate(mem_ids)}
     for r in entity_rows:
@@ -1433,12 +1593,15 @@ async def _compute_distances(conn, memories):
         if idx is not None:
             entity_sets[idx].add(r["entity_node_id"])
 
-    pred_rows = await conn.fetch("""
+    pred_rows = await conn.fetch(
+        """
         SELECT DISTINCT mel.memory_id, t.predicate FROM triples t
         JOIN memory_entity_links mel
           ON mel.entity_node_id IN (t.subject_id, t.object_id)
         WHERE mel.memory_id = ANY($1::uuid[])
-    """, mem_ids)
+    """,
+        mem_ids,
+    )
     predicate_sets = {idx: set() for idx in range(n)}
     for r in pred_rows:
         idx = mid_to_idx.get(r["memory_id"])
@@ -1490,8 +1653,8 @@ def _cluster_agglomerative(distance_matrix, threshold):
     if n < 2:
         return np.array([1] * n)
     condensed = distance_matrix[np.triu_indices(n, k=1)]
-    Z = linkage(condensed, method='average')
-    labels = fcluster(Z, t=threshold, criterion='distance')
+    Z = linkage(condensed, method="average")
+    labels = fcluster(Z, t=threshold, criterion="distance")
     return _split_large_clusters(labels, distance_matrix)
 
 
@@ -1506,10 +1669,10 @@ def _split_large_clusters(labels, distance_matrix):
         sub_dist = distance_matrix[np.ix_(indices, indices)]
         n = len(sub_dist)
         condensed = sub_dist[np.triu_indices(n, k=1)]
-        Z = linkage(condensed, method='average')
+        Z = linkage(condensed, method="average")
         current_t = 0.5
         for attempt in range(5):
-            sub_labels = fcluster(Z, t=current_t, criterion='distance')
+            sub_labels = fcluster(Z, t=current_t, criterion="distance")
             max_size = max(np.bincount(sub_labels)[1:]) if len(set(sub_labels)) > 1 else len(indices)
             if max_size <= MAX_CLUSTER_MEMBERS:
                 break
@@ -1524,11 +1687,12 @@ def _split_large_clusters(labels, distance_matrix):
 # Cell: consolidation (weekly)
 # ---------------------------------------------------------------------------
 
+
 async def run_consolidation(pool, agent_id, week_start, week_end):
     run_id = None
     org_id = None
     async with pool.acquire() as conn:
-        lock = _lock_key(agent_id, 'consolidation', week_start, week_end)
+        lock = _lock_key(agent_id, "consolidation", week_start, week_end)
         acquired = await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock)
         if not acquired:
             log.info("Lock held for agent %d %s-%s, skipping", agent_id, week_start, week_end)
@@ -1541,36 +1705,44 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                 await _ensure_week_rollup(conn, agent_id, week_start, week_end)
                 return None
 
-            run_id = await _create_run(conn, 'consolidation', agent_id, week_start, week_end)
+            run_id = await _create_run(conn, "consolidation", agent_id, week_start, week_end)
             ws_id, org_id, ident = await _resolve_context(conn, agent_id)
             if ws_id is None:
                 log.info("Agent %d has no memories, skipping", agent_id)
                 await _complete_run(conn, run_id, 0)
                 return run_id
 
-            await _broadcast_sse('cell.run.started', {
-                'run_id': str(run_id), 'cell_type': 'consolidation',
-                'agent_identifier': ident}, org_id)
+            await _broadcast_sse(
+                "cell.run.started",
+                {"run_id": str(run_id), "cell_type": "consolidation", "agent_identifier": ident},
+                org_id,
+            )
 
             # code-2 review: fetch the week itself (end exclusive-ish: next midnight, filtered below),
             # so margin rows can't crowd in-period ones out of the MAX_MEMORIES weight sample.
-            memories = await _fetch_memories(
-                conn, agent_id, ws_id,
-                week_start,
-                week_end + timedelta(days=1))
+            memories = await _fetch_memories(conn, agent_id, ws_id, week_start, week_end + timedelta(days=1))
             # #362: the +-3 day margin let boundary memories be clustered in two adjacent weeks,
             # giving twin clusters (same members, same centroid, two narratives; 34 active pairs
             # measured 2026-09-25). A memory is woven once: drop the ones already in another
             # week's active thematic cluster.
-            _woven = {r['id'] for r in await conn.fetch("""
+            _woven = {
+                r["id"]
+                for r in await conn.fetch(
+                    """
                 SELECT DISTINCT unnest(member_ids) AS id FROM memory_clusters
                 WHERE agent_id=$1 AND level='weekly' AND status='active' AND source_ids IS NULL
                   AND NOT (period_start=$2 AND period_end=$3)
-            """, agent_id, week_start, week_end)}
+            """,
+                    agent_id,
+                    week_start,
+                    week_end,
+                )
+            }
             # code-2 review: members are the week's own memories only; the margin memories were
             # first-come (whichever week ran first kept them, across month boundaries too).
-            memories = [m for m in memories if m['id'] not in _woven
-                        and week_start <= m['created_at'].date() <= week_end]
+            memories = [
+                m for m in memories if m["id"] not in _woven and week_start <= m["created_at"].date() <= week_end
+            ]
 
             if not memories:
                 await _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
@@ -1580,49 +1752,69 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             # «Sueltas» cluster below, without the thematic LLM call.
             _small_week = len(memories) < MIN_CLUSTER_SIZE
 
-            identity = await conn.fetch("""
+            identity = await conn.fetch(
+                """
                 SELECT content, fragment_idx, version FROM agent_identity
                 WHERE agent_id=$1
                 ORDER BY version DESC, fragment_idx
-            """, agent_id)
+            """,
+                agent_id,
+            )
             lens_fragment_ids = [f"{r['version']}:{r['fragment_idx']}" for r in identity]
 
-            high_weight_mems = await conn.fetch("""
+            high_weight_mems = await conn.fetch(
+                """
                 SELECT content, type, weight, created_at FROM memories
                 WHERE agent_id=$1 AND workspace_id=$2
                   AND created_at BETWEEN $3 AND $4
                   AND weight >= 0.7
                 ORDER BY weight DESC, created_at DESC LIMIT 10
-            """, agent_id, ws_id,
+            """,
+                agent_id,
+                ws_id,
                 week_start - timedelta(days=3),
-                week_end + timedelta(days=3))
+                week_end + timedelta(days=3),
+            )
 
             # #702: nothing from AFTER the week goes into its context. Rebuilding March used to feed it
             # October's narratives, calibration and voice samples (the query had no date bound); the
             # higher levels already had it (period_end < p_start).
             _after_week = datetime.combine(week_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-            calibration_mems = await conn.fetch("""
+            calibration_mems = await conn.fetch(
+                """
                 SELECT content FROM memories
                 WHERE agent_id=$1 AND 'calibration' = ANY(tags) AND created_at < $2
                 ORDER BY weight DESC, created_at DESC LIMIT 5
-            """, agent_id, _after_week)
+            """,
+                agent_id,
+                _after_week,
+            )
 
-            voice_samples = await conn.fetch("""
+            voice_samples = await conn.fetch(
+                """
                 SELECT content FROM memories
                 WHERE agent_id=$1 AND type='momento' AND weight >= 0.7
                   AND length(content) > 200 AND created_at < $2
                 ORDER BY weight DESC, created_at DESC LIMIT 3
-            """, agent_id, _after_week)
+            """,
+                agent_id,
+                _after_week,
+            )
 
-            prev_narratives = await conn.fetch("""
+            prev_narratives = await conn.fetch(
+                """
                 SELECT label, narrative, period_start, period_end
                 FROM memory_clusters
                 WHERE agent_id=$1 AND status='active' AND narrative IS NOT NULL
                   AND period_end < $2
                 ORDER BY period_end DESC LIMIT 3
-            """, agent_id, week_start)
+            """,
+                agent_id,
+                week_start,
+            )
 
-            cross_agent = await conn.fetch("""
+            cross_agent = await conn.fetch(
+                """
                 SELECT a.identifier, mc.label
                 FROM memory_clusters mc
                 JOIN agents a ON a.id = mc.agent_id
@@ -1630,16 +1822,21 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                   AND mc.period_start >= $2 AND mc.period_end <= $3
                   AND mc.status = 'active'
                 ORDER BY a.identifier, mc.created_at DESC
-            """, agent_id, week_start, week_end)
+            """,
+                agent_id,
+                week_start,
+                week_end,
+            )
 
             if _small_week:
                 cluster_data, arcos_que_cruzan, lo_que_evitas = [], "", ""
             else:
                 distance_matrix = await _compute_distances(conn, memories)
 
-                cognition_class = await conn.fetchval(
-                    "SELECT cognition_class FROM agents WHERE id=$1", agent_id) or 'work'
-                threshold = THRESHOLD_NARRATIVE if cognition_class == 'narrative' else THRESHOLD_WORK
+                cognition_class = (
+                    await conn.fetchval("SELECT cognition_class FROM agents WHERE id=$1", agent_id) or "work"
+                )
+                threshold = THRESHOLD_NARRATIVE if cognition_class == "narrative" else THRESHOLD_WORK
                 labels = _cluster_agglomerative(distance_matrix, threshold)
 
                 cross_agent_summary = {}
@@ -1647,27 +1844,38 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                     cross_agent_summary.setdefault(r["identifier"], []).append(r["label"])
 
                 cluster_data, arcos_que_cruzan, lo_que_evitas = await _llm_retry(
-                    _label_clusters_llm, memories, labels, identity, ident,
+                    _label_clusters_llm,
+                    memories,
+                    labels,
+                    identity,
+                    ident,
                     [dict(r) for r in high_weight_mems],
                     [dict(r) for r in prev_narratives],
                     [r["content"] for r in calibration_mems],
                     [r["content"] for r in voice_samples],
-                    cross_agent_summary)
+                    cross_agent_summary,
+                )
             # #702 coverage: no memory of the week is left outside every cluster.
             cluster_data, _added = _cover_uncovered(memories, cluster_data)
             if _added:
-                log.info("#702 coverage: %d memories of agent %d %s-%s added deterministically",
-                         len(_added), agent_id, week_start, week_end)
+                log.info(
+                    "#702 coverage: %d memories of agent %d %s-%s added deterministically",
+                    len(_added),
+                    agent_id,
+                    week_start,
+                    week_end,
+                )
 
             async with conn.transaction():
                 cluster_records = []
                 for cd in cluster_data:
-                    cd_meta = cd.get('metadata', {})
-                    cd_meta['lens_fragment_ids'] = lens_fragment_ids
-                    cd_meta['cell_generated'] = True
-                    cd_meta['cell_model'] = _active_model()
-                    cd_meta['cell_agent'] = f"{ident}.memoria"
-                    cid = await conn.fetchval("""
+                    cd_meta = cd.get("metadata", {})
+                    cd_meta["lens_fragment_ids"] = lens_fragment_ids
+                    cd_meta["cell_generated"] = True
+                    cd_meta["cell_model"] = _active_model()
+                    cd_meta["cell_agent"] = f"{ident}.memoria"
+                    cid = await conn.fetchval(
+                        """
                         INSERT INTO memory_clusters
                             (agent_id, workspace_id, level, label, detail,
                              narrative, narrated_at,
@@ -1675,29 +1883,36 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                              period_start, period_end, status)
                         VALUES ($1,$2,'weekly',$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,'active')
                         RETURNING id
-                    """, agent_id, ws_id,
-                        cd['label'], cd.get('detail'),
-                        cd.get('narrative'),
-                        cd['centroid'], cd['member_ids'],
-                        json.dumps(cd.get('pattern_flags', {})),
+                    """,
+                        agent_id,
+                        ws_id,
+                        cd["label"],
+                        cd.get("detail"),
+                        cd.get("narrative"),
+                        cd["centroid"],
+                        cd["member_ids"],
+                        json.dumps(cd.get("pattern_flags", {})),
                         json.dumps(cd_meta),
-                        week_start, week_end)
-                    cluster_records.append((cid, len(cd['member_ids'])))
+                        week_start,
+                        week_end,
+                    )
+                    cluster_records.append((cid, len(cd["member_ids"])))
 
                 if arcos_que_cruzan or lo_que_evitas:
                     meta_reflection = {
-                        'cell_generated': True,
-                        'cell_model': _active_model(),
-                        'cell_agent': f"{ident}.memoria",
-                        'arcos_que_cruzan': arcos_que_cruzan,
-                        'lo_que_evitas': lo_que_evitas,
+                        "cell_generated": True,
+                        "cell_model": _active_model(),
+                        "cell_agent": f"{ident}.memoria",
+                        "arcos_que_cruzan": arcos_que_cruzan,
+                        "lo_que_evitas": lo_que_evitas,
                     }
                     reflection_narrative = ""
                     if arcos_que_cruzan:
                         reflection_narrative += f"Arcos que cruzan:\n{arcos_que_cruzan}\n\n"
                     if lo_que_evitas:
                         reflection_narrative += f"Lo que evitas:\n{lo_que_evitas}"
-                    await conn.fetchval("""
+                    await conn.fetchval(
+                        """
                         INSERT INTO memory_clusters
                             (agent_id, workspace_id, level, label,
                              narrative, narrated_at, member_ids,
@@ -1706,13 +1921,19 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
                                 $3, NOW(), $7::uuid[],
                                 $4, $5, $6, 'active')
                         RETURNING id
-                    """, agent_id, ws_id,
+                    """,
+                        agent_id,
+                        ws_id,
                         reflection_narrative.strip(),
                         json.dumps(meta_reflection),
-                        week_start, week_end, _reflection_member_ids(memories))
+                        week_start,
+                        week_end,
+                        _reflection_member_ids(memories),
+                    )
 
             tension_count = await _detect_identity_tensions(
-                conn, agent_id, ws_id, identity, memories, week_start, week_end)
+                conn, agent_id, ws_id, identity, memories, week_start, week_end
+            )
             if tension_count:
                 log.info("Agent %d: %d identity tensions created", agent_id, tension_count)
 
@@ -1723,15 +1944,23 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             await _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
 
             await _complete_run(conn, run_id, len(cluster_records) + tension_count)
-            await _broadcast_sse('cell.run.completed', {
-                'run_id': str(run_id), 'cell_type': 'consolidation',
-                'items_created': len(cluster_records)}, org_id)
+            await _broadcast_sse(
+                "cell.run.completed",
+                {"run_id": str(run_id), "cell_type": "consolidation", "items_created": len(cluster_records)},
+                org_id,
+            )
 
             for cid, member_count in cluster_records:
-                await _broadcast_sse('cluster.created', {
-                    'cluster_id': str(cid), 'agent_identifier': ident,
-                    'level': 'weekly', 'member_count': member_count
-                }, org_id)
+                await _broadcast_sse(
+                    "cluster.created",
+                    {
+                        "cluster_id": str(cid),
+                        "agent_identifier": ident,
+                        "level": "weekly",
+                        "member_count": member_count,
+                    },
+                    org_id,
+                )
 
             return run_id
         except json.JSONDecodeError as e:
@@ -1740,8 +1969,9 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
             period_days = (week_end - week_start).days
             if period_days >= 3:
                 mid = week_start + timedelta(days=period_days // 2)
-                log.warning("JSON decode failed for agent %d %s-%s, splitting at %s",
-                           agent_id, week_start, week_end, mid)
+                log.warning(
+                    "JSON decode failed for agent %d %s-%s, splitting at %s", agent_id, week_start, week_end, mid
+                )
                 await conn.execute("SELECT pg_advisory_unlock($1)", lock)
                 r1 = await run_consolidation(pool, agent_id, week_start, mid)
                 r2 = await run_consolidation(pool, agent_id, mid + timedelta(days=1), week_end)
@@ -1752,9 +1982,11 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
         except Exception as e:
             if run_id:
                 await _fail_run(conn, run_id, e)
-                await _broadcast_sse('cell.run.error', {
-                    'run_id': str(run_id), 'cell_type': 'consolidation',
-                    'error': type(e).__name__}, org_id)
+                await _broadcast_sse(
+                    "cell.run.error",
+                    {"run_id": str(run_id), "cell_type": "consolidation", "error": type(e).__name__},
+                    org_id,
+                )
             raise
         finally:
             try:
@@ -1767,6 +1999,7 @@ async def run_consolidation(pool, agent_id, week_start, week_end):
 # Cell: consolidation stacking (monthly / quarterly / yearly)
 # ---------------------------------------------------------------------------
 
+
 async def _week_uncovered(conn, agent_id, ws_id, week_start, week_end):
     """#701 coverage invariant, counted in MEMORIES and starting at the weekly: the
     week's active memories that are a member of NO active weekly cluster (thematic,
@@ -1775,7 +2008,8 @@ async def _week_uncovered(conn, agent_id, ws_id, week_start, week_end):
     leave _label_clusters_llm without a word (index left out by the LLM, cluster
     under MIN_CLUSTER_SIZE, dedup) or with a week of fewer than 2 memories. This
     does not fix them: it makes them visible instead of silent."""
-    rows = await conn.fetch("""
+    rows = await conn.fetch(
+        """
         SELECT m.id FROM memories m
         WHERE m.agent_id=$1 AND m.workspace_id=$2 AND m.staleness='active'
           AND m.created_at >= $3 AND m.created_at < $4
@@ -1784,7 +2018,12 @@ async def _week_uncovered(conn, agent_id, ws_id, week_start, week_end):
               WHERE mc.agent_id=$1 AND mc.level='weekly' AND mc.status='active'
                 AND m.id = ANY(mc.member_ids))
         ORDER BY m.created_at
-    """, agent_id, ws_id, week_start, week_end + timedelta(days=1))
+    """,
+        agent_id,
+        ws_id,
+        week_start,
+        week_end + timedelta(days=1),
+    )
     return [r["id"] for r in rows]
 
 
@@ -1792,13 +2031,21 @@ async def _report_uncovered(conn, run_id, agent_id, ws_id, week_start, week_end)
     """#701: log the week's uncovered memories and keep the count in the run's metrics."""
     uncovered = await _week_uncovered(conn, agent_id, ws_id, week_start, week_end)
     if uncovered:
-        log.warning("COVERAGE agent %d week %s..%s: %d memories in no weekly cluster: %s",
-                    agent_id, week_start, week_end, len(uncovered),
-                    ", ".join(str(u)[:8] for u in uncovered[:20]))
-        await conn.execute("""
+        log.warning(
+            "COVERAGE agent %d week %s..%s: %d memories in no weekly cluster: %s",
+            agent_id,
+            week_start,
+            week_end,
+            len(uncovered),
+            ", ".join(str(u)[:8] for u in uncovered[:20]),
+        )
+        await conn.execute(
+            """
             UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1
-        """, run_id, json.dumps({"uncovered": len(uncovered),
-                                 "uncovered_ids": [str(u) for u in uncovered[:100]]}))
+        """,
+            run_id,
+            json.dumps({"uncovered": len(uncovered), "uncovered_ids": [str(u) for u in uncovered[:100]]}),
+        )
     return uncovered
 
 
@@ -1809,6 +2056,7 @@ async def _embed_for_memory(text):
     one and left for the backfill (WHERE embedding IS NULL)."""
     try:
         from embeddings_client import embed_text
+
         return await embed_text(text, prompt_name="passage")
     except Exception as e:  # HTTPException 503 from the client, or anything else
         log.warning("cell memory saved WITHOUT embedding (left for backfill): %s", e)
@@ -1827,11 +2075,11 @@ def _last_source_period(source_level, p_end):
     """#701: the period of the LAST source a level needs before it may be sealed: the week
     containing the month's last day, the monthly of the quarter's last month, the
     quarterly ending the year (Q4)."""
-    if source_level == 'weekly':
+    if source_level == "weekly":
         return _last_week_of_period(p_end)
-    if source_level == 'monthly':
+    if source_level == "monthly":
         return p_end.replace(day=1), p_end
-    if source_level == 'quarterly':
+    if source_level == "quarterly":
         return p_end.replace(month=10, day=1), p_end
     raise ValueError(f"unknown source level: {source_level}")
 
@@ -1839,12 +2087,20 @@ def _last_source_period(source_level, p_end):
 async def _run_completed(conn, agent_id, p_start, p_end):
     """A consolidation run for exactly [p_start, p_end] has COMPLETED (any level: the period
     tells them apart)."""
-    return await conn.fetchval("""
+    return (
+        await conn.fetchval(
+            """
         SELECT 1 FROM cell_runs
         WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
           AND metrics->>'period_start' = $2 AND metrics->>'period_end' = $3
         LIMIT 1
-    """, agent_id, str(p_start), str(p_end)) is not None
+    """,
+            agent_id,
+            str(p_start),
+            str(p_end),
+        )
+        is not None
+    )
 
 
 async def _source_done(conn, agent_id, source_level, p_end):
@@ -1860,26 +2116,33 @@ def _periods_closed_by(level, p_start, p_end):
     that just finished: a week containing a month's last day closes that month; the monthly
     of a quarter's last month closes the quarter; the Q4 quarterly closes the year.
     [(upper_level, start, end)], at most one level up — the chain climbs one step per run."""
-    if level == 'weekly':
+    if level == "weekly":
         out = []
         d = p_start
         while d <= p_end:
             if (d + timedelta(days=1)).day == 1:
-                out.append(('monthly', d.replace(day=1), d))
+                out.append(("monthly", d.replace(day=1), d))
             d += timedelta(days=1)
         return out
-    if level == 'monthly' and p_end.month in (3, 6, 9, 12):
-        return [('quarterly', p_end.replace(month=p_end.month - 2, day=1), p_end)]
-    if level == 'quarterly' and p_end.month == 12:
-        return [('yearly', date(p_end.year, 1, 1), p_end)]
+    if level == "monthly" and p_end.month in (3, 6, 9, 12):
+        return [("quarterly", p_end.replace(month=p_end.month - 2, day=1), p_end)]
+    if level == "quarterly" and p_end.month == 12:
+        return [("yearly", date(p_end.year, 1, 1), p_end)]
     return []
 
 
 async def _upper_config_enabled(conn, agent_id, level):
-    return await conn.fetchval("""
+    return (
+        await conn.fetchval(
+            """
         SELECT 1 FROM cell_task_configs
         WHERE agent_id=$1 AND cell_type='consolidation' AND level=$2 AND enabled=true
-    """, agent_id, level) is not None
+    """,
+            agent_id,
+            level,
+        )
+        is not None
+    )
 
 
 async def _cascade_up(pool, agent_id, level, p_start, p_end):
@@ -1890,13 +2153,13 @@ async def _cascade_up(pool, agent_id, level, p_start, p_end):
         async with pool.acquire() as conn:
             if not await _upper_config_enabled(conn, agent_id, up_level):
                 continue
-        log.info("Cascade: %s agent=%s %s..%s after %s %s..%s",
-                 up_level, agent_id, up_start, up_end, level, p_start, p_end)
-        run_ctx = await _resolve_run_context(pool, agent_id, 'consolidation', up_level)
+        log.info(
+            "Cascade: %s agent=%s %s..%s after %s %s..%s", up_level, agent_id, up_start, up_end, level, p_start, p_end
+        )
+        run_ctx = await _resolve_run_context(pool, agent_id, "consolidation", up_level)
         token = _active_cell.set(run_ctx) if run_ctx else None
         try:
-            out = await _BUILTIN_DISPATCH[('consolidation', up_level)](
-                pool, agent_id, None, up_start, up_end)
+            out = await _BUILTIN_DISPATCH[("consolidation", up_level)](pool, agent_id, None, up_start, up_end)
         except Exception:
             log.exception("Cascade %s agent %d %s..%s failed", up_level, agent_id, up_start, up_end)
             continue
@@ -1921,11 +2184,12 @@ async def _select_higher_sources(conn, agent_id, source_level, p_start, p_end):
     cluster (thematic weeklies under a week rollup), or the monthly would eat
     the same week twice.
     """
-    if source_level == 'weekly':
+    if source_level == "weekly":
         in_period = "mc.period_start <= $4 AND mc.period_end >= $3"
     else:
         in_period = "mc.period_start >= $3 AND mc.period_end <= $4"
-    return await conn.fetch(f"""
+    return await conn.fetch(
+        f"""
         SELECT mc.* FROM memory_clusters mc
         WHERE mc.agent_id=$1 AND mc.level=$2 AND mc.status='active'
           AND {in_period}
@@ -1934,17 +2198,21 @@ async def _select_higher_sources(conn, agent_id, source_level, p_start, p_end):
               WHERE r.agent_id=$1 AND r.status='active' AND r.level=$2
                 AND mc.id = ANY(r.source_ids))
         ORDER BY mc.period_start
-    """, agent_id, source_level, p_start, p_end)
+    """,
+        agent_id,
+        source_level,
+        p_start,
+        p_end,
+    )
 
 
 async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, source_level, min_sources=2):
     async with pool.acquire() as conn:
-        lock = _lock_key(agent_id, 'consolidation', p_start, p_end)
+        lock = _lock_key(agent_id, "consolidation", p_start, p_end)
         if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock):
             return None
         try:
-            if await _check_idempotency(conn, agent_id, 'consolidation',
-                                        p_start, p_end, cluster_level=level):
+            if await _check_idempotency(conn, agent_id, "consolidation", p_start, p_end, cluster_level=level):
                 return None
 
             # #701: never seal a level before its last source has been consolidated —
@@ -1952,8 +2220,16 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
             # the cascade (_cascade_up, when the source finishes) or the retry sweep builds it.
             if not await _source_done(conn, agent_id, source_level, p_end):
                 s_start, s_end = _last_source_period(source_level, p_end)
-                log.warning("%s agent %d %s..%s NOT built: last %s %s..%s not done yet",
-                            level, agent_id, p_start, p_end, source_level, s_start, s_end)
+                log.warning(
+                    "%s agent %d %s..%s NOT built: last %s %s..%s not done yet",
+                    level,
+                    agent_id,
+                    p_start,
+                    p_end,
+                    source_level,
+                    s_start,
+                    s_end,
+                )
                 return None
 
             sources = await _select_higher_sources(conn, agent_id, source_level, p_start, p_end)
@@ -1963,19 +2239,21 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
                 # pieces, or the level above would wait forever for a run that never comes.
                 # Recorded once (a second pass finds it and leaves it).
                 if not await _run_completed(conn, agent_id, p_start, p_end):
-                    run_id = await _create_run(conn, 'consolidation', agent_id, p_start, p_end)
-                    await conn.execute("UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1",
-                                       run_id, json.dumps({"too_few_sources": len(sources)}))
+                    run_id = await _create_run(conn, "consolidation", agent_id, p_start, p_end)
+                    await conn.execute(
+                        "UPDATE cell_runs SET metrics = metrics || $2::jsonb WHERE id=$1",
+                        run_id,
+                        json.dumps({"too_few_sources": len(sources)}),
+                    )
                     await _complete_run(conn, run_id, 0)
                 return None
 
-            run_id = await _create_run(conn, 'consolidation', agent_id, p_start, p_end)
+            run_id = await _create_run(conn, "consolidation", agent_id, p_start, p_end)
             ws_id = sources[0]["workspace_id"]
 
             # Emparejar centroide↔tamaño por fuente: si una fuente no tiene
             # centroide (o no parsea), su tamaño tampoco debe entrar al promedio.
-            pairs = [(_parse_embedding(s["centroid"]), len(s["member_ids"]))
-                     for s in sources if s["centroid"]]
+            pairs = [(_parse_embedding(s["centroid"]), len(s["member_ids"])) for s in sources if s["centroid"]]
             pairs = [(c, sz) for c, sz in pairs if c is not None]
             centroid = None
             if pairs:
@@ -1986,22 +2264,21 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
                     weighted += c * s
                 centroid = _vec_literal(weighted / total_size)
 
-            all_members = list(set(
-                mid for s in sources for mid in s["member_ids"]
-            ))[:500]
+            all_members = list(set(mid for s in sources for mid in s["member_ids"]))[:500]
 
             label_data = await _llm_retry(
-                _label_higher_cluster, [dict(s) for s in sources], level, agent_id, conn, p_start)
+                _label_higher_cluster, [dict(s) for s in sources], level, agent_id, conn, p_start
+            )
 
-            ident = await conn.fetchval(
-                "SELECT identifier FROM agents WHERE id=$1", agent_id)
+            ident = await conn.fetchval("SELECT identifier FROM agents WHERE id=$1", agent_id)
             meta = label_data.get("metadata", {})
-            meta['cell_generated'] = True
-            meta['cell_model'] = _active_model()
-            meta['cell_agent'] = f"{ident}.memoria"
+            meta["cell_generated"] = True
+            meta["cell_model"] = _active_model()
+            meta["cell_agent"] = f"{ident}.memoria"
 
             async with conn.transaction():
-                await conn.fetchval("""
+                await conn.fetchval(
+                    """
                     INSERT INTO memory_clusters
                         (agent_id, workspace_id, level, label, detail,
                          narrative, narrated_at,
@@ -2009,14 +2286,20 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
                          period_start, period_end, status)
                     VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7,$8,$9,$10,$11,$12,'active')
                     RETURNING id
-                """, agent_id, ws_id, level,
+                """,
+                    agent_id,
+                    ws_id,
+                    level,
                     label_data.get("label", "unlabeled"),
                     label_data.get("detail"),
                     label_data.get("narrative"),
-                    centroid, all_members,
+                    centroid,
+                    all_members,
                     [s["id"] for s in sources],
                     json.dumps(meta),
-                    p_start, p_end)
+                    p_start,
+                    p_end,
+                )
 
             await _complete_run(conn, run_id, 1)
             return run_id
@@ -2025,43 +2308,42 @@ async def _run_higher_consolidation(pool, agent_id, level, p_start, p_end, sourc
 
 
 async def run_monthly_consolidation(pool, agent_id, month_start, month_end):
-    return await _run_higher_consolidation(
-        pool, agent_id, 'monthly', month_start, month_end, 'weekly')
+    return await _run_higher_consolidation(pool, agent_id, "monthly", month_start, month_end, "weekly")
 
 
 async def run_quarterly_consolidation(pool, agent_id, q_start, q_end):
-    return await _run_higher_consolidation(
-        pool, agent_id, 'quarterly', q_start, q_end, 'monthly')
+    return await _run_higher_consolidation(pool, agent_id, "quarterly", q_start, q_end, "monthly")
 
 
 async def run_yearly_consolidation(pool, agent_id, year_start, year_end):
-    return await _run_higher_consolidation(
-        pool, agent_id, 'yearly', year_start, year_end, 'quarterly')
+    return await _run_higher_consolidation(pool, agent_id, "yearly", year_start, year_end, "quarterly")
 
 
 # ---------------------------------------------------------------------------
 # Cell: foresight extraction (daily)
 # ---------------------------------------------------------------------------
 
+
 async def run_foresight_extraction(pool, agent_id):
     run_id = None
     org_id = None
     today = date.today()
     async with pool.acquire() as conn:
-        lock = _lock_key(agent_id, 'foresight', today, today)
+        lock = _lock_key(agent_id, "foresight", today, today)
         if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock):
             return None
         try:
-            if await _check_idempotency(conn, agent_id, 'foresight', today, today):
+            if await _check_idempotency(conn, agent_id, "foresight", today, today):
                 return None
 
-            run_id = await _create_run(conn, 'foresight', agent_id, today, today)
+            run_id = await _create_run(conn, "foresight", agent_id, today, today)
             ws_id, org_id, ident = await _resolve_context(conn, agent_id)
             if ws_id is None:
                 await _complete_run(conn, run_id, 0)
                 return run_id
 
-            recent = await conn.fetch("""
+            recent = await conn.fetch(
+                """
                 SELECT id, content, tags, type, created_at
                 FROM memories
                 WHERE agent_id=$1 AND workspace_id=$2
@@ -2069,7 +2351,11 @@ async def run_foresight_extraction(pool, agent_id):
                   AND foresight_start IS NULL
                   AND type IN ('referencia','decision','acuerdo','tecnico')
                 ORDER BY created_at DESC LIMIT 50
-            """, agent_id, ws_id, FORESIGHT_HOURS)
+            """,
+                agent_id,
+                ws_id,
+                FORESIGHT_HOURS,
+            )
 
             if not recent:
                 await _complete_run(conn, run_id, 0)
@@ -2084,7 +2370,8 @@ async def run_foresight_extraction(pool, agent_id):
                 # $4 must be float8: asyncpg requires a Python str for ::text
                 # params (DataError "expected str, got float"), and existing
                 # foresight metadata stores confidence as a JSON number.
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE memories
                     SET foresight_start=$2, foresight_end=$3,
                       metadata = coalesce(metadata,'{}'::jsonb) ||
@@ -2094,11 +2381,16 @@ async def run_foresight_extraction(pool, agent_id):
                         ),
                       updated_at=NOW()
                     WHERE id=$1
-                """, signal["memory_id"], signal["start"],
-                    signal["end"], float(signal["confidence"]))
+                """,
+                    signal["memory_id"],
+                    signal["start"],
+                    signal["end"],
+                    float(signal["confidence"]),
+                )
                 items_created += 1
 
-            triggered = await conn.fetch("""
+            triggered = await conn.fetch(
+                """
                 SELECT id, content, foresight_start FROM memories
                 WHERE agent_id=$1
                   AND foresight_start IS NOT NULL
@@ -2107,13 +2399,15 @@ async def run_foresight_extraction(pool, agent_id):
                   AND foresight_end > NOW()
                   AND (metadata->>'foresight_dismissed' IS NULL
                        OR metadata->>'foresight_dismissed' != 'true')
-            """, agent_id)
+            """,
+                agent_id,
+            )
             for t in triggered:
-                await _broadcast_sse('foresight.triggered', {
-                    'memory_id': str(t["id"]),
-                    'agent_identifier': ident,
-                    'content_preview': t["content"][:100]
-                }, org_id)
+                await _broadcast_sse(
+                    "foresight.triggered",
+                    {"memory_id": str(t["id"]), "agent_identifier": ident, "content_preview": t["content"][:100]},
+                    org_id,
+                )
 
             await _complete_run(conn, run_id, items_created)
             return run_id
@@ -2129,6 +2423,7 @@ async def run_foresight_extraction(pool, agent_id):
 # Cell: skill distillation (weekly)
 # ---------------------------------------------------------------------------
 
+
 async def run_skill_distillation(pool, agent_id):
     run_id = None
     org_id = None
@@ -2139,43 +2434,49 @@ async def run_skill_distillation(pool, agent_id):
     # re-run. The idempotency/lock/run period must be invariant within the week.
     week_end = week_start + timedelta(days=6)
     async with pool.acquire() as conn:
-        lock = _lock_key(agent_id, 'skill_distillation', week_start, week_end)
+        lock = _lock_key(agent_id, "skill_distillation", week_start, week_end)
         if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock):
             return None
         try:
-            if await _check_idempotency(
-                    conn, agent_id, 'skill_distillation', week_start, week_end):
+            if await _check_idempotency(conn, agent_id, "skill_distillation", week_start, week_end):
                 return None
 
-            run_id = await _create_run(
-                conn, 'skill_distillation', agent_id, week_start, week_end)
+            run_id = await _create_run(conn, "skill_distillation", agent_id, week_start, week_end)
             ws_id, org_id, ident = await _resolve_context(conn, agent_id)
             if ws_id is None:
                 await _complete_run(conn, run_id, 0)
                 return run_id
 
-            candidates = await conn.fetch("""
+            candidates = await conn.fetch(
+                """
                 SELECT id, content, metadata FROM memories
                 WHERE agent_id=$1
                   AND 'case_candidate' = ANY(tags)
                   AND type != 'caso'
                 LIMIT 20
-            """, agent_id)
+            """,
+                agent_id,
+            )
             for cand in candidates:
                 structured = await _llm_retry(_structure_as_case, cand)
                 if structured:
                     meta = dict(cand["metadata"] or {})
                     meta.update(structured)
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE memories
                         SET type='caso',
                             metadata=$2::jsonb,
                             tags = array_remove(tags, 'case_candidate'),
                             updated_at=NOW()
                         WHERE id=$1
-                    """, cand["id"], json.dumps(meta))
+                    """,
+                        cand["id"],
+                        json.dumps(meta),
+                    )
 
-            task_groups = await conn.fetch("""
+            task_groups = await conn.fetch(
+                """
                 SELECT metadata->>'task_type' AS task_type,
                        COUNT(*) AS total,
                        COUNT(*) FILTER (
@@ -2187,11 +2488,15 @@ async def run_skill_distillation(pool, agent_id):
                   AND metadata->>'task_type' IS NOT NULL
                 GROUP BY metadata->>'task_type'
                 HAVING COUNT(*) >= $3
-            """, agent_id, ws_id, SKILL_MIN_CASES)
+            """,
+                agent_id,
+                ws_id,
+                SKILL_MIN_CASES,
+            )
 
             common_proj_id = await conn.fetchval(
-                "SELECT id FROM projects WHERE workspace_id=$1 AND is_common=true LIMIT 1",
-                ws_id)
+                "SELECT id FROM projects WHERE workspace_id=$1 AND is_common=true LIMIT 1", ws_id
+            )
             if common_proj_id is None:
                 log.warning("Agent %d ws %d: no is_common project, skipping skill distillation", agent_id, ws_id)
                 await _complete_run(conn, run_id, 0)
@@ -2203,11 +2508,15 @@ async def run_skill_distillation(pool, agent_id):
                 success_rate = group["successes"] / group["total"] if group["total"] > 0 else 0
                 case_ids = group["case_ids"]
 
-                existing_skill = await conn.fetchrow("""
+                existing_skill = await conn.fetchrow(
+                    """
                     SELECT id, metadata FROM memories
                     WHERE agent_id=$1 AND type='skill'
                       AND metadata @> $2::jsonb
-                """, agent_id, json.dumps({"task_signature": task_type}))
+                """,
+                    agent_id,
+                    json.dumps({"task_signature": task_type}),
+                )
 
                 if existing_skill:
                     old_meta = dict(existing_skill["metadata"] or {})
@@ -2215,16 +2524,20 @@ async def run_skill_distillation(pool, agent_id):
                     old_meta["source_case_ids"] = [str(c) for c in case_ids]
                     if success_rate < SKILL_STALE:
                         old_meta["status"] = "stale"
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE memories
                         SET metadata=$2::jsonb, updated_at=NOW()
                         WHERE id=$1
-                    """, existing_skill["id"], json.dumps(old_meta))
+                    """,
+                        existing_skill["id"],
+                        json.dumps(old_meta),
+                    )
 
                 elif success_rate >= SKILL_MIN_SUCCESS:
                     cases_content = await conn.fetch(
-                        "SELECT content, metadata FROM memories "
-                        "WHERE id=ANY($1::uuid[])", case_ids)
+                        "SELECT content, metadata FROM memories WHERE id=ANY($1::uuid[])", case_ids
+                    )
                     skill_data = await _llm_retry(_distill_skill, task_type, cases_content)
 
                     skill_meta = {
@@ -2237,7 +2550,8 @@ async def run_skill_distillation(pool, agent_id):
                         "source_case_ids": [str(c) for c in case_ids],
                         "status": "active",
                     }
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO memories
                             (user_id, agent_id, workspace_id, project_id,
                              type, content, metadata,
@@ -2248,25 +2562,31 @@ async def run_skill_distillation(pool, agent_id):
                           'skill', $4, $5::jsonb,
                           0.8, 0.8, ARRAY['auto_skill'], $6::vector
                         )
-                    """, agent_id, ws_id, common_proj_id,
+                    """,
+                        agent_id,
+                        ws_id,
+                        common_proj_id,
                         skill_data.get("summary", f"Skill: {task_type}"),
                         json.dumps(skill_meta),
-                        await _embed_for_memory(skill_data.get("summary", f"Skill: {task_type}")))
+                        await _embed_for_memory(skill_data.get("summary", f"Skill: {task_type}")),
+                    )
                     items_created += 1
 
                 fail_count = group["total"] - group["successes"]
                 if fail_count >= 3 and success_rate < 0.5:
-                    existing_warning = await conn.fetchval("""
+                    existing_warning = await conn.fetchval(
+                        """
                         SELECT id FROM memories
                         WHERE agent_id=$1
                           AND foresight_start IS NOT NULL
                           AND metadata @> $2::jsonb
-                    """, agent_id, json.dumps({
-                        "foresight_source": "skill_failure",
-                        "task_type": task_type
-                    }))
+                    """,
+                        agent_id,
+                        json.dumps({"foresight_source": "skill_failure", "task_type": task_type}),
+                    )
                     if not existing_warning:
-                        await conn.execute("""
+                        await conn.execute(
+                            """
                             INSERT INTO memories
                                 (user_id, agent_id, workspace_id, project_id,
                                  type, content,
@@ -2283,17 +2603,22 @@ async def run_skill_distillation(pool, agent_id):
                               ARRAY['auto_foresight', 'skill_failure'],
                               $6::vector
                             )
-                        """, agent_id, ws_id, common_proj_id,
-                            f"Failure pattern in {task_type}: "
-                            f"{fail_count}/{group['total']} cases failed.",
-                            json.dumps({
-                                "foresight_source": "skill_failure",
-                                "task_type": task_type,
-                                "fail_rate": round(1 - success_rate, 2)
-                            }),
+                        """,
+                            agent_id,
+                            ws_id,
+                            common_proj_id,
+                            f"Failure pattern in {task_type}: {fail_count}/{group['total']} cases failed.",
+                            json.dumps(
+                                {
+                                    "foresight_source": "skill_failure",
+                                    "task_type": task_type,
+                                    "fail_rate": round(1 - success_rate, 2),
+                                }
+                            ),
                             await _embed_for_memory(
-                                f"Failure pattern in {task_type}: "
-                                f"{fail_count}/{group['total']} cases failed."))
+                                f"Failure pattern in {task_type}: {fail_count}/{group['total']} cases failed."
+                            ),
+                        )
                         items_created += 1
 
             await _complete_run(conn, run_id, items_created)
@@ -2309,6 +2634,7 @@ async def run_skill_distillation(pool, agent_id):
 # ---------------------------------------------------------------------------
 # Main loop (cron scheduler)
 # ---------------------------------------------------------------------------
+
 
 async def _run_generic_cell(pool, config, agent_id):
     """Execute a custom cell type using its prompt template + model router."""
@@ -2329,21 +2655,28 @@ async def _run_generic_cell(pool, config, agent_id):
             return
 
         run_id = await _create_run(conn, cell_type, agent_id, date.today(), date.today())
-        await _broadcast_sse('cell.run.started', {
-            'run_id': str(run_id), 'cell_type': cell_type,
-            'agent_identifier': ident}, org_id)
+        await _broadcast_sse(
+            "cell.run.started", {"run_id": str(run_id), "cell_type": cell_type, "agent_identifier": ident}, org_id
+        )
 
-        identity = await conn.fetch("""
+        identity = await conn.fetch(
+            """
             SELECT content FROM agent_identity WHERE agent_id=$1
             ORDER BY version DESC, fragment_idx LIMIT 20
-        """, agent_id)
+        """,
+            agent_id,
+        )
         identity_text = "\n---\n".join(r["content"] for r in identity) if identity else "(no identity)"
 
-        recent = await conn.fetch("""
+        recent = await conn.fetch(
+            """
             SELECT content, type, weight FROM memories
             WHERE agent_id=$1 AND workspace_id=$2
             ORDER BY created_at DESC LIMIT 20
-        """, agent_id, ws_id)
+        """,
+            agent_id,
+            ws_id,
+        )
         recent_text = "\n".join(f"- ({r['type']}, w={r['weight']:.1f}) {r['content'][:300]}" for r in recent)
 
         system_prompt = _safe_format(
@@ -2360,37 +2693,59 @@ async def _run_generic_cell(pool, config, agent_id):
 
         try:
             result = await _llm_retry(
-                _llm_call_routed, conn, system_prompt,
+                _llm_call_routed,
+                conn,
+                system_prompt,
                 f"Execute cell task '{cell_type}' for agent {ident}. Recent context:\n{recent_text}",
-                provider, model)
+                provider,
+                model,
+            )
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO memories (workspace_id, project_id, agent_id, type, content, visibility, tags,
                                       embedding)
                 VALUES ($1, (SELECT id FROM projects WHERE workspace_id=$1 AND is_common=true LIMIT 1),
                         $2, 'observacion', $3, 'public', $4, $5::vector)
-            """, ws_id, agent_id, result[:16000],
+            """,
+                ws_id,
+                agent_id,
+                result[:16000],
                 [f"cell:{cell_type}", f"cell_generated"],
-                await _embed_for_memory(result[:16000]))
+                await _embed_for_memory(result[:16000]),
+            )
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE cell_runs SET finished_at=NOW(), status='completed',
                   items_created=1, prompt_version=$2, model=$3
                 WHERE id=$1
-            """, run_id, template_name, model)
+            """,
+                run_id,
+                template_name,
+                model,
+            )
 
-            await _broadcast_sse('cell.run.completed', {
-                'run_id': str(run_id), 'cell_type': cell_type,
-                'agent_identifier': ident, 'items_created': 1}, org_id)
+            await _broadcast_sse(
+                "cell.run.completed",
+                {"run_id": str(run_id), "cell_type": cell_type, "agent_identifier": ident, "items_created": 1},
+                org_id,
+            )
 
         except Exception as e:
             log.exception("Generic cell %s agent %d failed", cell_type, agent_id)
             if run_id:
                 await _fail_run(conn, run_id, e)
-            await _broadcast_sse('cell.run.failed', {
-                'run_id': str(run_id) if run_id else None,
-                'cell_type': cell_type,
-                'agent_identifier': ident, 'error': str(e)[:200]}, org_id)
+            await _broadcast_sse(
+                "cell.run.failed",
+                {
+                    "run_id": str(run_id) if run_id else None,
+                    "cell_type": cell_type,
+                    "agent_identifier": ident,
+                    "error": str(e)[:200],
+                },
+                org_id,
+            )
 
 
 _BUILTIN_DISPATCH = {
@@ -2420,17 +2775,34 @@ async def _resolve_run_context(pool, agent_id, cell_type, level):
         try:
             key = await _get_provider_key(conn, provider)
         except Exception as e:
-            log.error("Cell %s/%s agent %d: cannot resolve key for provider %s: %s — "
-                      "falling back to default LLM path", cell_type, level, agent_id, provider, e)
-            return {"provider": provider, "model": model, "template": template,
-                    "key": None, "prompt_name": cfg.get("prompt_name")}
-        return {"provider": provider, "model": model, "template": template,
-                "key": key, "prompt_name": cfg.get("prompt_name")}
+            log.error(
+                "Cell %s/%s agent %d: cannot resolve key for provider %s: %s — falling back to default LLM path",
+                cell_type,
+                level,
+                agent_id,
+                provider,
+                e,
+            )
+            return {
+                "provider": provider,
+                "model": model,
+                "template": template,
+                "key": None,
+                "prompt_name": cfg.get("prompt_name"),
+            }
+        return {
+            "provider": provider,
+            "model": model,
+            "template": template,
+            "key": key,
+            "prompt_name": cfg.get("prompt_name"),
+        }
 
 
 async def _run_from_config(pool, cfg_row):
     """Execute a cell task from a DB config row, honoring its model/provider/template."""
     from cells import _default_period
+
     agent_id = cfg_row["agent_id"]
     cell_type = cfg_row["cell_type"]
     level = cfg_row.get("level")
@@ -2468,12 +2840,11 @@ async def _run_from_config(pool, cfg_row):
 
 
 async def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     # Never let httpx log request headers (would leak provider Bearer keys under DEBUG) — VS_L4_3.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     from urllib.parse import urlparse
+
     _parsed = urlparse(DATABASE_URL)
     _safe_url = f"{_parsed.scheme}://{_parsed.username}:***@{_parsed.hostname}:{_parsed.port}{_parsed.path}"
     log.info("Cell worker starting (v1.3 DB-config mode). DATABASE_URL=%s", _safe_url)
@@ -2511,9 +2882,7 @@ async def main():
                 else:
                     check_start, check_end = prev_fire.date(), now.date()
                 async with pool.acquire() as conn:
-                    already = await _check_idempotency(
-                        conn, cfg["agent_id"], cfg["cell_type"],
-                        check_start, check_end)
+                    already = await _check_idempotency(conn, cfg["agent_id"], cfg["cell_type"], check_start, check_end)
                 if not already:
                     log.info("Catch-up: %s/%s agent=%s", cfg["cell_type"], cfg.get("level"), cfg["identifier"])
                     await _run_from_config(pool, dict(cfg))
@@ -2540,8 +2909,7 @@ async def main():
                 prev_fire = it.get_prev(datetime)
                 next_fire = croniter(cfg["schedule_cron"], prev_fire).get_next(datetime)
                 age = now - prev_fire
-                if not (timedelta(hours=1) <= age <= min(timedelta(hours=RETRY_WINDOW_HOURS),
-                                                         next_fire - prev_fire)):
+                if not (timedelta(hours=1) <= age <= min(timedelta(hours=RETRY_WINDOW_HOURS), next_fire - prev_fire)):
                     continue
                 # code-2 review: foresight and skill compute their period from TODAY, so a retry on
                 # a later day/week would run the NEXT period early. Retry them only while "now" is
@@ -2555,12 +2923,19 @@ async def main():
                     continue  # custom cells: period semantics unknown, no blind retry
                 await _run_from_config(pool, dict(cfg))
             except Exception:
-                log.exception("Retry sweep failed: %s/%s agent=%s", cfg["cell_type"], cfg.get("level"), cfg["identifier"])
+                log.exception(
+                    "Retry sweep failed: %s/%s agent=%s", cfg["cell_type"], cfg.get("level"), cfg["identifier"]
+                )
         try:
             async with pool.acquire() as conn:
                 for g in await consolidation_gaps(conn):
-                    log.warning("Consolidation gap: agent=%s week %s..%s has %d memories and no active weekly cluster",
-                                g["agent_identifier"], g["week_start"], g["week_end"], g["memories"])
+                    log.warning(
+                        "Consolidation gap: agent=%s week %s..%s has %d memories and no active weekly cluster",
+                        g["agent_identifier"],
+                        g["week_start"],
+                        g["week_end"],
+                        g["memories"],
+                    )
         except Exception:
             log.exception("Gap check failed")
 
@@ -2586,8 +2961,8 @@ async def main():
                 if next_fire <= now and _last_fired.get(cfg_id, datetime.min.replace(tzinfo=timezone.utc)) < next_fire:
                     async with pool.acquire() as conn:
                         already = await _check_idempotency(
-                            conn, cfg["agent_id"], cfg["cell_type"],
-                            next_fire.date(), now.date())
+                            conn, cfg["agent_id"], cfg["cell_type"], next_fire.date(), now.date()
+                        )
                     if not already:
                         log.info("Cron fire: %s/%s agent=%s", cfg["cell_type"], cfg.get("level"), cfg["identifier"])
                         _last_fired[cfg_id] = now
@@ -2608,22 +2983,30 @@ async def _main_legacy(pool):
         now = datetime.now(timezone.utc)
         if now.hour == 2 and now.minute < 5:
             for aid in agent_ids:
-                try: await run_foresight_extraction(pool, aid)
-                except Exception as e: log.error("Foresight agent %d: %r", aid, e)
+                try:
+                    await run_foresight_extraction(pool, aid)
+                except Exception as e:
+                    log.error("Foresight agent %d: %r", aid, e)
         if now.weekday() == 6 and now.hour == 3 and now.minute < 5:
             ws, we = now.date() - timedelta(days=6), now.date()
             for aid in agent_ids:
-                try: await run_consolidation(pool, aid, ws, we)
-                except Exception as e: log.error("Consolidation agent %d: %r", aid, e)
+                try:
+                    await run_consolidation(pool, aid, ws, we)
+                except Exception as e:
+                    log.error("Consolidation agent %d: %r", aid, e)
         if now.weekday() == 6 and now.hour == 4 and now.minute < 5:
             for aid in agent_ids:
-                try: await run_skill_distillation(pool, aid)
-                except Exception as e: log.error("Skill distillation agent %d: %r", aid, e)
+                try:
+                    await run_skill_distillation(pool, aid)
+                except Exception as e:
+                    log.error("Skill distillation agent %d: %r", aid, e)
         if now.day == 1 and now.hour == 5 and now.minute < 5:
             me = now.date() - timedelta(days=1)
             for aid in agent_ids:
-                try: await run_monthly_consolidation(pool, aid, me.replace(day=1), me)
-                except Exception as e: log.error("Monthly agent %d: %r", aid, e)
+                try:
+                    await run_monthly_consolidation(pool, aid, me.replace(day=1), me)
+                except Exception as e:
+                    log.error("Monthly agent %d: %r", aid, e)
         await asyncio.sleep(60)
 
 

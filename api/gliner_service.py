@@ -32,6 +32,7 @@ GPU justification). Lazy load: FastAPI starts,
 
 Modelo: urchade/gliner_multi-v2.1 (multilingual con español).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -96,14 +97,11 @@ async def load_dictionary_to_cache(pool: asyncpg.Pool) -> int:
     global _dictionary_cache
     async with _dictionary_lock:
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT name, name_normalized, entity_type FROM entity_dictionary"
-            )
+            rows = await conn.fetch("SELECT name, name_normalized, entity_type FROM entity_dictionary")
         # Ordenar por len(name_normalized) DESC — longest match wins.
         sorted_rows = sorted(rows, key=lambda r: len(r["name_normalized"]), reverse=True)
         compiled: list[tuple[re.Pattern, str, str]] = [
-            (_compile_dictionary_pattern(r["name_normalized"]), r["entity_type"], r["name"])
-            for r in sorted_rows
+            (_compile_dictionary_pattern(r["name_normalized"]), r["entity_type"], r["name"]) for r in sorted_rows
         ]
         _dictionary_cache = compiled
         logger.info("Entity dictionary cache loaded: %d entries", len(compiled))
@@ -172,14 +170,14 @@ async def renormalize_dictionary(pool: asyncpg.Pool) -> int:
         rows = await conn.fetch("SELECT id, name, name_normalized FROM entity_dictionary")
         fixes, collisions = dictionary_rows_to_renormalize(rows)
         for entry_id, want in collisions:
-            logger.warning("entity_dictionary %d: normalize_name gives %r, already taken; left as is",
-                           entry_id, want)
+            logger.warning("entity_dictionary %d: normalize_name gives %r, already taken; left as is", entry_id, want)
         if fixes:
             async with conn.transaction():
                 for entry_id, want in fixes:
                     await conn.execute(
                         "UPDATE entity_dictionary SET name_normalized = $2, updated_at = now() WHERE id = $1",
-                        entry_id, want,
+                        entry_id,
+                        want,
                     )
             logger.info("entity_dictionary: %d entries renormalized", len(fixes))
     return len(fixes)
@@ -219,14 +217,16 @@ def _match_dictionary(text: str) -> tuple[list[dict], str]:
             if any(cs <= start < ce or cs < end <= ce for cs, ce in consumed_ranges):
                 continue
             consumed_ranges.append((start, end))
-            entities.append({
-                "text": text[start:end],  # extraido del original con case/tilde
-                "label": entity_type,
-                "start": start,
-                "end": end,
-                "score": 1.0,  # diccionario = 100% confianza
-                "source": "dictionary",
-            })
+            entities.append(
+                {
+                    "text": text[start:end],  # extraido del original con case/tilde
+                    "label": entity_type,
+                    "start": start,
+                    "end": end,
+                    "score": 1.0,  # diccionario = 100% confianza
+                    "source": "dictionary",
+                }
+            )
     # Construir texto residual: reemplazar spans consumidos con espacios mismo largo.
     consumed_ranges.sort()
     chars = list(text)
@@ -323,6 +323,7 @@ async def extract_entities_from_chunks(chunks: list, pool: asyncpg.Pool) -> list
     Returns: list of {chunk_index, entities: [{text, label, score, source}]}
     """
     import tiktoken as _tiktoken
+
     enc = _tiktoken.get_encoding("cl100k_base")
 
     # Load stop_set once for all chunks (BC2 — avoid N+1 DB queries)
@@ -355,10 +356,12 @@ async def extract_entities_from_chunks(chunks: list, pool: asyncpg.Pool) -> list
         # Filter stop entities (stop_set already loaded — no extra DB query)
         chunk_entities = filter_stop_entities(list(merged.values()), stop_set)
 
-        results.append({
-            "chunk_index": chunk.chunk_index,
-            "entities": chunk_entities,
-        })
+        results.append(
+            {
+                "chunk_index": chunk.chunk_index,
+                "entities": chunk_entities,
+            }
+        )
 
     # Task 5.9 — detect alias candidates across all extracted entities
     all_chunk_entities = [e for r in results for e in r["entities"]]
@@ -392,7 +395,9 @@ async def detect_alias_candidates(entities: list[dict], pool: asyncpg.Pool) -> N
                     ORDER BY sim DESC
                     LIMIT $3
                     """,
-                    name, _ALIAS_SIM_THRESHOLD, _ALIAS_MAX_CANDIDATES,
+                    name,
+                    _ALIAS_SIM_THRESHOLD,
+                    _ALIAS_MAX_CANDIDATES,
                 )
                 for node in similar_rows:
                     confidence = float(node["sim"])
@@ -400,7 +405,8 @@ async def detect_alias_candidates(entities: list[dict], pool: asyncpg.Pool) -> N
                         """SELECT id FROM entity_alias_candidates
                            WHERE source_name = $1 AND target_node_id = $2
                              AND status = 'pending'""",
-                        name, node["id"],
+                        name,
+                        node["id"],
                     )
                     if existing:
                         await conn.execute(
@@ -409,14 +415,17 @@ async def detect_alias_candidates(entities: list[dict], pool: asyncpg.Pool) -> N
                                    confidence = GREATEST(confidence, $2),
                                    last_seen = now()
                                WHERE id = $1""",
-                            existing["id"], confidence,
+                            existing["id"],
+                            confidence,
                         )
                     else:
                         await conn.execute(
                             """INSERT INTO entity_alias_candidates
                                    (source_name, target_node_id, confidence, occurrences)
                                VALUES ($1, $2, $3, 1)""",
-                            name, node["id"], confidence,
+                            name,
+                            node["id"],
+                            confidence,
                         )
     except Exception as exc:
         logger.warning("detect_alias_candidates failed: %r", exc)
@@ -454,9 +463,7 @@ async def scan_all_alias_candidates(
                     f"%{name_filter}%",
                 )
             else:
-                name_rows = await conn.fetch(
-                    "SELECT name FROM nodes WHERE status = 'active'"
-                )
+                name_rows = await conn.fetch("SELECT name FROM nodes WHERE status = 'active'")
             names = sorted({r["name"] for r in name_rows})
 
             for name in names:
@@ -470,7 +477,9 @@ async def scan_all_alias_candidates(
                     ORDER BY sim DESC
                     LIMIT $3
                     """,
-                    name, threshold, max_per_name,
+                    name,
+                    threshold,
+                    max_per_name,
                 )
                 for node in similar_rows:
                     found += 1
@@ -489,7 +498,8 @@ async def scan_all_alias_candidates(
                         """SELECT id, status FROM entity_alias_candidates
                            WHERE source_name = $1 AND target_node_id = $2
                            ORDER BY id DESC LIMIT 1""",
-                        name, node["id"],
+                        name,
+                        node["id"],
                     )
                     if existing:
                         new_status = "pending"
@@ -501,7 +511,9 @@ async def scan_all_alias_candidates(
                                    last_seen = now(),
                                    reviewed_by = NULL
                                WHERE id = $1""",
-                            existing["id"], confidence, new_status,
+                            existing["id"],
+                            confidence,
+                            new_status,
                         )
                         updated += 1
                     else:
@@ -509,7 +521,9 @@ async def scan_all_alias_candidates(
                             """INSERT INTO entity_alias_candidates
                                    (source_name, target_node_id, confidence, occurrences)
                                VALUES ($1, $2, $3, 1)""",
-                            name, node["id"], confidence,
+                            name,
+                            node["id"],
+                            confidence,
                         )
                         inserted += 1
 
@@ -533,5 +547,3 @@ async def scan_all_alias_candidates(
     except Exception as exc:
         logger.warning("scan_all_alias_candidates failed: %r", exc)
         raise
-
-

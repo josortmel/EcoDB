@@ -22,6 +22,7 @@ Pendiente (deuda anotada):
 - VS6 → pip-compile --generate-hashes antes de imagen de produccion.
 - VS9 → rate limiting (slowapi) antes de VPS.
 """
+
 import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 from contextlib import asynccontextmanager
 
@@ -41,6 +42,7 @@ from db import close_pool, get_pool
 # saltaba el middleware. ASGI puro intercepta http.response.start ANTES de
 # que el body se serialice — los headers se aplican siempre, incluso en 500.
 # ---------------------------------------------------------------------------
+
 
 class SecurityHeadersMiddleware:
     def __init__(self, app: ASGIApp) -> None:
@@ -68,12 +70,14 @@ class SecurityHeadersMiddleware:
 # Lifespan: abrir pool al arrancar, cerrarlo al apagar.
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Validacion de secretos en production al startup (no al import — eso
     # rompia tests). En development es no-op.
     settings.validate_production_secrets()
     import logging as _startup_logging
+
     _ecodb_log = _startup_logging.getLogger("ecodb")
     _ecodb_log.setLevel(_startup_logging.INFO)
     if not _ecodb_log.handlers:
@@ -93,28 +97,31 @@ async def lifespan(app: FastAPI):
     # silenciosa y el cache queda vacío — extract_entities sigue funcionando
     # sin override (solo GLiNER puro).
     from migrations import run_migrations
+
     pool = await get_pool()
     await run_migrations(pool)
 
     try:
         from gliner_service import load_dictionary_to_cache, renormalize_dictionary
+
         pool = await get_pool()
         # #478: las entradas mal normalizadas se arreglan ANTES de cargar el cache, en el
         # mismo arranque que trae la búsqueda sin tildes (por separado, cada uno rompe algo).
         await renormalize_dictionary(pool)
         count = await load_dictionary_to_cache(pool)
         import logging
-        logging.getLogger("ecodb.startup").info(
-            "entity_dictionary cache loaded at startup: %d entries", count
-        )
+
+        logging.getLogger("ecodb.startup").info("entity_dictionary cache loaded at startup: %d entries", count)
     except Exception as exc:
         import logging
+
         logging.getLogger("ecodb.startup").warning(
             "entity_dictionary cache load failed at startup (extract_entities will run without overrides): %r", exc
         )
 
     # LLM provider init (Adendum A)
     from llm_provider import init_llm_provider
+
     llm = init_llm_provider()
     if llm:
         is_avail = await llm.available()
@@ -144,6 +151,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         _ecodb_log.error("Final access flush failed: %r", exc)
     from llm_provider import get_llm_provider
+
     llm = get_llm_provider()
     if llm and hasattr(llm, "aclose"):
         await llm.aclose()
@@ -153,6 +161,7 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 # Factory: crea la app con la configuracion del entorno dado.
 # ---------------------------------------------------------------------------
+
 
 def create_app(environment: str = None) -> FastAPI:
     if environment is None:
@@ -184,12 +193,14 @@ def create_app(environment: str = None) -> FastAPI:
 
     # VS9: rate limiting in-memory por actor+path.
     from rate_limit import RateLimitMiddleware
+
     app.add_middleware(RateLimitMiddleware)
 
     import json as _json
     import httpx as _httpx
 
     from settings import EMBEDDINGS_URL as _EMBEDDINGS_URL_SETTING
+
     _EMBEDDINGS_HEALTH_URL = _EMBEDDINGS_URL_SETTING + "/health"
 
     @app.get("/health", tags=["health"], operation_id="health_liveness")
@@ -202,13 +213,13 @@ def create_app(environment: str = None) -> FastAPI:
                     embeddings_status = "degraded"
         except Exception as _e:
             import logging as _logging
-            _logging.getLogger("ecodb.health").warning(
-                "embeddings health check failed: %s", type(_e).__name__
-            )
+
+            _logging.getLogger("ecodb.health").warning("embeddings health check failed: %s", type(_e).__name__)
             embeddings_status = "degraded"
         llm_status = "off"
         if settings.ECODB_LLM_PROVIDER != "off":
             from llm_provider import get_llm_provider
+
             llm = get_llm_provider()
             if llm:
                 try:
@@ -218,14 +229,16 @@ def create_app(environment: str = None) -> FastAPI:
                     llm_status = "degraded"
             else:
                 llm_status = "not_configured"
-        body = _json.dumps({
-            "status": "ok",
-            "service": "ecodb-api",
-            "api_version": settings.API_VERSION,
-            "schema_version_target": settings.SCHEMA_VERSION,
-            "embeddings": embeddings_status,
-            "llm": llm_status,
-        }).encode("utf-8")
+        body = _json.dumps(
+            {
+                "status": "ok",
+                "service": "ecodb-api",
+                "api_version": settings.API_VERSION,
+                "schema_version_target": settings.SCHEMA_VERSION,
+                "embeddings": embeddings_status,
+                "llm": llm_status,
+            }
+        ).encode("utf-8")
         return Response(content=body, media_type="application/json", status_code=200)
 
     @app.head("/health", include_in_schema=False)
@@ -237,92 +250,116 @@ def create_app(environment: str = None) -> FastAPI:
 
     # Memories router.
     import memories
+
     app.include_router(memories.router)
 
     # Graph router — SQL + AGE atomico.
     import graph
+
     app.include_router(graph.router)
 
     # Search router — busqueda semantica basica = Etapa 3 GAMR.
     import search
+
     app.include_router(search.router)
 
     # Workspaces router — CRUD workspaces con cascada permisos.
     import workspaces
+
     app.include_router(workspaces.router)
 
     # Projects router — CRUD projects con cascada heredada de 2.1.
     import projects
+
     app.include_router(projects.router)
 
     # Teams router — equipos ad-hoc cross-workspace.
     import teams
+
     app.include_router(teams.router)
 
     # Admin router — operaciones admin (redistribución, etc.).
     import admin
+
     app.include_router(admin.router)
 
     # Users router — user_preferences GET/PUT /users/me/preferences.
     import users
+
     app.include_router(users.router)
 
     # Agents router — agent_identity endpoints (Sprint Paridad parcial Opción A).
     import agents
+
     app.include_router(agents.router)
     app.include_router(agents.router_v1, prefix="/api/v1")
 
     # Stats router — métricas de memorias, grafo, agentes, búsqueda, sistema.
     import stats
+
     app.include_router(stats.router, prefix="/api/v1")
 
     # Events router — session events + last_seen.
     import events
+
     app.include_router(events.router, prefix="/api/v1")
 
     # Onboarding router — resumen de proyecto para agente/dashboard.
     import onboarding
+
     app.include_router(onboarding.router, prefix="/api/v1")
 
     # Documents router (Task 4.11) — document CRUD + ingestion queue.
     import documents
+
     app.include_router(documents.router)
 
     # Telemetry router (Fase B.1) — internal-only injection telemetry.
     import telemetry_api
+
     app.include_router(telemetry_api.router)
 
     # --- Metacognicion routers (v2.0) ---
     import clusters
+
     app.include_router(clusters.router, prefix="/api/v1")
 
     import briefing
+
     app.include_router(briefing.router, prefix="/api/v1")
 
     import foresights
+
     app.include_router(foresights.router, prefix="/api/v1")
 
     import cases
+
     app.include_router(cases.router, prefix="/api/v1")
 
     import skills
+
     app.include_router(skills.router, prefix="/api/v1")
 
     import cells
+
     app.include_router(cells.router, prefix="/api/v1")
 
     # --- Memory Agent routers (v1.3) ---
     import cell_configs
+
     app.include_router(cell_configs.router, prefix="/api/v1")
 
     import cell_templates
+
     app.include_router(cell_templates.router, prefix="/api/v1")
 
     import providers
+
     app.include_router(providers.router, prefix="/api/v1")
 
     # Decisiones vigentes (#919) — solo lectura, lógica en vigentes.py.
     import decisiones
+
     app.include_router(decisiones.router, prefix="/api/v1")
 
     return app

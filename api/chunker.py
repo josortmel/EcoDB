@@ -1,4 +1,5 @@
 """Chunking pipeline for EcoDB ingestion — Task 4.4."""
+
 import logging
 import re
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ def _split_with_overlap(text: str, max_tokens: int = CHUNK_SIZE, overlap: int = 
 
 def chunk_document(parse_result, doc_type: str) -> list[ChunkResult]:
     from parsers import TranscriptionResult
+
     if isinstance(parse_result, TranscriptionResult):
         return _chunk_audio(parse_result)
     if doc_type in ("md", "markdown"):
@@ -58,7 +60,7 @@ def chunk_document(parse_result, doc_type: str) -> list[ChunkResult]:
 # Header-aware markdown chunking
 # ---------------------------------------------------------------------------
 
-_HEADER_RE = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+_HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
 
 def _build_section_path(stack: list[tuple[int, str]]) -> str:
@@ -77,7 +79,7 @@ def _chunk_markdown(text: str) -> list[ChunkResult]:
     idx = 0
 
     # Capture preamble (text before first header) as section_path=None chunk
-    preamble = text[:header_matches[0].start()].strip()
+    preamble = text[: header_matches[0].start()].strip()
     if preamble:
         if _count_tokens(preamble) <= CHUNK_SIZE:
             chunks.append(ChunkResult(content=preamble, chunk_index=idx, section_path=None))
@@ -91,7 +93,7 @@ def _chunk_markdown(text: str) -> list[ChunkResult]:
     sections = []
     for i, m in enumerate(header_matches):
         end = header_matches[i + 1].start() if i + 1 < len(header_matches) else len(text)
-        sections.append((len(m.group(1)), m.group(2).strip(), text[m.start():end].strip()))
+        sections.append((len(m.group(1)), m.group(2).strip(), text[m.start() : end].strip()))
 
     stack: list[tuple[int, str]] = []
 
@@ -117,22 +119,31 @@ def _chunk_markdown(text: str) -> list[ChunkResult]:
 # Docling output (pdf / docx / html — Docling exports to markdown)
 # ---------------------------------------------------------------------------
 
+
 def _chunk_docling(parse_result) -> list[ChunkResult]:
     chunks = _chunk_markdown(parse_result.text)
     idx = len(chunks)
     for table_md in getattr(parse_result, "tables", []):
         if _count_tokens(table_md) <= CHUNK_SIZE:
-            chunks.append(ChunkResult(
-                content=table_md, chunk_index=idx,
-                section_path=None, metadata={"is_table": True},
-            ))
+            chunks.append(
+                ChunkResult(
+                    content=table_md,
+                    chunk_index=idx,
+                    section_path=None,
+                    metadata={"is_table": True},
+                )
+            )
             idx += 1
         else:
             for sub in _split_with_overlap(table_md):
-                chunks.append(ChunkResult(
-                    content=sub, chunk_index=idx,
-                    section_path=None, metadata={"is_table": True},
-                ))
+                chunks.append(
+                    ChunkResult(
+                        content=sub,
+                        chunk_index=idx,
+                        section_path=None,
+                        metadata={"is_table": True},
+                    )
+                )
                 idx += 1
     return chunks
 
@@ -141,7 +152,7 @@ def _chunk_docling(parse_result) -> list[ChunkResult]:
 # Plain text — recursive split: paragraphs → sentences → hard split
 # ---------------------------------------------------------------------------
 
-_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _chunk_txt(text: str) -> list[ChunkResult]:
@@ -167,6 +178,7 @@ def _chunk_txt(text: str) -> list[ChunkResult]:
 # Audio — group Whisper segments into ~60s windows with 10s overlap
 # ---------------------------------------------------------------------------
 
+
 def _chunk_audio(result) -> list[ChunkResult]:
     segments = result.segments
     if not segments:
@@ -184,15 +196,17 @@ def _chunk_audio(result) -> list[ChunkResult]:
             window_start += AUDIO_WINDOW_SEC
             continue
 
-        chunks.append(ChunkResult(
-            content=" ".join(s["text"] for s in window_segs).strip(),
-            chunk_index=chunk_index,
-            section_path=None,
-            metadata={
-                "timestamp_start": window_segs[0]["start"],
-                "timestamp_end": window_segs[-1]["end"],
-            },
-        ))
+        chunks.append(
+            ChunkResult(
+                content=" ".join(s["text"] for s in window_segs).strip(),
+                chunk_index=chunk_index,
+                section_path=None,
+                metadata={
+                    "timestamp_start": window_segs[0]["start"],
+                    "timestamp_end": window_segs[-1]["end"],
+                },
+            )
+        )
         chunk_index += 1
 
         if all(s["start"] < window_end for s in segments):
@@ -206,6 +220,7 @@ def _chunk_audio(result) -> list[ChunkResult]:
 # Shared: merge parts into token-capped chunks with paragraph-level overlap
 # ---------------------------------------------------------------------------
 
+
 def _merge_into_chunks(parts: list[str], section_path: str | None) -> list[ChunkResult]:
     chunks: list[ChunkResult] = []
     current: list[str] = []
@@ -213,11 +228,13 @@ def _merge_into_chunks(parts: list[str], section_path: str | None) -> list[Chunk
 
     def _flush():
         if current:
-            chunks.append(ChunkResult(
-                content="\n\n".join(current),
-                chunk_index=0,
-                section_path=section_path,
-            ))
+            chunks.append(
+                ChunkResult(
+                    content="\n\n".join(current),
+                    chunk_index=0,
+                    section_path=section_path,
+                )
+            )
 
     for part in parts:
         pt = _count_tokens(part)

@@ -1,4 +1,5 @@
 """GLiNER NER microservice — lightweight HTTP API."""
+
 import asyncio
 import logging
 import time
@@ -18,6 +19,7 @@ async def lifespan(app):
     log.info("Loading GLiNER model...")
     t0 = time.time()
     from gliner import GLiNER
+
     loop = asyncio.get_running_loop()
     _model = await loop.run_in_executor(None, GLiNER.from_pretrained, "urchade/gliner_multi-v2.1")
     log.info("GLiNER loaded in %.1fs", time.time() - t0)

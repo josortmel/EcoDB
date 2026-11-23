@@ -6,6 +6,7 @@ real postgres+AGE; extract_entities is replaced so the test needs no GLiNER mode
 
 Run ONLY against a throwaway DB: TEST_DB_PORT=5436 (never the live family DB on 5435).
 """
+
 import asyncio
 import sys
 import uuid
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import gliner_service  # noqa: E402
 import graph  # noqa: E402
 
+
 def _names():
     tag = f"pytest-stop443-{uuid.uuid4().hex[:6]}"
     # STOPPED carries an accent; the stop list stores it without (normalize_name strips accents, #478)
@@ -29,7 +31,9 @@ def _names():
 async def _linked_names(conn, memory_id):
     rows = await conn.fetch(
         """SELECT n.name FROM memory_entity_links l JOIN nodes n ON n.id = l.entity_node_id
-           WHERE l.memory_id = $1""", memory_id)
+           WHERE l.memory_id = $1""",
+        memory_id,
+    )
     return {r["name"] for r in rows}
 
 
@@ -37,8 +41,10 @@ async def _scenario(with_stop: bool):
     TAG, STOPPED, KEPT = _names()
 
     async def _fake_extract(content, *args, **kwargs):
-        return [{"text": STOPPED, "label": "organizacion", "score": 1.0, "source": "dictionary"},
-                {"text": KEPT, "label": "concepto", "score": 1.0, "source": "dictionary"}]
+        return [
+            {"text": STOPPED, "label": "organizacion", "score": 1.0, "source": "dictionary"},
+            {"text": KEPT, "label": "concepto", "score": 1.0, "source": "dictionary"},
+        ]
 
     conn = await asyncpg.connect(TEST_DB_URL)
     original = gliner_service.extract_entities
@@ -46,19 +52,26 @@ async def _scenario(with_stop: bool):
     try:
         memory_id = await conn.fetchval(
             "INSERT INTO memories (workspace_id, project_id, type, content) "
-            "VALUES (1, 1, 'observacion', $1) RETURNING id", f"{TAG} memory")
+            "VALUES (1, 1, 'observacion', $1) RETURNING id",
+            f"{TAG} memory",
+        )
         if with_stop:
             await conn.execute(
                 "INSERT INTO stop_entities (name, name_normalized, reason, created_by) VALUES ($1, $2, $3, 1)",
-                STOPPED, gliner_service.normalize_name(STOPPED.replace("é", "e")), TAG)
+                STOPPED,
+                gliner_service.normalize_name(STOPPED.replace("é", "e")),
+                TAG,
+            )
         count = await graph.link_entities_from_content(conn, memory_id, "irrelevant, extraction is faked")
         names = await _linked_names(conn, memory_id)
         stopped_nodes = await conn.fetchval("SELECT count(*) FROM nodes WHERE name = $1", STOPPED)
         return count, names, stopped_nodes, STOPPED, KEPT
     finally:
         gliner_service.extract_entities = original
-        await conn.execute("DELETE FROM memory_entity_links WHERE memory_id IN "
-                           "(SELECT id FROM memories WHERE content LIKE $1)", f"{TAG}%")
+        await conn.execute(
+            "DELETE FROM memory_entity_links WHERE memory_id IN (SELECT id FROM memories WHERE content LIKE $1)",
+            f"{TAG}%",
+        )
         await conn.execute("DELETE FROM memories WHERE content LIKE $1", f"{TAG}%")
         await conn.execute("DELETE FROM stop_entities WHERE reason = $1", TAG)
         await conn.close()

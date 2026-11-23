@@ -10,6 +10,7 @@ throwaway Postgres on 5436. Any asyncpg connection to the live DB (host port
 session via pytest.exit() unless ECODB_ALLOW_LIVE_TESTS=1 is set explicitly.
 Pure tests (no DB) run anywhere. (C18, after the 2026-09-25 live-run incident.)
 """
+
 import functools
 import os
 import sys
@@ -62,10 +63,18 @@ def _resolve_targets(dsn=None, host=None, port=None) -> list[tuple[str, int]]:
                 h, p = part, ""
             dsn_hosts.append(h)
             dsn_ports.append(p)
-    hosts = ([host] if host else None) or [h for h in dsn_hosts if h] or query.get("host") \
+    hosts = (
+        ([host] if host else None)
+        or [h for h in dsn_hosts if h]
+        or query.get("host")
         or [os.environ.get("PGHOST") or "localhost"]
-    ports = ([str(port)] if port else None) or [p for p in dsn_ports if p] or query.get("port") \
+    )
+    ports = (
+        ([str(port)] if port else None)
+        or [p for p in dsn_ports if p]
+        or query.get("port")
         or [os.environ.get("PGPORT") or "5432"]
+    )
     if len(ports) == 1:
         ports = ports * len(hosts)
     return [(h, int(p)) for h, p in zip(hosts, ports)]
@@ -92,6 +101,7 @@ def _guard(fn):
     def wrapper(dsn=None, *args, **kwargs):
         _refuse_live(dsn, **kwargs)
         return fn(dsn, *args, **kwargs)
+
     return wrapper
 
 
@@ -109,6 +119,8 @@ def db_url():
 @pytest.fixture
 def api_url():
     if os.environ.get("ECODB_ALLOW_LIVE_TESTS") != "1" and urlparse(TEST_API_URL).port in LIVE_API_PORTS:
-        pytest.exit("REFUSED: api_url points at the live API (:8080). Set TEST_API_URL or ECODB_ALLOW_LIVE_TESTS=1.",
-                    returncode=3)
+        pytest.exit(
+            "REFUSED: api_url points at the live API (:8080). Set TEST_API_URL or ECODB_ALLOW_LIVE_TESTS=1.",
+            returncode=3,
+        )
     return TEST_API_URL

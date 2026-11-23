@@ -16,6 +16,7 @@ anadir si surge caso.
 Validacion tamano: max 32KB JSON request body para evitar DoS via prefs grandes.
 JSONB en Postgres puede llegar hasta 1GB pero lo limitamos a tamano razonable.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,6 +54,7 @@ class PreferencesUpdate(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/preferences", response_model=PreferencesResponse)
 async def get_my_preferences(
@@ -109,12 +111,14 @@ async def put_my_preferences(
               SET prefs = EXCLUDED.prefs, updated_at = now()
             RETURNING user_id, prefs, updated_at
             """,
-            user_id, serialized,
+            user_id,
+            serialized,
         )
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_preferences', 'user_preferences', $2, $3::jsonb, $4)""",
-            user_id, str(user_id),
+            user_id,
+            str(user_id),
             json.dumps({"size_bytes": len(serialized.encode("utf-8"))}),
             actor.get("organization_id"),
         )

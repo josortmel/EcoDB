@@ -7,6 +7,7 @@ no-op that returns results unchanged + logs WARNING.
 Security: trust_remote_code=False, revision pinned to specific SHA.
 Must run locally — never call external reranking APIs.
 """
+
 import logging
 import os
 
@@ -27,6 +28,7 @@ def _load_model():
         log.info("Reranker disabled by RERANKER_ENABLED=false")
         return
     from settings import RERANKER_MODEL_ALLOWLIST
+
     if RERANKER_MODEL not in RERANKER_MODEL_ALLOWLIST:
         log.error("RERANKER_MODEL %r not in allowlist — refusing to load", RERANKER_MODEL)
         return
@@ -35,6 +37,7 @@ def _load_model():
         return
     try:
         from sentence_transformers import CrossEncoder
+
         kwargs = {
             "trust_remote_code": False,
             "revision": RERANKER_REVISION,

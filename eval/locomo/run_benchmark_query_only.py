@@ -7,6 +7,7 @@ Usage:
     ECODB_API_KEY=<key> SEARCH_LIMIT=5  python eval/locomo/run_benchmark_query_only.py
     ECODB_API_KEY=<key> SEARCH_LIMIT=25 python eval/locomo/run_benchmark_query_only.py
 """
+
 import functools
 import json
 import math
@@ -51,7 +52,7 @@ def discover_workspaces(client: httpx.Client) -> dict[str, tuple[int, int]]:
         name = ws["name"]
         if not name.startswith("locomo-chunked-"):
             continue
-        suffix = name[len("locomo-chunked-"):]  # e.g. "conv-26" or "conv-26-17483..."
+        suffix = name[len("locomo-chunked-") :]  # e.g. "conv-26" or "conv-26-17483..."
         # Extract conv id: take up to the second hyphen group "conv-XX"
         parts = suffix.split("-")
         if len(parts) >= 2 and parts[0] == "conv":
@@ -78,8 +79,9 @@ def discover_workspaces(client: httpx.Client) -> dict[str, tuple[int, int]]:
     return result
 
 
-def reconstruct_session_mapping(client: httpx.Client, ws_id: int,
-                                 sample_id: str, session_keys: list[str]) -> dict[str, list[str]]:
+def reconstruct_session_mapping(
+    client: httpx.Client, ws_id: int, sample_id: str, session_keys: list[str]
+) -> dict[str, list[str]]:
     """Rebuild session_key -> [mem_ids] by querying per-session tag.
 
     Uses tag filter (one call per session) to avoid limit/pagination issues.
@@ -88,9 +90,11 @@ def reconstruct_session_mapping(client: httpx.Client, ws_id: int,
     mapping: dict[str, list[str]] = {}
     for sk in session_keys:
         tag = f"session:{sample_id}_{sk}"
-        r = client.get(f"{API_URL}/memories/recent", headers=headers(), params={
-            "workspace_id": ws_id, "tag": tag, "limit": 100, "expand_scope": "true"
-        })
+        r = client.get(
+            f"{API_URL}/memories/recent",
+            headers=headers(),
+            params={"workspace_id": ws_id, "tag": tag, "limit": 100, "expand_scope": "true"},
+        )
         r.raise_for_status()
         items = r.json().get("items", [])
         if items:
@@ -111,8 +115,9 @@ def evidence_to_sessions(evidence: list[str]) -> set[str]:
     return sessions
 
 
-def search_and_evaluate(client: httpx.Client, conv: dict, ws_id: int,
-                         session_mapping: dict, conv_id: str) -> list[dict]:
+def search_and_evaluate(
+    client: httpx.Client, conv: dict, ws_id: int, session_mapping: dict, conv_id: str
+) -> list[dict]:
     """Run all QA pairs and compute session-level recall@K with dedup."""
     memid_to_session: dict[str, str] = {}
     for sk, mem_ids in session_mapping.items():
@@ -133,18 +138,20 @@ def search_and_evaluate(client: httpx.Client, conv: dict, ws_id: int,
         query = q["question"]
 
         try:
-            r = client.post(f"{API_URL}/search", headers=headers(),
-                             json={
-                                 "query_text": query,
-                                 "workspace_id": ws_id,
-                                 "limit": SEARCH_LIMIT,
-                                 "include_documents": False,
-                             })
+            r = client.post(
+                f"{API_URL}/search",
+                headers=headers(),
+                json={
+                    "query_text": query,
+                    "workspace_id": ws_id,
+                    "limit": SEARCH_LIMIT,
+                    "include_documents": False,
+                },
+            )
             r.raise_for_status()
             search_results = r.json()
         except Exception as e:
-            results.append({"question": query, "category": q.get("category", 0),
-                            "error": str(e), "metrics": {}})
+            results.append({"question": query, "category": q.get("category", 0), "error": str(e), "metrics": {}})
             continue
 
         # Dedup: walk ranked chunks, keep first occurrence per session
@@ -179,22 +186,24 @@ def search_and_evaluate(client: httpx.Client, conv: dict, ws_id: int,
         r10 = entry_metrics.get("recall_any@10", 0)
         print(f"  [{conv_id}] Query {query_num}/{total_queries}: R@1={r1:.0f} R@5={r5:.0f} R@10={r10:.0f}")
 
-        results.append({
-            "question": query,
-            "category": q.get("category", 0),
-            "category_name": CAT_NAMES.get(q.get("category", 0), "unknown"),
-            "gold_sessions": sorted(gold_sessions),
-            "retrieved_sessions": retrieved_sessions[:10],
-            "metrics": entry_metrics,
-        })
+        results.append(
+            {
+                "question": query,
+                "category": q.get("category", 0),
+                "category_name": CAT_NAMES.get(q.get("category", 0), "unknown"),
+                "gold_sessions": sorted(gold_sessions),
+                "retrieved_sessions": retrieved_sessions[:10],
+                "metrics": entry_metrics,
+            }
+        )
 
     return results
 
 
 def print_metrics(all_results: list[dict], label: str):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"LoCoMo Results -- {label}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     metrics_accum: dict[str, list] = defaultdict(list)
     by_category: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
@@ -209,7 +218,7 @@ def print_metrics(all_results: list[dict], label: str):
     print(f"\nOverall ({len(metrics_accum.get('recall_any@5', []))} queries):")
     for key in sorted(metrics_accum.keys()):
         vals = metrics_accum[key]
-        print(f"  {key}: {sum(vals)/len(vals):.4f}")
+        print(f"  {key}: {sum(vals) / len(vals):.4f}")
 
     print(f"\nBy category:")
     for cat_name in ["single-hop", "temporal", "multi-hop", "open-domain", "adversarial"]:
@@ -217,7 +226,7 @@ def print_metrics(all_results: list[dict], label: str):
             continue
         r5 = by_category[cat_name].get("recall_any@5", [])
         if r5:
-            print(f"  {cat_name}: R@5={sum(r5)/len(r5):.4f} ({len(r5)} queries)")
+            print(f"  {cat_name}: R@5={sum(r5) / len(r5):.4f} ({len(r5)} queries)")
 
 
 def main():
@@ -257,10 +266,10 @@ def main():
                 c = conv["conversation"]
                 session_keys = sorted(
                     [k for k in c if k.startswith("session_") and not k.endswith("_date_time")],
-                    key=lambda x: int(x.split("_")[1])
+                    key=lambda x: int(x.split("_")[1]),
                 )
                 qa_count = len(conv["qa"])
-                print(f"--- Conversation {conv_idx+1}/{len(ws_map)}: {conv_id} (ws={ws_id}, {qa_count} QA) ---")
+                print(f"--- Conversation {conv_idx + 1}/{len(ws_map)}: {conv_id} (ws={ws_id}, {qa_count} QA) ---")
 
                 print(f"  Reconstructing session mapping from tags...")
                 session_mapping = reconstruct_session_mapping(client, ws_id, conv_id, session_keys)

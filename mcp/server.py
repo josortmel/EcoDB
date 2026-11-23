@@ -28,6 +28,7 @@ Run:
 - Subprocess stdio: `python server.py` (configuracion para Claude Code MCP).
 - Standalone test: importa mcp_call_X() directo.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,8 +46,8 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
-_URL_SCHEME_RE = _re.compile(r'^(https?|ftp|file|rtsp|rtmp)://', _re.IGNORECASE)
-_UUID_RE = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
+_URL_SCHEME_RE = _re.compile(r"^(https?|ftp|file|rtsp|rtmp)://", _re.IGNORECASE)
+_UUID_RE = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", _re.I)
 from mcp.server.fastmcp import FastMCP, Image
 
 # #492 (Prima, 13-oct; el mismo fallo que el #339 de FarOS): FastMCP valida los argumentos de cada
@@ -58,10 +59,14 @@ from mcp.server.fastmcp import FastMCP, Image
 # stderr (stdout es el protocolo en stdio) y se vuelve a lo de antes. Lo caza test_mcp_unknown_args.
 try:
     from mcp.server.fastmcp.utilities import func_metadata as _fm
+
     _fm.ArgModelBase.model_config["extra"] = "forbid"
 except (ImportError, AttributeError, TypeError) as _exc:
-    print(f"[ecodb-mcp] AVISO #492: no se pudo prohibir argumentos desconocidos ({_exc!r}); "
-          "FastMCP los descartará en silencio", file=sys.stderr)
+    print(
+        f"[ecodb-mcp] AVISO #492: no se pudo prohibir argumentos desconocidos ({_exc!r}); "
+        "FastMCP los descartará en silencio",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +77,7 @@ ECODB_API_URL = os.environ.get("ECODB_API_URL", "http://localhost:8080").rstrip(
 ECODB_API_KEY = os.environ.get("ECODB_API_KEY", "")
 ECODB_TIMEOUT = float(os.environ.get("ECODB_TIMEOUT", "60.0"))
 
+
 # Transport selector — --transport CLI o env MCP_TRANSPORT:
 # - "stdio" (default, dev local): subprocess invocado por Claude Code.
 # - "sse": HTTP server-sent events, util para containerizar y servir por red.
@@ -79,12 +85,14 @@ ECODB_TIMEOUT = float(os.environ.get("ECODB_TIMEOUT", "60.0"))
 # El docker-compose pasa MCP_TRANSPORT=sse para exponer el puerto 8091.
 def _resolve_transport() -> str:
     import sys
+
     for i, arg in enumerate(sys.argv[1:], 1):
         if arg == "--transport" and i < len(sys.argv) - 1:
             return sys.argv[i + 1].lower()
         if arg.startswith("--transport="):
             return arg.split("=", 1)[1].lower()
     return os.environ.get("MCP_TRANSPORT", "stdio").lower()
+
 
 MCP_TRANSPORT = _resolve_transport()
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
@@ -112,7 +120,26 @@ _INTERNAL_HOSTS |= {h.strip().lower() for h in os.environ.get("ECODB_INTERNAL_HO
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MEDIA_STORE_DIR = Path(os.environ.get("ECODB_MEDIA_DIR", str(_PROJECT_ROOT / "media"))).resolve()
 MAX_MEDIA_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-_DENIED_EXTENSIONS = {".env", ".key", ".pem", ".pfx", ".p12", ".p8", ".ppk", ".der", ".yaml", ".toml", ".ini", ".config", ".exe", ".dll", ".bat", ".ps1", ".sh", ".cmd"}
+_DENIED_EXTENSIONS = {
+    ".env",
+    ".key",
+    ".pem",
+    ".pfx",
+    ".p12",
+    ".p8",
+    ".ppk",
+    ".der",
+    ".yaml",
+    ".toml",
+    ".ini",
+    ".config",
+    ".exe",
+    ".dll",
+    ".bat",
+    ".ps1",
+    ".sh",
+    ".cmd",
+}
 _EMBEDDABLE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}
 _NO_COPY_EXTENSIONS = {".html", ".css", ".htm"}
 
@@ -144,24 +171,38 @@ def _resolve_predicate(predicate: str, subject_type: str = "unknown", object_typ
     # Etapa 1+2: cache de lexemas + alias
     cache_key = (lexeme, subject_type, object_type)
     if cache_key in _predicate_cache:
-        return {"canonical": _predicate_cache[cache_key], "original": original,
-                "confidence": 1.0, "needs_review": False, "method": "cache"}
+        return {
+            "canonical": _predicate_cache[cache_key],
+            "original": original,
+            "confidence": 1.0,
+            "needs_review": False,
+            "method": "cache",
+        }
 
     # Domain-específico primero, genérico como fallback (BC3: coherente con SQL)
     for domain_key in [(lexeme, subject_type), (lexeme, object_type), (lexeme, None)]:
         if domain_key in _alias_cache:
             canonical = _alias_cache[domain_key]
             _predicate_cache[cache_key] = canonical
-            return {"canonical": canonical, "original": original,
-                    "confidence": 1.0, "needs_review": False, "method": "alias"}
+            return {
+                "canonical": canonical,
+                "original": original,
+                "confidence": 1.0,
+                "needs_review": False,
+                "method": "alias",
+            }
 
     # Etapa 2b: exact match contra predicates_canonical
     try:
-        data = _api_call("GET", "/graph/predicates/resolve", params={
-            "predicate": lexeme,
-            "subject_type": subject_type,
-            "object_type": object_type,
-        })
+        data = _api_call(
+            "GET",
+            "/graph/predicates/resolve",
+            params={
+                "predicate": lexeme,
+                "subject_type": subject_type,
+                "object_type": object_type,
+            },
+        )
         if data.get("canonical"):
             canonical = data["canonical"]
             confidence = float(data.get("confidence", 0.0))
@@ -169,14 +210,18 @@ def _resolve_predicate(predicate: str, subject_type: str = "unknown", object_typ
             needs_review = confidence < MAPPER_THRESHOLD
             if confidence >= MAPPER_THRESHOLD:
                 _predicate_cache[cache_key] = canonical
-            return {"canonical": canonical, "original": original,
-                    "confidence": confidence, "needs_review": needs_review, "method": method}
+            return {
+                "canonical": canonical,
+                "original": original,
+                "confidence": confidence,
+                "needs_review": needs_review,
+                "method": method,
+            }
     except RuntimeError:
         pass
 
     # Etapa 5: no mapeó — va a pending
-    return {"canonical": lexeme, "original": original,
-            "confidence": 0.0, "needs_review": True, "method": "pending"}
+    return {"canonical": lexeme, "original": original, "confidence": 0.0, "needs_review": True, "method": "pending"}
 
 
 def _load_alias_cache() -> None:
@@ -205,6 +250,8 @@ def _copy_to_media_store(source_path: str, memory_id: str) -> str:
     dest = month_dir / f"{memory_id}_{real_path.name}"
     shutil.copy2(str(real_path), str(dest))
     return str(dest)
+
+
 _parsed_api_url = urlparse(ECODB_API_URL)
 if _parsed_api_url.scheme == "http" and _parsed_api_url.hostname not in _INTERNAL_HOSTS:
     raise RuntimeError(
@@ -212,9 +259,7 @@ if _parsed_api_url.scheme == "http" and _parsed_api_url.hostname not in _INTERNA
         f"Got: {_parsed_api_url.hostname!r}. Para hosts externos usar https://."
     )
 if _parsed_api_url.scheme not in ("http", "https"):
-    raise RuntimeError(
-        f"ECODB_API_URL scheme must be http or https, got: {_parsed_api_url.scheme!r}"
-    )
+    raise RuntimeError(f"ECODB_API_URL scheme must be http or https, got: {_parsed_api_url.scheme!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +361,9 @@ def _normalize(obj):
         return {k: _normalize(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_normalize(v) for v in obj]
-    if hasattr(obj, 'isoformat'):  # datetime, date
+    if hasattr(obj, "isoformat"):  # datetime, date
         return obj.isoformat()
-    if hasattr(obj, 'hex') and hasattr(obj, 'int'):  # UUID
+    if hasattr(obj, "hex") and hasattr(obj, "int"):  # UUID
         return str(obj)
     return obj
 
@@ -349,8 +394,10 @@ def _err(exc: Exception) -> dict:
 # The API accepts occurred_at at most 7 days back: a queue stuck longer than that lands in failed/
 # (and is reported), it is never sent with a false date.
 
-SPOOL_DIR = Path(os.environ.get("ECODB_SPOOL_DIR") or (
-    Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "ecodb-mcp" / "spool"))
+SPOOL_DIR = Path(
+    os.environ.get("ECODB_SPOOL_DIR")
+    or (Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache") / "ecodb-mcp" / "spool")
+)
 SPOOL_RETRY_SECONDS = float(os.environ.get("ECODB_SPOOL_RETRY_SECONDS", "30"))
 # #1114 (10-nov, lo vio Lienzo): al volver la API, las cuatro sesiones vaciaban sus colas a la vez, el
 # límite de POST /memories (20 por minuto) respondía 429 y esas memorias iban a failed/. Ahora la cola
@@ -381,8 +428,12 @@ def _retry_after(exc: Exception) -> float:
 
 def _spool_put(mem_id: str, payload: dict, file_real: Optional[str]) -> None:
     SPOOL_DIR.mkdir(parents=True, exist_ok=True)
-    rec = {"id": mem_id, "payload": payload, "file_real": file_real,
-           "queued_at": datetime.now(timezone.utc).isoformat()}
+    rec = {
+        "id": mem_id,
+        "payload": payload,
+        "file_real": file_real,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
     tmp = SPOOL_DIR / f"{mem_id}.tmp"
     tmp.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, SPOOL_DIR / f"{mem_id}.json")
@@ -398,8 +449,7 @@ def _spool_status() -> dict:
         return {}
     out = {"pending": pending, "failed": failed, "dir": str(SPOOL_DIR)}
     if failed:
-        out["warning"] = (f"{failed} queued memories could NOT be saved; "
-                          f"read {failed_dir} (each file says why)")
+        out["warning"] = f"{failed} queued memories could NOT be saved; read {failed_dir} (each file says why)"
     return out
 
 
@@ -545,9 +595,13 @@ def save_memory(
     if agent_identifier is not None:
         payload["agent_identifier"] = agent_identifier
     # #919: solo se mandan si vienen (la API valida tipos, fechas y permisos).
-    for _k, _v in (("supersedes", supersedes), ("supersede_kind", supersede_kind),
-                   ("supersede_reason", supersede_reason), ("valid_until", valid_until),
-                   ("decidido_por", decidido_por)):
+    for _k, _v in (
+        ("supersedes", supersedes),
+        ("supersede_kind", supersede_kind),
+        ("supersede_reason", supersede_reason),
+        ("valid_until", valid_until),
+        ("decidido_por", decidido_por),
+    ):
         if _v is not None:
             payload[_k] = _v
     resolved_file_path = file_path if file_path is not None else image_path
@@ -565,6 +619,7 @@ def save_memory(
                 return _err(RuntimeError(f"file exceeds max size ({fsize} > {MAX_MEDIA_FILE_SIZE} bytes)"))
             if ext in _EMBEDDABLE_IMAGE_EXTENSIONS:
                 import base64 as _b64
+
                 with open(real, "rb") as _f:
                     image_base64 = _b64.b64encode(_f.read()).decode("ascii")
         except (OSError, IOError) as _e:
@@ -584,11 +639,19 @@ def save_memory(
             if not _is_outage(e):
                 raise
             # #547: outage (or our own timeout) → queue it with the same id and the time it was asked.
-            _spool_put(mem_id, {**payload, "occurred_at": occurred_at},
-                       real if resolved_file_path is not None else None)
-            resp = {"status": "queued", "id": mem_id, "type": type, "created_at": occurred_at,
-                    "note": ("EcoDB can't save right now (" + str(e)[:160] + "). Saved to the local "
-                             "queue; it will be sent automatically with this id and this time.")}
+            _spool_put(
+                mem_id, {**payload, "occurred_at": occurred_at}, real if resolved_file_path is not None else None
+            )
+            resp = {
+                "status": "queued",
+                "id": mem_id,
+                "type": type,
+                "created_at": occurred_at,
+                "note": (
+                    "EcoDB can't save right now (" + str(e)[:160] + "). Saved to the local "
+                    "queue; it will be sent automatically with this id and this time."
+                ),
+            }
             spool = _spool_status()
             if spool:
                 resp["spool"] = spool
@@ -694,15 +757,34 @@ def search(
     from pathlib import Path as _Path
 
     if query_text is None and query_image is None:
-        return [TextContent(type="text", text=json.dumps({"error": "at least one of query_text or query_image is required"}, ensure_ascii=False))]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps({"error": "at least one of query_text or query_image is required"}, ensure_ascii=False),
+            )
+        ]
     if limit < 1 or limit > 100:
-        return [TextContent(type="text", text=json.dumps({"error": "limit must be between 1 and 100"}, ensure_ascii=False))]
+        return [
+            TextContent(type="text", text=json.dumps({"error": "limit must be between 1 and 100"}, ensure_ascii=False))
+        ]
     if deep_factor < 1 or deep_factor > 10:
-        return [TextContent(type="text", text=json.dumps({"error": "deep_factor must be between 1 and 10"}, ensure_ascii=False))]
+        return [
+            TextContent(
+                type="text", text=json.dumps({"error": "deep_factor must be between 1 and 10"}, ensure_ascii=False)
+            )
+        ]
     if cluster_mode not in ("none", "include", "mixed"):
-        return [TextContent(type="text", text=json.dumps({"error": "cluster_mode must be none|include|mixed"}, ensure_ascii=False))]
-    payload: dict = {"limit": limit, "expand_scope": expand_scope, "modality_filter": modality_filter,
-                     "include_documents": include_documents}  # always: API default is True
+        return [
+            TextContent(
+                type="text", text=json.dumps({"error": "cluster_mode must be none|include|mixed"}, ensure_ascii=False)
+            )
+        ]
+    payload: dict = {
+        "limit": limit,
+        "expand_scope": expand_scope,
+        "modality_filter": modality_filter,
+        "include_documents": include_documents,
+    }  # always: API default is True
     if query_text is not None:
         payload["query_text"] = query_text
     if query_image is not None:
@@ -777,15 +859,25 @@ def search(
             continue
         in_store = p.is_relative_to(MEDIA_STORE_DIR)
         suffix = p.suffix.lower()
-        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".gif": "image/gif", ".webp": "image/webp",
-                ".bmp": "image/bmp", ".tiff": "image/tiff"}.get(suffix)
+        mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+        }.get(suffix)
         if mime and in_store and images_added < max_images:
             try:
                 img_data = _b64.b64encode(p.read_bytes()).decode("ascii")
-                content_blocks.append(ImageContent(
-                    type="image", data=img_data, mimeType=mime,
-                ))
+                content_blocks.append(
+                    ImageContent(
+                        type="image",
+                        data=img_data,
+                        mimeType=mime,
+                    )
+                )
                 images_added += 1
             except (OSError, IOError):
                 continue
@@ -793,14 +885,19 @@ def search(
             asset_paths.append(media_path)
 
     if asset_paths:
-        content_blocks.append(TextContent(type="text", text=(
-            f"\n📎 {len(asset_paths)} documento(s) adjunto(s) en media_path. "
-            "Los recuerdos resumen información pero no sustituyen los documentos originales. "
-            "Si un resultado relevante apunta a un archivo, consulta el documento completo con Read "
-            "— especialmente si varios recuerdos convergen en el mismo tema. "
-            "Usa criterio: resultados con score alto sobre tu tema de trabajo merecen consulta; "
-            "resultados con score bajo o tangenciales no. El recuerdo es el mapa, el documento es el territorio."
-        )))
+        content_blocks.append(
+            TextContent(
+                type="text",
+                text=(
+                    f"\n📎 {len(asset_paths)} documento(s) adjunto(s) en media_path. "
+                    "Los recuerdos resumen información pero no sustituyen los documentos originales. "
+                    "Si un resultado relevante apunta a un archivo, consulta el documento completo con Read "
+                    "— especialmente si varios recuerdos convergen en el mismo tema. "
+                    "Usa criterio: resultados con score alto sobre tu tema de trabajo merecen consulta; "
+                    "resultados con score bajo o tangenciales no. El recuerdo es el mapa, el documento es el territorio."
+                ),
+            )
+        )
 
     return content_blocks
 
@@ -882,15 +979,25 @@ def search_recent(
             continue
         in_store = p.is_relative_to(MEDIA_STORE_DIR)
         suffix = p.suffix.lower()
-        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".gif": "image/gif", ".webp": "image/webp",
-                ".bmp": "image/bmp", ".tiff": "image/tiff"}.get(suffix)
+        mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+        }.get(suffix)
         if mime and in_store and images_added < max_images:
             try:
                 img_data = _b64.b64encode(p.read_bytes()).decode("ascii")
-                content_blocks.append(ImageContent(
-                    type="image", data=img_data, mimeType=mime,
-                ))
+                content_blocks.append(
+                    ImageContent(
+                        type="image",
+                        data=img_data,
+                        mimeType=mime,
+                    )
+                )
                 images_added += 1
             except (OSError, IOError):
                 continue
@@ -898,14 +1005,19 @@ def search_recent(
             asset_paths.append(media_path)
 
     if asset_paths:
-        content_blocks.append(TextContent(type="text", text=(
-            f"\n📎 {len(asset_paths)} documento(s) adjunto(s) en media_path. "
-            "Los recuerdos resumen información pero no sustituyen los documentos originales. "
-            "Si un resultado relevante apunta a un archivo, consulta el documento completo con Read "
-            "— especialmente si varios recuerdos convergen en el mismo tema. "
-            "Usa criterio: resultados con score alto sobre tu tema de trabajo merecen consulta; "
-            "resultados con score bajo o tangenciales no. El recuerdo es el mapa, el documento es el territorio."
-        )))
+        content_blocks.append(
+            TextContent(
+                type="text",
+                text=(
+                    f"\n📎 {len(asset_paths)} documento(s) adjunto(s) en media_path. "
+                    "Los recuerdos resumen información pero no sustituyen los documentos originales. "
+                    "Si un resultado relevante apunta a un archivo, consulta el documento completo con Read "
+                    "— especialmente si varios recuerdos convergen en el mismo tema. "
+                    "Usa criterio: resultados con score alto sobre tu tema de trabajo merecen consulta; "
+                    "resultados con score bajo o tangenciales no. El recuerdo es el mapa, el documento es el territorio."
+                ),
+            )
+        )
 
     return content_blocks
 
@@ -934,11 +1046,15 @@ def get_relevant_context(
         return _ok({"injected": False, "reason": "context injection disabled"})
 
     try:
-        results_raw = _api_call("POST", "/search", json={
-            "query_text": prompt_text[:500],
-            "limit": max_results * 2,
-            "include_documents": True,
-        })
+        results_raw = _api_call(
+            "POST",
+            "/search",
+            json={
+                "query_text": prompt_text[:500],
+                "limit": max_results * 2,
+                "include_documents": True,
+            },
+        )
     except RuntimeError as e:
         return _err(e)
 
@@ -964,32 +1080,40 @@ def get_relevant_context(
         lines.append(f"[EcoDB:{injection_id}] {source}/{rtype}: {content_preview}")
 
     context_block = (
-        "<ecodb_context note=\"puede ser relevante o no — ignóralo si no ayuda\">\n"
+        '<ecodb_context note="puede ser relevante o no — ignóralo si no ayuda">\n'
         + "\n".join(f"• {l}" for l in lines)
         + "\n</ecodb_context>"
     )
 
     import hashlib as _hashlib
+
     prompt_hash = _hashlib.md5(prompt_text.encode()).hexdigest()[:12]
 
     # Fire-and-forget telemetry (best-effort)
     try:
-        _api_call("POST", "/telemetry/record", json={
-            "injection_id": injection_id,
-            "memory_ids": memory_ids,
-            "scores": scores,
-            "prompt_hash": prompt_hash,
-        })
+        _api_call(
+            "POST",
+            "/telemetry/record",
+            json={
+                "injection_id": injection_id,
+                "memory_ids": memory_ids,
+                "scores": scores,
+                "prompt_hash": prompt_hash,
+            },
+        )
     except Exception as _e:
         import logging as _log
+
         _log.getLogger("ecodb.mcp").warning("telemetry record failed: %r", _e)
 
-    return _ok({
-        "injected": True,
-        "injection_id": injection_id,
-        "count": len(filtered),
-        "context_block": context_block,
-    })
+    return _ok(
+        {
+            "injected": True,
+            "injection_id": injection_id,
+            "count": len(filtered),
+            "context_block": context_block,
+        }
+    )
 
 
 @mcp.tool()
@@ -1022,24 +1146,39 @@ def read_memory(memory_id: str, expand_scope: bool = False) -> list:
         in_store = p.is_relative_to(MEDIA_STORE_DIR)
         if p.exists():
             suffix = p.suffix.lower()
-            mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                    ".gif": "image/gif", ".webp": "image/webp",
-                    ".bmp": "image/bmp", ".tiff": "image/tiff"}.get(suffix)
+            mime = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+                ".bmp": "image/bmp",
+                ".tiff": "image/tiff",
+            }.get(suffix)
             if mime and in_store:
                 try:
                     img_data = _b64.b64encode(p.read_bytes()).decode("ascii")
-                    content_blocks.append(ImageContent(
-                        type="image", data=img_data, mimeType=mime,
-                    ))
+                    content_blocks.append(
+                        ImageContent(
+                            type="image",
+                            data=img_data,
+                            mimeType=mime,
+                        )
+                    )
                 except (OSError, IOError):
                     pass
             else:
-                content_blocks.append(TextContent(type="text", text=(
-                    f"\n📎 Documento adjunto: {media_path}\n"
-                    "Este recuerdo apunta a un documento original. Si es relevante para tu trabajo, "
-                    "consulta el documento completo con Read. "
-                    "El recuerdo es el mapa, el documento es el territorio."
-                )))
+                content_blocks.append(
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"\n📎 Documento adjunto: {media_path}\n"
+                            "Este recuerdo apunta a un documento original. Si es relevante para tu trabajo, "
+                            "consulta el documento completo con Read. "
+                            "El recuerdo es el mapa, el documento es el territorio."
+                        ),
+                    )
+                )
 
     return content_blocks
 
@@ -1067,8 +1206,12 @@ def save_triple(
 
     # #569: el predicado pedido se guarda SIEMPRE, también cuando no cambia,
     # para poder medir después qué hizo el diccionario.
-    payload = {"subject": subject, "predicate": canonical_predicate, "object": object,
-               "original_predicate": resolution["original"]}
+    payload = {
+        "subject": subject,
+        "predicate": canonical_predicate,
+        "object": object,
+        "original_predicate": resolution["original"],
+    }
     if author is not None:
         payload["author"] = author
     if resolution["needs_review"]:
@@ -1125,6 +1268,7 @@ def neighbors(node: str, depth: int = 1) -> dict:
 # — Sprint Paridad parcial Opcion A (identidad + grafo navegacion)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 def load_identity(agent_identifier: str, version: Optional[int] = None) -> dict:
     """Cargar identidad de un agente desde EcoDB.
@@ -1154,13 +1298,15 @@ def load_identity(agent_identifier: str, version: Optional[int] = None) -> dict:
     # Concatenate fragments as plain text with separator — no synthetic headers
     # (the schema has no title/hash fields; inventing them would be false metadata).
     text = "\n\n---\n\n".join(f.get("content", "") for f in fragments)
-    return _ok({
-        "agent_identifier": data.get("agent_identifier", agent_identifier),
-        "agent_id": data.get("agent_id"),
-        "version": data.get("version", 0),
-        "text": text,
-        "fragments_count": len(fragments),
-    })
+    return _ok(
+        {
+            "agent_identifier": data.get("agent_identifier", agent_identifier),
+            "agent_id": data.get("agent_id"),
+            "version": data.get("version", 0),
+            "text": text,
+            "fragments_count": len(fragments),
+        }
+    )
 
 
 @mcp.tool()
@@ -1263,6 +1409,7 @@ def view_image(memory_id: str) -> Image:
 # — 5 wrappers MCP paridad (tools sobre endpoints existentes)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 def save_triples_batch(
     triples: list[dict],
@@ -1299,18 +1446,25 @@ def save_triples_batch(
         created = data.get("created", [])
         # #569: por cada tripleta creada, lo pedido y lo guardado. Los duplicados
         # (ya existían) no salen en `created` y se cuentan en `skipped_duplicates`.
-        return _ok({
-            "status": "ok",
-            "count": len(created) if isinstance(created, list) else created,
-            "skipped_duplicates": data.get("skipped_duplicates", 0),
-            "triples": [{
-                "id": c.get("id"),
-                "subject": c.get("subject_name"),
-                "requested_predicate": c.get("original_predicate"),
-                "stored_predicate": c.get("predicate"),
-                "object": c.get("object_name"),
-            } for c in created] if isinstance(created, list) else [],
-        })
+        return _ok(
+            {
+                "status": "ok",
+                "count": len(created) if isinstance(created, list) else created,
+                "skipped_duplicates": data.get("skipped_duplicates", 0),
+                "triples": [
+                    {
+                        "id": c.get("id"),
+                        "subject": c.get("subject_name"),
+                        "requested_predicate": c.get("original_predicate"),
+                        "stored_predicate": c.get("predicate"),
+                        "object": c.get("object_name"),
+                    }
+                    for c in created
+                ]
+                if isinstance(created, list)
+                else [],
+            }
+        )
     except RuntimeError as e:
         return _err(e)
 
@@ -1374,12 +1528,21 @@ def graph_status() -> dict:
 # ---------------------------------------------------------------------------
 
 _DOC_EXT_MAP: dict[str, str] = {
-    ".pdf": "pdf", ".docx": "docx", ".doc": "docx",
-    ".html": "html", ".htm": "html",
-    ".md": "md", ".markdown": "markdown",
-    ".txt": "txt", ".text": "txt",
-    ".mp3": "audio", ".wav": "audio", ".m4a": "audio",
-    ".ogg": "audio", ".flac": "audio", ".mp4": "audio",
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".doc": "docx",
+    ".html": "html",
+    ".htm": "html",
+    ".md": "md",
+    ".markdown": "markdown",
+    ".txt": "txt",
+    ".text": "txt",
+    ".mp3": "audio",
+    ".wav": "audio",
+    ".m4a": "audio",
+    ".ogg": "audio",
+    ".flac": "audio",
+    ".mp4": "audio",
 }
 
 
@@ -1433,14 +1596,21 @@ def register_document(
 
     try:
         data = _api_call(
-            "POST", "/documents/upload",
+            "POST",
+            "/documents/upload",
             params={"project_id": project_id, "visibility": visibility, "doc_type": doc_type},
             files={"file": (_Path(real).name, content)},
         )
     except RuntimeError as e:
         return _err(e)
-    return _ok({"status": data.get("status"), "document_id": str(data.get("id")),
-                "uri": data.get("uri"), "doc_type": data.get("doc_type")})
+    return _ok(
+        {
+            "status": data.get("status"),
+            "document_id": str(data.get("id")),
+            "uri": data.get("uri"),
+            "doc_type": data.get("doc_type"),
+        }
+    )
 
 
 @mcp.tool()
@@ -1454,15 +1624,17 @@ def document_status(document_id: str) -> dict:
         return _err(RuntimeError("document_id must be a valid UUID"))
     try:
         data = _api_call("GET", f"/documents/{quote(str(document_id), safe='')}")
-        return _ok({
-            "document_id": str(data.get("id")),
-            "status": data.get("status"),
-            "doc_type": data.get("doc_type"),
-            "filename": data.get("filename"),
-            "retry_count": data.get("retry_count"),
-            "last_indexed": data.get("last_indexed"),
-            "processing_metrics": data.get("processing_metrics"),
-        })
+        return _ok(
+            {
+                "document_id": str(data.get("id")),
+                "status": data.get("status"),
+                "doc_type": data.get("doc_type"),
+                "filename": data.get("filename"),
+                "retry_count": data.get("retry_count"),
+                "last_indexed": data.get("last_indexed"),
+                "processing_metrics": data.get("processing_metrics"),
+            }
+        )
     except RuntimeError as e:
         return _err(e)
 
@@ -1519,8 +1691,11 @@ def search_in_document(
         return _err(RuntimeError("document_id must be a valid UUID"))
     limit = min(max(1, limit), 50)
     try:
-        data = _api_call("POST", f"/search/document/{quote(str(document_id), safe='')}",
-                         json={"query_text": query_text, "limit": limit})
+        data = _api_call(
+            "POST",
+            f"/search/document/{quote(str(document_id), safe='')}",
+            json={"query_text": query_text, "limit": limit},
+        )
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
@@ -1548,16 +1723,21 @@ def read_document(
         return _err(RuntimeError("document_id must be a valid UUID"))
     limit = min(max(1, limit), 200)
     try:
-        data = _api_call("GET", f"/documents/{quote(str(document_id), safe='')}/chunks",
-                         params={"start": start_chunk, "limit": limit})
+        data = _api_call(
+            "GET",
+            f"/documents/{quote(str(document_id), safe='')}/chunks",
+            params={"start": start_chunk, "limit": limit},
+        )
         chunks = data.get("chunks", [])
         content = "\n\n".join(c.get("content", "") for c in chunks)
-        return _ok({
-            "content": content,
-            "chunks_returned": data.get("chunks_returned", len(chunks)),
-            "total_chunks": data.get("total_chunks", 0),
-            "truncated": data.get("truncated", False),
-        })
+        return _ok(
+            {
+                "content": content,
+                "chunks_returned": data.get("chunks_returned", len(chunks)),
+                "total_chunks": data.get("total_chunks", 0),
+                "truncated": data.get("truncated", False),
+            }
+        )
     except RuntimeError as e:
         return _err(e)
 
@@ -1576,7 +1756,9 @@ def validate_link(memory_id: str, document_id: str) -> dict:
     if not _UUID_RE.match(memory_id) or not _UUID_RE.match(document_id):
         return _err(RuntimeError("memory_id and document_id must be valid UUIDs"))
     try:
-        resp = _api_call("PUT", f"/memories/{quote(str(memory_id), safe='')}/links/{quote(str(document_id), safe='')}/validate")
+        resp = _api_call(
+            "PUT", f"/memories/{quote(str(memory_id), safe='')}/links/{quote(str(document_id), safe='')}/validate"
+        )
         return _ok(resp)
     except RuntimeError as e:
         return _err(e)
@@ -1660,8 +1842,9 @@ def classify_document(document_id: str, trust_tier: int) -> dict:
     if trust_tier not in (0, 1, 2, 3):
         return _err(ValueError("trust_tier must be 0-3"))
     try:
-        resp = _api_call("PUT", f"/admin/documents/{quote(str(document_id), safe='')}/trust-tier",
-                         json={"trust_tier": trust_tier})
+        resp = _api_call(
+            "PUT", f"/admin/documents/{quote(str(document_id), safe='')}/trust-tier", json={"trust_tier": trust_tier}
+        )
         return _ok(resp)
     except RuntimeError as e:
         return _err(e)
@@ -1679,8 +1862,9 @@ def confirm_document_relation(source_id: str, target_id: str) -> dict:
       target_id: UUID del documento relacionado.
     """
     try:
-        resp = _api_call("PUT", "/admin/related-documents/confirm",
-                         json={"source_id": source_id, "target_id": target_id})
+        resp = _api_call(
+            "PUT", "/admin/related-documents/confirm", json={"source_id": source_id, "target_id": target_id}
+        )
         return _ok(resp)
     except RuntimeError as e:
         return _err(e)
@@ -1744,11 +1928,15 @@ def seed_dictionary(
       notes: nota opcional sobre la entidad.
     """
     try:
-        data = _api_call("POST", "/admin/entity-dictionary", json={
-            "name": name,
-            "entity_type": entity_type,
-            "notes": notes,
-        })
+        data = _api_call(
+            "POST",
+            "/admin/entity-dictionary",
+            json={
+                "name": name,
+                "entity_type": entity_type,
+                "notes": notes,
+            },
+        )
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
@@ -1773,9 +1961,11 @@ def get_graph_vocabulary() -> dict:
 # Metacognition cluster tools (Memory Agent v1.3)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
-def search_clusters(query_text: str, agent_identifier: Optional[str] = None,
-                    level: Optional[str] = None, limit: int = 10) -> dict:
+def search_clusters(
+    query_text: str, agent_identifier: Optional[str] = None, level: Optional[str] = None, limit: int = 10
+) -> dict:
     """Buscar clusters por similitud semántica (coseno sobre centroides + BM25 en labels).
 
     Args:
@@ -1798,8 +1988,7 @@ def search_clusters(query_text: str, agent_identifier: Optional[str] = None,
 
 
 @mcp.tool()
-def list_clusters(agent_identifier: str, level: Optional[str] = None,
-                  status: str = "active", limit: int = 20) -> dict:
+def list_clusters(agent_identifier: str, level: Optional[str] = None, status: str = "active", limit: int = 20) -> dict:
     """Listar clusters de memoria de un agente, filtrados por nivel y estado.
 
     Args:
@@ -1808,8 +1997,7 @@ def list_clusters(agent_identifier: str, level: Optional[str] = None,
       status: candidate|active|rejected|superseded (default active).
       limit: máximo de resultados, 1-100 (default 20).
     """
-    params: dict = {"agent_identifier": agent_identifier, "status": status,
-                    "limit": limit}
+    params: dict = {"agent_identifier": agent_identifier, "status": status, "limit": limit}
     if level is not None:
         params["level"] = level
     try:
@@ -1820,8 +2008,9 @@ def list_clusters(agent_identifier: str, level: Optional[str] = None,
 
 
 @mcp.tool()
-def read_cluster(cluster_id: str, include_members: bool = False,
-                 include_sources: bool = False, include_model: bool = False) -> dict:
+def read_cluster(
+    cluster_id: str, include_members: bool = False, include_sources: bool = False, include_model: bool = False
+) -> dict:
     """Leer el detalle de un cluster, opcionalmente con miembros y fuentes.
 
     Args:
@@ -1854,16 +2043,14 @@ def get_briefing(agent_identifier: str) -> dict:
       agent_identifier: nombre del agente (obligatorio).
     """
     try:
-        data = _api_call("GET", "/api/v1/briefing",
-                         params={"agent_identifier": agent_identifier})
+        data = _api_call("GET", "/api/v1/briefing", params={"agent_identifier": agent_identifier})
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
 
 
 @mcp.tool(meta={"anthropic/maxResultSizeChars": 400000})
-def get_telescopic_view(agent_identifier: str,
-                        levels: str = "weekly,monthly,quarterly,yearly") -> dict:
+def get_telescopic_view(agent_identifier: str, levels: str = "weekly,monthly,quarterly,yearly") -> dict:
     """Cargar la cadena de memoria fractal del agente para el protocolo de boot.
 
     Args:
@@ -1871,8 +2058,9 @@ def get_telescopic_view(agent_identifier: str,
       levels: niveles separados por comas (default "weekly,monthly,quarterly,yearly").
     """
     try:
-        data = _api_call("GET", "/api/v1/clusters/telescopic",
-                         params={"agent_identifier": agent_identifier, "levels": levels})
+        data = _api_call(
+            "GET", "/api/v1/clusters/telescopic", params={"agent_identifier": agent_identifier, "levels": levels}
+        )
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
@@ -1883,8 +2071,7 @@ def get_telescopic_view(agent_identifier: str,
 # default 25K-token MCP output cap. Annotating the size server-side lets the
 # boot arrive in ONE call without any client-side env configuration.
 @mcp.tool(meta={"anthropic/maxResultSizeChars": 400000})
-def get_progressive_view(agent_identifier: str, max_recent_days: int = 14,
-                         sections: str = "all") -> dict:
+def get_progressive_view(agent_identifier: str, max_recent_days: int = 14, sections: str = "all") -> dict:
     """Vista telescópica progresiva — cada capa temporal comprime la anterior.
 
     Lo cerrado no se re-lee: yearly de años anteriores → quarterly no
@@ -1903,19 +2090,24 @@ def get_progressive_view(agent_identifier: str, max_recent_days: int = 14,
         por capítulos si un cliente tiene límite de respuesta.
     """
     try:
-        data = _api_call("GET", "/api/v1/clusters/telescopic/progressive",
-                         params={"agent_identifier": agent_identifier,
-                                 "max_recent_days": max_recent_days,
-                                 "sections": sections})
+        data = _api_call(
+            "GET",
+            "/api/v1/clusters/telescopic/progressive",
+            params={"agent_identifier": agent_identifier, "max_recent_days": max_recent_days, "sections": sections},
+        )
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
 
 
 @mcp.tool(meta={"anthropic/maxResultSizeChars": 200000})
-def fractal_search(agent_identifier: str, cluster_id: Optional[str] = None,
-                   query_text: Optional[str] = None,
-                   level: Optional[str] = None, limit: int = 20) -> dict:
+def fractal_search(
+    agent_identifier: str,
+    cluster_id: Optional[str] = None,
+    query_text: Optional[str] = None,
+    level: Optional[str] = None,
+    limit: int = 20,
+) -> dict:
     """Búsqueda fractal: navegar la memoria desde la máxima abstracción hacia abajo.
 
     Sin cluster_id entra por el nivel más alto que exista (yearly →
@@ -1960,8 +2152,7 @@ def narrate_cluster(cluster_id: str, narrative: str) -> dict:
         return _err(RuntimeError("cluster_id must be a valid UUID"))
     cid = quote(str(cluster_id), safe="")
     try:
-        data = _api_call("PUT", f"/api/v1/clusters/{cid}/narrate",
-                         json={"narrative": narrative})
+        data = _api_call("PUT", f"/api/v1/clusters/{cid}/narrate", json={"narrative": narrative})
         return _ok(data)
     except RuntimeError as e:
         return _err(e)
@@ -1970,6 +2161,7 @@ def narrate_cluster(cluster_id: str, narrative: str) -> dict:
 # ---------------------------------------------------------------------------
 # Entry point: stdio MCP server (Claude Code lo invoca como subprocess).
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool()
 def decisiones_vigentes(
@@ -1993,8 +2185,11 @@ def decisiones_vigentes(
       incluir_superadas: true para auditar: añade «superadas» con por quién y por qué.
       limit: máximo de vigentes (1-50, default 10).
     """
-    params = {"tema": tema, "incluir_superadas": str(bool(incluir_superadas)).lower(),
-              "limit": max(1, min(int(limit), 50))}
+    params = {
+        "tema": tema,
+        "incluir_superadas": str(bool(incluir_superadas)).lower(),
+        "limit": max(1, min(int(limit), 50)),
+    }
     if agente:
         params["agente"] = agente
     try:

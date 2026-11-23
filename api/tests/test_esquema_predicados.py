@@ -5,6 +5,7 @@ migration created them: they only existed in the family's database, and on a fre
 endpoint died with «relation "predicates_canonical" does not exist». 5.7.0 creates them. Runs against the
 throwaway test DB (conftest), never the live one.
 """
+
 import asyncio
 import sys
 from pathlib import Path

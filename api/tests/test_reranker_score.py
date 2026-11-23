@@ -3,6 +3,7 @@ so a demotion (Q1: 591f9af5 composite top 0.701 -> reranked #13) was invisible.
 Each result now carries reranker_score (None when the reranker is off or failed).
 Ordering is exactly the reranker's, as before. Pure: reranker stubbed.
 """
+
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,7 +32,7 @@ def test_reranker_score_attached_and_order_kept(monkeypatch):
     out = search._apply_rerank(results, "q", limit=3, enabled=True)
     assert [r.content for r in out] == ["b", "a", "c"]
     assert [r.reranker_score for r in out] == [2.5, 0.1, -1.0]
-    assert [r.score for r in out] == [0.60, 0.70, 0.50]   # composite untouched
+    assert [r.score for r in out] == [0.60, 0.70, 0.50]  # composite untouched
 
 
 def test_reranker_off_leaves_none_and_composite_order(monkeypatch):

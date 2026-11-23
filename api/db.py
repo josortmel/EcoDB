@@ -10,6 +10,7 @@ Convencion de uso desde endpoints:
 El pool se crea perezosamente al primer acquire (lifecycle del API). En tests
 con TestClient se puede inyectar un pool propio via override_pool().
 """
+
 from __future__ import annotations
 
 from typing import Optional

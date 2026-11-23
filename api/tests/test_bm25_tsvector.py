@@ -3,6 +3,7 @@ host/file lexeme, so the bare identifier is never indexed and BM25 can't match
 it. Every BM25 tsvector must also index the text with '.' and '/' split.
 Pure test (no DB): the SQL builder and every BM25 site in search.py.
 """
+
 import re
 import sys
 from pathlib import Path

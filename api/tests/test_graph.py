@@ -1,4 +1,5 @@
 """Tests integración — CRUD grafo SQL+AGE contra postgres real."""
+
 import asyncio
 import os
 import sys
@@ -9,6 +10,7 @@ import asyncpg
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -71,6 +73,7 @@ def auth(jwt):
 # POST /graph/triples
 # ---------------------------------------------------------------------------
 
+
 def test_create_triple_creates_nodes_and_edge(client, super_jwt):
     r = client.post(
         "/graph/triples",
@@ -85,10 +88,16 @@ def test_create_triple_creates_nodes_and_edge(client, super_jwt):
 
 
 def test_create_duplicate_triple_returns_409(client, super_jwt):
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-X", "predicate": "rel-dup", "object": "pytest-Y", "author": "pytest-graph"})
-    r = client.post("/graph/triples", headers=auth(super_jwt),
-                    json={"subject": "pytest-X", "predicate": "rel-dup", "object": "pytest-Y", "author": "pytest-graph"})
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-X", "predicate": "rel-dup", "object": "pytest-Y", "author": "pytest-graph"},
+    )
+    r = client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-X", "predicate": "rel-dup", "object": "pytest-Y", "author": "pytest-graph"},
+    )
     assert r.status_code == 409
 
 
@@ -110,14 +119,17 @@ def test_create_triple_without_auth_returns_401(client):
 # POST /graph/triples/batch
 # ---------------------------------------------------------------------------
 
+
 def test_batch_creates_multiple_triples(client, super_jwt):
     r = client.post(
         "/graph/triples/batch",
         headers=auth(super_jwt),
-        json={"triples": [
-            {"subject": "pytest-batch-1", "predicate": "p1", "object": "pytest-batch-2", "author": "pytest-graph"},
-            {"subject": "pytest-batch-2", "predicate": "p2", "object": "pytest-batch-3", "author": "pytest-graph"},
-        ]},
+        json={
+            "triples": [
+                {"subject": "pytest-batch-1", "predicate": "p1", "object": "pytest-batch-2", "author": "pytest-graph"},
+                {"subject": "pytest-batch-2", "predicate": "p2", "object": "pytest-batch-3", "author": "pytest-graph"},
+            ]
+        },
     )
     assert r.status_code == 201
     body = r.json()
@@ -126,15 +138,20 @@ def test_batch_creates_multiple_triples(client, super_jwt):
 
 
 def test_batch_skips_duplicates(client, super_jwt):
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-D1", "predicate": "p", "object": "pytest-D2", "author": "pytest-graph"})
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-D1", "predicate": "p", "object": "pytest-D2", "author": "pytest-graph"},
+    )
     r = client.post(
         "/graph/triples/batch",
         headers=auth(super_jwt),
-        json={"triples": [
-            {"subject": "pytest-D1", "predicate": "p", "object": "pytest-D2", "author": "pytest-graph"},
-            {"subject": "pytest-D1", "predicate": "p", "object": "pytest-D3", "author": "pytest-graph"},
-        ]},
+        json={
+            "triples": [
+                {"subject": "pytest-D1", "predicate": "p", "object": "pytest-D2", "author": "pytest-graph"},
+                {"subject": "pytest-D1", "predicate": "p", "object": "pytest-D3", "author": "pytest-graph"},
+            ]
+        },
     )
     assert r.status_code == 201
     body = r.json()
@@ -152,12 +169,19 @@ def test_batch_too_large_returns_422(client, super_jwt):
 # GET /graph/neighbors
 # ---------------------------------------------------------------------------
 
+
 def test_neighbors_depth_1(client, super_jwt):
     # Crear pytest-N1 → pytest-N2 → pytest-N3
-    client.post("/graph/triples/batch", headers=auth(super_jwt), json={"triples": [
-        {"subject": "pytest-N1", "predicate": "p", "object": "pytest-N2", "author": "pytest-graph"},
-        {"subject": "pytest-N2", "predicate": "p", "object": "pytest-N3", "author": "pytest-graph"},
-    ]})
+    client.post(
+        "/graph/triples/batch",
+        headers=auth(super_jwt),
+        json={
+            "triples": [
+                {"subject": "pytest-N1", "predicate": "p", "object": "pytest-N2", "author": "pytest-graph"},
+                {"subject": "pytest-N2", "predicate": "p", "object": "pytest-N3", "author": "pytest-graph"},
+            ]
+        },
+    )
     r = client.get("/graph/neighbors/pytest-N1?depth=1", headers=auth(super_jwt))
     assert r.status_code == 200
     assert "pytest-N2" in r.json()["neighbors"]
@@ -181,11 +205,18 @@ def test_neighbors_max_depth(client, super_jwt):
 # GET /graph/path
 # ---------------------------------------------------------------------------
 
+
 def test_path_finds_route(client, super_jwt):
-    client.post("/graph/triples/batch", headers=auth(super_jwt), json={"triples": [
-        {"subject": "pytest-P1", "predicate": "r", "object": "pytest-P2", "author": "pytest-graph"},
-        {"subject": "pytest-P2", "predicate": "r", "object": "pytest-P3", "author": "pytest-graph"},
-    ]})
+    client.post(
+        "/graph/triples/batch",
+        headers=auth(super_jwt),
+        json={
+            "triples": [
+                {"subject": "pytest-P1", "predicate": "r", "object": "pytest-P2", "author": "pytest-graph"},
+                {"subject": "pytest-P2", "predicate": "r", "object": "pytest-P3", "author": "pytest-graph"},
+            ]
+        },
+    )
     r = client.get("/graph/path?source=pytest-P1&target=pytest-P3", headers=auth(super_jwt))
     assert r.status_code == 200
     body = r.json()
@@ -194,10 +225,21 @@ def test_path_finds_route(client, super_jwt):
 
 
 def test_path_unreachable_returns_404(client, super_jwt):
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-isolated-1", "predicate": "r", "object": "pytest-isolated-2", "author": "pytest-graph"})
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-island-A", "predicate": "r", "object": "pytest-island-B", "author": "pytest-graph"})
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={
+            "subject": "pytest-isolated-1",
+            "predicate": "r",
+            "object": "pytest-isolated-2",
+            "author": "pytest-graph",
+        },
+    )
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-island-A", "predicate": "r", "object": "pytest-island-B", "author": "pytest-graph"},
+    )
     r = client.get("/graph/path?source=pytest-isolated-1&target=pytest-island-A", headers=auth(super_jwt))
     assert r.status_code == 404
 
@@ -206,9 +248,13 @@ def test_path_unreachable_returns_404(client, super_jwt):
 # GET /graph/search (pg_trgm)
 # ---------------------------------------------------------------------------
 
+
 def test_search_finds_similar_node(client, super_jwt):
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-Cervantes", "predicate": "r", "object": "pytest-Quijote", "author": "pytest-graph"})
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-Cervantes", "predicate": "r", "object": "pytest-Quijote", "author": "pytest-graph"},
+    )
     r = client.get("/graph/search?q=Cerv", headers=auth(super_jwt))
     assert r.status_code == 200
     matches = r.json()["matches"]
@@ -218,8 +264,11 @@ def test_search_finds_similar_node(client, super_jwt):
 def test_search_skips_merged_nodes(client, super_jwt):
     """#513 (Prima, 15-oct): un nodo fusionado (status='merged') no sale en la búsqueda; el activo sí.
     Antes «Jotaro» devolvía el 40359 ya fusionado al lado de Jōtarō."""
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-Fusionado", "predicate": "r", "object": "pytest-Vivo", "author": "pytest-graph"})
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-Fusionado", "predicate": "r", "object": "pytest-Vivo", "author": "pytest-graph"},
+    )
 
     async def _merge():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
@@ -227,6 +276,7 @@ def test_search_skips_merged_nodes(client, super_jwt):
             await conn.execute("UPDATE nodes SET status = 'merged' WHERE name = 'pytest-Fusionado'")
         finally:
             await conn.close()
+
     asyncio.run(_merge())
 
     names = [m["name"] for m in client.get("/graph/search?q=pytest-", headers=auth(super_jwt)).json()["matches"]]
@@ -248,8 +298,11 @@ def test_neighbors_inexistent_node_returns_404(client, super_jwt):
 
 def test_path_self_returns_zero_length(client, super_jwt):
     """OBS-1 (verificador): path A→A es trivial length=0, no 404."""
-    client.post("/graph/triples", headers=auth(super_jwt),
-                json={"subject": "pytest-SELF-1", "predicate": "r", "object": "pytest-other", "author": "pytest-graph"})
+    client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-SELF-1", "predicate": "r", "object": "pytest-other", "author": "pytest-graph"},
+    )
     r = client.get("/graph/path?source=pytest-SELF-1&target=pytest-SELF-1", headers=auth(super_jwt))
     assert r.status_code == 200
     assert r.json() == {"source": "pytest-SELF-1", "target": "pytest-SELF-1", "path": ["pytest-SELF-1"], "length": 0}
@@ -260,8 +313,7 @@ def test_path_nonexistent_source_returns_404(client, super_jwt):
     NO existe en el grafo → 404, distinto de test_path_unreachable (ambos existen sin
     camino) — es otra rama del endpoint ('source node not found'). Consulta pura, no
     crea nodos. Verificado a mano el 14-sep (caza de bugs #46, ticket #48)."""
-    r = client.get("/graph/path?source=pytest-NOEXISTE-src-xyz&target=pytest-NOEXISTE-tgt-xyz",
-                   headers=auth(super_jwt))
+    r = client.get("/graph/path?source=pytest-NOEXISTE-src-xyz&target=pytest-NOEXISTE-tgt-xyz", headers=auth(super_jwt))
     assert r.status_code == 404, r.text
 
 
@@ -269,9 +321,13 @@ def test_path_nonexistent_source_returns_404(client, super_jwt):
 # DELETE /graph/triples/{id}
 # ---------------------------------------------------------------------------
 
+
 def test_delete_triple_removes_from_sql_and_age(client, super_jwt):
-    created = client.post("/graph/triples", headers=auth(super_jwt),
-                          json={"subject": "pytest-DEL-S", "predicate": "todelete", "object": "pytest-DEL-O", "author": "pytest-graph"}).json()
+    created = client.post(
+        "/graph/triples",
+        headers=auth(super_jwt),
+        json={"subject": "pytest-DEL-S", "predicate": "todelete", "object": "pytest-DEL-O", "author": "pytest-graph"},
+    ).json()
     r = client.delete(f"/graph/triples/{created['id']}", headers=auth(super_jwt))
     assert r.status_code == 204
     # Re-DELETE → 404
@@ -287,6 +343,7 @@ def test_delete_inexistent_triple_returns_404(client, super_jwt):
 # ---------------------------------------------------------------------------
 # GET /graph/stats
 # ---------------------------------------------------------------------------
+
 
 def test_stats_returns_counts(client, super_jwt):
     r = client.get("/graph/stats", headers=auth(super_jwt))

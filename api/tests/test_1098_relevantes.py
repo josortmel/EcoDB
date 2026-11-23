@@ -1,5 +1,6 @@
 """#1098: el umbral por mitad de decisiones vigentes (SUELO y MARGEN) y la regla de las filas que solo llegan
 por texto. Sin base ni red: _relevantes es una función pura sobre las candidatas ya puntuadas."""
+
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def test_el_margen_corta_las_lejanas_de_la_mejor():
 
 
 def test_solo_por_texto_necesita_la_mitad_de_las_palabras():
-    tema = "push y merge sin pedir permiso"   # con contenido: push, merge, sin, pedir, permiso (5)
+    tema = "push y merge sin pedir permiso"  # con contenido: push, merge, sin, pedir, permiso (5)
     buena = _c("t1", 0.65, r_vec=None, r_txt=1, content="Pepe: push y merge sin pedir permiso nunca")
     pobre = _c("t2", 0.65, r_vec=None, r_txt=2, content="el permiso de los hobbies")
     assert [f["id"] for f in _relevantes([buena, pobre], tema)] == ["t1"]

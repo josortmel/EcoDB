@@ -5,6 +5,7 @@ filter without any error.
 
 Static (AST) check — no DB, no running API, no imports of the modules.
 """
+
 import ast
 from pathlib import Path
 
@@ -45,11 +46,19 @@ def sent_param_names(path: Path, func_name: str) -> set[str]:
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "params" and isinstance(node.value, ast.Dict):
                     names |= {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
-                if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
-                        and target.value.id == "params" and isinstance(target.slice, ast.Constant)):
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "params"
+                    and isinstance(target.slice, ast.Constant)
+                ):
                     names.add(target.slice.value)
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
-                and node.target.id == "params" and isinstance(node.value, ast.Dict):
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "params"
+            and isinstance(node.value, ast.Dict)
+        ):
             names |= {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
     return names
 

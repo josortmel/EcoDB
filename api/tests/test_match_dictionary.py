@@ -10,6 +10,7 @@ Helper `_match_dictionary` es funcion pura que opera sobre `_dictionary_cache`
 (lista de tuplas precompiladas). Estos tests manipulan _dictionary_cache
 directamente para evitar dependencia de BD + cargar el cache real.
 """
+
 from __future__ import annotations
 
 import re
@@ -32,10 +33,7 @@ def _build_cache(entries: list[tuple[str, str]]) -> list[tuple[re.Pattern, str, 
     """
     # Ordenar por longitud DESC — longest-match wins.
     sorted_entries = sorted(entries, key=lambda e: len(e[0]), reverse=True)
-    return [
-        (_compile_dictionary_pattern(name_norm), etype, name_norm.title())
-        for name_norm, etype in sorted_entries
-    ]
+    return [(_compile_dictionary_pattern(name_norm), etype, name_norm.title()) for name_norm, etype in sorted_entries]
 
 
 @pytest.fixture(autouse=True)
@@ -61,10 +59,12 @@ def test_match_basic_single_entity():
 
 def test_match_longest_wins_overlapping_entries():
     """Longest match wins: 'eco consulting' matches before standalone 'eco'."""
-    gliner_service._dictionary_cache = _build_cache([
-        ("eco", "agente_ia"),
-        ("eco consulting", "organizacion"),
-    ])
+    gliner_service._dictionary_cache = _build_cache(
+        [
+            ("eco", "agente_ia"),
+            ("eco consulting", "organizacion"),
+        ]
+    )
     entities, residual = _match_dictionary("trabajo en eco consulting")
     # Solo debe haber 1 match — el largo. "eco" no debe aparecer adicional.
     assert len(entities) == 1
@@ -109,10 +109,12 @@ def test_residual_preserves_offsets_with_spaces():
 
 def test_multiple_entities_in_one_text():
     """Múltiples entidades, todas matcheadas por el dict."""
-    gliner_service._dictionary_cache = _build_cache([
-        ("alan", "persona"),
-        ("lisboa", "lugar"),
-    ])
+    gliner_service._dictionary_cache = _build_cache(
+        [
+            ("alan", "persona"),
+            ("lisboa", "lugar"),
+        ]
+    )
     entities, residual = _match_dictionary("alan vive en lisboa")
     assert len(entities) == 2
     labels = {e["label"] for e in entities}
@@ -138,10 +140,12 @@ def test_empty_dictionary_returns_text_unchanged():
 
 def test_provenance_source_dictionary():
     """Todas las entidades del helper tienen source='dictionary' (provenance)."""
-    gliner_service._dictionary_cache = _build_cache([
-        ("alan", "persona"),
-        ("eco consulting", "organizacion"),
-    ])
+    gliner_service._dictionary_cache = _build_cache(
+        [
+            ("alan", "persona"),
+            ("eco consulting", "organizacion"),
+        ]
+    )
     entities, _ = _match_dictionary("alan trabajó en eco consulting")
     assert all(e["source"] == "dictionary" for e in entities)
     assert all(e["score"] == 1.0 for e in entities)
@@ -175,15 +179,18 @@ def test_dedupe_same_entity_multiple_occurrences():
 # el nodo gemelo. Casos de la tabla de tildes_430_2026-10-09.md (Prima y Hilo).
 
 
-@pytest.mark.parametrize("entry, text, expected", [
-    ("espana", "Vivimos en España desde mayo", "España"),
-    ("el ultimo emperador", "Vimos El Último Emperador anoche", "El Último Emperador"),
-    ("lazaro", "Lázaro cambió de concha", "Lázaro"),
-    ("lazaro", "Lazaro cambio de concha", "Lazaro"),
-    ("jotaro", "Jōtarō llegó tarde", "Jōtarō"),
-    ("diseno", "el diseño final", "diseño"),
-    ("la juderia", "Paseamos por La Judería", "La Judería"),
-])
+@pytest.mark.parametrize(
+    "entry, text, expected",
+    [
+        ("espana", "Vivimos en España desde mayo", "España"),
+        ("el ultimo emperador", "Vimos El Último Emperador anoche", "El Último Emperador"),
+        ("lazaro", "Lázaro cambió de concha", "Lázaro"),
+        ("lazaro", "Lazaro cambio de concha", "Lazaro"),
+        ("jotaro", "Jōtarō llegó tarde", "Jōtarō"),
+        ("diseno", "el diseño final", "diseño"),
+        ("la juderia", "Paseamos por La Judería", "La Judería"),
+    ],
+)
 def test_accent_insensitive_match_keeps_original_spelling(entry, text, expected):
     gliner_service._dictionary_cache = _build_cache([(entry, "concepto")])
     entities, residual = _match_dictionary(text)
@@ -195,8 +202,7 @@ def test_accent_insensitive_match_keeps_original_spelling(entry, text, expected)
 
 def test_entry_ending_in_a_sign_matches():
     """\b no encuentra borde detrás de «)», así que una entrada así no casaba NUNCA."""
-    gliner_service._dictionary_cache = _build_cache(
-        [("comfyui-ipadapter-flux (shakker-labs)", "producto")])
+    gliner_service._dictionary_cache = _build_cache([("comfyui-ipadapter-flux (shakker-labs)", "producto")])
     entities, _ = _match_dictionary("Usé ComfyUI-IPAdapter-Flux (Shakker-Labs) ayer.")
     assert [e["text"] for e in entities] == ["ComfyUI-IPAdapter-Flux (Shakker-Labs)"]
 

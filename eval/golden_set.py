@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Golden set evaluation for EcoDB GAMR search quality."""
+
 import argparse
 import os
 import sys
@@ -20,6 +21,7 @@ API_URL = os.environ.get("ECODB_API_URL", "http://localhost:8080")
 QUERIES_PATH = Path(__file__).parent / "queries.yaml"
 K = 5
 
+
 def load_queries(path: Path) -> list[dict]:
     """Load and validate queries.yaml."""
     with open(path, encoding="utf-8") as f:
@@ -29,6 +31,7 @@ def load_queries(path: Path) -> list[dict]:
         print("ERROR: No queries found in", path)
         sys.exit(1)
     return queries
+
 
 def get_auth_headers() -> dict:
     """Get auth headers. Try ECODB_EVAL_API_KEY env var first, then .env file."""
@@ -48,6 +51,7 @@ def get_auth_headers() -> dict:
         return {}
     return {"Authorization": f"Bearer {key}"}
 
+
 def search(client: httpx.Client, query: str, headers: dict) -> list[str]:
     """Execute search and return list of result IDs (top K)."""
     for attempt in range(3):
@@ -59,7 +63,7 @@ def search(client: httpx.Client, query: str, headers: dict) -> list[str]:
                 timeout=30.0,
             )
             if resp.status_code == 429:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
@@ -77,10 +81,12 @@ def search(client: httpx.Client, query: str, headers: dict) -> list[str]:
     print(f"  ERROR searching '{query[:50]}': rate limited after 3 retries")
     return []
 
+
 def recall_at_k(expected: list[str], found: list[str]) -> float:
     if not expected:
         return 1.0
     return len(set(expected) & set(found)) / len(expected)
+
 
 def reciprocal_rank(expected: list[str], found: list[str]) -> float:
     expected_set = set(expected)
@@ -89,13 +95,21 @@ def reciprocal_rank(expected: list[str], found: list[str]) -> float:
             return 1.0 / (i + 1)
     return 0.0
 
+
 def get_feature_flags() -> dict:
     """Read current feature flag values."""
     flags = {}
-    for name in ["ENABLE_BM25", "ENABLE_AUTO_LINK", "ENABLE_WEIGHT_DYNAMIC",
-                  "ENABLE_TRUST_TIERS", "ENABLE_STOP_ENTITIES_DYNAMIC", "ENABLE_TENSION_DETECTION"]:
+    for name in [
+        "ENABLE_BM25",
+        "ENABLE_AUTO_LINK",
+        "ENABLE_WEIGHT_DYNAMIC",
+        "ENABLE_TRUST_TIERS",
+        "ENABLE_STOP_ENTITIES_DYNAMIC",
+        "ENABLE_TENSION_DETECTION",
+    ]:
         flags[name] = os.environ.get(name, "false").lower() in ("true", "1", "yes")
     return flags
+
 
 def generate_report(results: list[dict], tag: str) -> str:
     """Generate markdown report."""
@@ -131,14 +145,15 @@ def generate_report(results: list[dict], tag: str) -> str:
     ]
     for cat, vals in sorted(categories.items()):
         c = vals["count"]
-        lines.append(f"| {cat} | {c} | {vals['recall_sum']/c:.3f} | {vals['rr_sum']/c:.3f} |")
+        lines.append(f"| {cat} | {c} | {vals['recall_sum'] / c:.3f} | {vals['rr_sum'] / c:.3f} |")
 
     lines += ["", "## Feature Flags\n", "| Flag | Value |", "|------|-------|"]
     for name, val in sorted(flags.items()):
         lines.append(f"| {name} | {val} |")
 
     lines += [
-        "", "## Per Query Detail\n",
+        "",
+        "## Per Query Detail\n",
         f"| # | Query | Category | Recall@{K} | RR | Expected | Found | Missing |",
         "|---|-------|----------|----------|----|----------|-------|---------|",
     ]
@@ -152,8 +167,10 @@ def generate_report(results: list[dict], tag: str) -> str:
 
     return "\n".join(lines) + "\n"
 
+
 def compare_reports(file1: str, file2: str):
     """Compare two report files and print deltas."""
+
     def parse_summary(path):
         metrics = {}
         with open(path) as f:
@@ -185,6 +202,7 @@ def compare_reports(file1: str, file2: str):
             symbol = "+" if delta >= 0 else ""
             marker = "ok" if delta >= 0 else "REGRESSION"
             print(f"  {key}: {v1:.3f} -> {v2:.3f} ({symbol}{delta:.3f}) {marker}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="EcoDB Golden Set Evaluation")
@@ -220,14 +238,16 @@ def main():
             rr = reciprocal_rank(expected, found)
 
             print(f"  [{i}/{len(queries)}] {query_text[:50]:50s} R@5={rec:.2f} RR={rr:.2f}")
-            results.append({
-                "query": query_text,
-                "category": category,
-                "expected": expected,
-                "found": found,
-                "recall": rec,
-                "rr": rr,
-            })
+            results.append(
+                {
+                    "query": query_text,
+                    "category": category,
+                    "expected": expected,
+                    "found": found,
+                    "recall": rec,
+                    "rr": rr,
+                }
+            )
 
     report = generate_report(results, args.tag)
 
@@ -236,6 +256,7 @@ def main():
         print(f"\nReport saved to {args.output}")
     else:
         print("\n" + report)
+
 
 if __name__ == "__main__":
     main()

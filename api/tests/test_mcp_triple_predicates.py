@@ -6,6 +6,7 @@ saying so ("was_investigated_on" -> "supervisa"). Choosing a better predicate is
 NOT in scope (that goes to the EcoDB redesign); this only makes the swap visible
 and recorded. Offline: httpx mocked with respx, no API, no DB.
 """
+
 import importlib.util
 import json
 from pathlib import Path
@@ -47,7 +48,8 @@ def _resolve(request):
 
 def _mock_common():
     respx.post(f"{API}/auth/token").mock(
-        return_value=httpx.Response(200, json={"access_token": "jwt", "expires_in": 3600}))
+        return_value=httpx.Response(200, json={"access_token": "jwt", "expires_in": 3600})
+    )
     respx.get(f"{API}/graph/predicates/aliases").mock(return_value=httpx.Response(200, json={"aliases": []}))
     respx.get(f"{API}/graph/predicates/resolve").mock(side_effect=_resolve)
 
@@ -57,34 +59,58 @@ def _mock_common():
 def test_save_triple_reports_and_sends_requested_predicate(mod, requested):
     _mock_common()
     stored = MAPPING[requested][0]
-    post = respx.post(f"{API}/graph/triples").mock(return_value=httpx.Response(201, json={
-        "id": 7, "subject_id": 1, "subject_name": "A", "predicate": stored,
-        "object_id": 2, "object_name": "B", "author": None}))
+    post = respx.post(f"{API}/graph/triples").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "id": 7,
+                "subject_id": 1,
+                "subject_name": "A",
+                "predicate": stored,
+                "object_id": 2,
+                "object_name": "B",
+                "author": None,
+            },
+        )
+    )
 
     out = mod.save_triple("A", requested, "B")
 
     sent = json.loads(post.calls.last.request.content)
     assert sent["predicate"] == stored
-    assert sent["original_predicate"] == requested          # (2) siempre, también si no cambia
-    assert out["requested_predicate"] == requested          # (1) el agente ve lo que pidió...
-    assert out["stored_predicate"] == stored                # ...y lo que se guardó
+    assert sent["original_predicate"] == requested  # (2) siempre, también si no cambia
+    assert out["requested_predicate"] == requested  # (1) el agente ve lo que pidió...
+    assert out["stored_predicate"] == stored  # ...y lo que se guardó
 
 
 @respx.mock
 def test_save_triples_batch_reports_each_triple(mod):
     _mock_common()
     cases = list(MAPPING)
-    created = [{"id": i, "subject_id": 1, "subject_name": f"S{i}", "predicate": MAPPING[req][0],
-                "object_id": 2, "object_name": f"O{i}", "author": None, "original_predicate": req}
-               for i, req in enumerate(cases)]
+    created = [
+        {
+            "id": i,
+            "subject_id": 1,
+            "subject_name": f"S{i}",
+            "predicate": MAPPING[req][0],
+            "object_id": 2,
+            "object_name": f"O{i}",
+            "author": None,
+            "original_predicate": req,
+        }
+        for i, req in enumerate(cases)
+    ]
     post = respx.post(f"{API}/graph/triples/batch").mock(
-        return_value=httpx.Response(201, json={"created": created, "skipped_duplicates": 0}))
+        return_value=httpx.Response(201, json={"created": created, "skipped_duplicates": 0})
+    )
 
-    out = mod.save_triples_batch([{"subject": f"S{i}", "predicate": req, "object": f"O{i}"}
-                                  for i, req in enumerate(cases)])
+    out = mod.save_triples_batch(
+        [{"subject": f"S{i}", "predicate": req, "object": f"O{i}"} for i, req in enumerate(cases)]
+    )
 
     sent = json.loads(post.calls.last.request.content)["triples"]
     assert [t["original_predicate"] for t in sent] == cases
     assert out["count"] == len(cases)
-    assert [(t["requested_predicate"], t["stored_predicate"]) for t in out["triples"]] == \
-        [(req, MAPPING[req][0]) for req in cases]
+    assert [(t["requested_predicate"], t["stored_predicate"]) for t in out["triples"]] == [
+        (req, MAPPING[req][0]) for req in cases
+    ]

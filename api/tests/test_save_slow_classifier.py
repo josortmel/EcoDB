@@ -2,6 +2,7 @@
 awaited before the response. The MCP gave up at 60 s and its queue re-sent the save as a twin.
 The classifier now runs after the response: the save returns at once and the tag lands later.
 Against the throwaway Postgres (5436); embeddings and the classifier are stubbed."""
+
 import asyncio
 import os
 import sys
@@ -14,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -45,6 +47,7 @@ def _sql(q, *args):
             return await conn.fetch(q, *args)
         finally:
             await conn.close()
+
     return asyncio.run(run())
 
 
@@ -57,8 +60,10 @@ def client():
 @pytest.fixture(scope="module")
 def jwt(client):
     key_plain, key_hash = generate_api_key()
-    key_id = _sql("INSERT INTO api_keys (key_hash, name, user_id, active) "
-                  "VALUES ($1, 'pytest-892', 1, true) RETURNING id", key_hash)[0]["id"]
+    key_id = _sql(
+        "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-892', 1, true) RETURNING id",
+        key_hash,
+    )[0]["id"]
     token = client.post("/auth/token", json={"api_key": key_plain}).json()["access_token"]
     yield token
     _sql("DELETE FROM api_keys WHERE id = $1", key_id)
@@ -70,8 +75,13 @@ def test_save_does_not_wait_for_the_llm_classifier(client, jwt, monkeypatch):
     monkeypatch.setattr(memories, "ENABLE_POST_HOC_CLASSIFIER", True)
     monkeypatch.setattr(classifier, "classify_with_llm", _slow_classify)
     # No heuristic tag, so Pass 2 (the LLM) is the one that decides.
-    body = {"type": "observacion", "content": PREFIX + uuid.uuid4().hex,
-            "workspace_id": 1, "project_id": 1, "client_id": str(uuid.uuid4())}
+    body = {
+        "type": "observacion",
+        "content": PREFIX + uuid.uuid4().hex,
+        "workspace_id": 1,
+        "project_id": 1,
+        "client_id": str(uuid.uuid4()),
+    }
     t0 = time.monotonic()
     r = client.post("/memories", headers={"Authorization": f"Bearer {jwt}"}, json=body)
     took = time.monotonic() - t0

@@ -6,6 +6,7 @@ evaluates correctness with Sonnet judge. Computes QA F1 per category.
 Usage:
     python eval/locomo/run_qa_eval.py
 """
+
 import functools
 import json
 import math
@@ -193,21 +194,21 @@ def main():
                 print(f"  {sample_id} F1={conv_f1:.4f} ({len(conv_scores)} evaluated)")
 
     # Final report
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"LoCoMo QA Evaluation Results")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Total evaluated: {total_evaluated}, errors: {total_errors}")
     print()
 
     overall = scores_accum.get("overall", [])
     if overall:
-        print(f"Overall F1: {sum(overall)/len(overall):.4f} ({len(overall)} queries)")
+        print(f"Overall F1: {sum(overall) / len(overall):.4f} ({len(overall)} queries)")
 
     print(f"\nBy category:")
     for cat_name in ["single-hop", "temporal", "multi-hop", "open-domain", "adversarial"]:
         vals = scores_accum.get(cat_name, [])
         if vals:
-            print(f"  {cat_name}: F1={sum(vals)/len(vals):.4f} ({len(vals)} queries)")
+            print(f"  {cat_name}: F1={sum(vals) / len(vals):.4f} ({len(vals)} queries)")
 
     print(f"\nFull results: {OUT_PATH}")
 

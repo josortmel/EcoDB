@@ -7,6 +7,7 @@ ahora usa visible_project_ids (granular) en lugar de visible_workspace_ids.
 Mantiene compatibilidad con filtros opcionales workspace_id y project_id (403
 unificado anti-IDOR).
 """
+
 import asyncio
 import os
 import sys
@@ -17,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -29,6 +31,7 @@ from auth import generate_api_key
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def app():
@@ -70,11 +73,15 @@ def super_jwt(client):
         try:
             # Borrar memorias creadas por los tests (matching content prefix).
             await conn.execute("DELETE FROM memories WHERE content LIKE 'pytest-search-%'")
-            await conn.execute("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-search-%')")
+            await conn.execute(
+                "DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-search-%')"
+            )
             await conn.execute("DELETE FROM projects WHERE name LIKE 'pytest-search-%'")
             await conn.execute("DELETE FROM workspaces WHERE name LIKE 'pytest-search-%'")
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-search-%'")
-            await conn.execute("DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-search-%')")
+            await conn.execute(
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-search-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-search-%'")
         finally:
             await conn.close()
@@ -91,6 +98,7 @@ def worker_world(client, super_jwt):
     + worker user + super crea memorias en cada uno con prefix identificable.
 
     Devuelve dict con jwt del worker y los IDs para asserts."""
+
     async def _setup():
         conn = await _aconn()
         try:
@@ -106,13 +114,12 @@ def worker_world(client, super_jwt):
             key_plain, key_hash = generate_api_key()
             await conn.execute(
                 "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-search-worker-key', $2, true)",
-                key_hash, user_id,
+                key_hash,
+                user_id,
             )
 
             # Workspace
-            ws = await conn.fetchrow(
-                "INSERT INTO workspaces (name) VALUES ('pytest-search-ws') RETURNING id"
-            )
+            ws = await conn.fetchrow("INSERT INTO workspaces (name) VALUES ('pytest-search-ws') RETURNING id")
             ws_id = ws["id"]
 
             # Otro workspace (worker NO debería ver nada de aquí)
@@ -129,7 +136,8 @@ def worker_world(client, super_jwt):
             pa_id = pa["id"]
             await conn.execute(
                 "INSERT INTO project_members (project_id, user_id) VALUES ($1, $2)",
-                pa_id, user_id,
+                pa_id,
+                user_id,
             )
 
             # Project B (worker NO es member, NO is_common)
@@ -159,7 +167,10 @@ def worker_world(client, super_jwt):
                 "key_plain": key_plain,
                 "ws_id": ws_id,
                 "ws_foreign_id": ws_foreign_id,
-                "pa_id": pa_id, "pb_id": pb_id, "pc_id": pc_id, "pd_id": pd_id,
+                "pa_id": pa_id,
+                "pb_id": pb_id,
+                "pc_id": pc_id,
+                "pd_id": pd_id,
             }
         finally:
             await conn.close()
@@ -182,9 +193,7 @@ def worker_world(client, super_jwt):
         )
         assert r.status_code == 201, f"setup memory {label} failed: {r.status_code} {r.text}"
 
-    state["worker_jwt"] = client.post(
-        "/auth/token", json={"api_key": state["key_plain"]}
-    ).json()["access_token"]
+    state["worker_jwt"] = client.post("/auth/token", json={"api_key": state["key_plain"]}).json()["access_token"]
     return state
 
 
@@ -194,6 +203,7 @@ def auth(jwt):
 
 # ===========================================================================
 # Pre-filtro project-level — el cambio clave de # ===========================================================================
+
 
 def test_worker_search_only_returns_member_and_common_projects(client, worker_world):
     """
@@ -291,6 +301,7 @@ def test_team_member_can_search_team_resource_project(client, super_jwt):
     - Crear team T → añadir team_resource P → añadir user a team T.
     - Search por marker → user-team-only ve memorias de P vía team_resources.
     """
+
     async def _setup():
         conn = await _aconn()
         try:
@@ -305,11 +316,10 @@ def test_team_member_can_search_team_resource_project(client, super_jwt):
             key_plain, key_hash = generate_api_key()
             await conn.execute(
                 "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-search-team-only-key', $2, true)",
-                key_hash, user_id,
+                key_hash,
+                user_id,
             )
-            ws = await conn.fetchrow(
-                "INSERT INTO workspaces (name) VALUES ('pytest-search-team-ws') RETURNING id"
-            )
+            ws = await conn.fetchrow("INSERT INTO workspaces (name) VALUES ('pytest-search-team-ws') RETURNING id")
             proj = await conn.fetchrow(
                 "INSERT INTO projects (workspace_id, name, is_common) VALUES ($1, 'pytest-search-team-proj', false) RETURNING id",
                 ws["id"],
@@ -336,16 +346,19 @@ def test_team_member_can_search_team_resource_project(client, super_jwt):
 
     # Crear team + añadir user + añadir resource.
     r_team = client.post(
-        "/teams", headers=auth(super_jwt),
+        "/teams",
+        headers=auth(super_jwt),
         json={"name": "pytest-search-team"},
     )
     team_id = r_team.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": user_id},
     )
     client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": proj_id},
     )
 
@@ -362,8 +375,7 @@ def test_team_member_can_search_team_resource_project(client, super_jwt):
     assert r_search.status_code == 200
     proj_ids_seen = {res["project_id"] for res in r_search.json()["results"]}
     assert proj_id in proj_ids_seen, (
-        f"team_member should see project via team_resources but didn't. "
-        f"results={r_search.json()['results']}"
+        f"team_member should see project via team_resources but didn't. results={r_search.json()['results']}"
     )
 
     # Cleanup adicional para que el fixture super_jwt._cleanup pueda
@@ -388,6 +400,7 @@ def test_team_member_can_search_team_resource_project(client, super_jwt):
 
 def test_isolated_user_with_no_assignments_returns_empty(client, super_jwt):
     """User no-super sin lead_workspaces ni project_members → search devuelve [] sin tocar GPU."""
+
     async def _setup():
         conn = await _aconn()
         try:
@@ -402,7 +415,8 @@ def test_isolated_user_with_no_assignments_returns_empty(client, super_jwt):
             key_plain, key_hash = generate_api_key()
             await conn.execute(
                 "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-search-isolated-key', $2, true)",
-                key_hash, user_id,
+                key_hash,
+                user_id,
             )
             return key_plain
         finally:

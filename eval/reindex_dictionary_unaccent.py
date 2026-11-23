@@ -12,7 +12,9 @@ Uso, dentro de ecodb-api (allí están el diccionario y el DATABASE_URL):
   python /tmp/reindex_dictionary_unaccent.py            → simulacro: cuenta, no escribe
   python /tmp/reindex_dictionary_unaccent.py --apply    → escribe
 """
+
 import asyncio, os, sys, time, collections
+
 sys.path.insert(0, "/app")
 import asyncpg
 
@@ -21,11 +23,13 @@ APPLY = "--apply" in sys.argv
 
 async def main():
     from gliner_service import extract_entities, load_dictionary_to_cache
+
     pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=4)
     print("diccionario:", await load_dictionary_to_cache(pool), "entradas")
     async with pool.acquire() as c:
-        mems = await c.fetch("SELECT id, content FROM memories "
-                             "WHERE staleness IS NULL OR staleness NOT IN ('dormant','archived')")
+        mems = await c.fetch(
+            "SELECT id, content FROM memories WHERE staleness IS NULL OR staleness NOT IN ('dormant','archived')"
+        )
         links_before = await c.fetchval("SELECT count(*) FROM memory_entity_links")
         # clave sin tildes -> nodos ACTIVOS
         rows = await c.fetch("SELECT id, f_unaccent(lower(name)) AS k FROM nodes WHERE status = 'active'")
@@ -57,23 +61,31 @@ async def main():
                 if not ids:
                     missing[name] += 1
                     continue
-                exists = await c.fetchval("SELECT 1 FROM memory_entity_links WHERE memory_id=$1 AND entity_node_id=$2",
-                                          m["id"], ids[0])
+                exists = await c.fetchval(
+                    "SELECT 1 FROM memory_entity_links WHERE memory_id=$1 AND entity_node_id=$2", m["id"], ids[0]
+                )
                 if exists:
                     continue
                 would += 1
                 if APPLY:
-                    res = await c.execute("INSERT INTO memory_entity_links (memory_id, entity_node_id) "
-                                          "VALUES ($1, $2) ON CONFLICT DO NOTHING", m["id"], ids[0])
+                    res = await c.execute(
+                        "INSERT INTO memory_entity_links (memory_id, entity_node_id) "
+                        "VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                        m["id"],
+                        ids[0],
+                    )
                     created += res.endswith(" 1")
         links_after = await c.fetchval("SELECT count(*) FROM memory_entity_links")
-        to_merged = await c.fetchval("SELECT count(*) FROM memory_entity_links l JOIN nodes n ON n.id = l.entity_node_id "
-                                     "WHERE n.status = 'merged'")
+        to_merged = await c.fetchval(
+            "SELECT count(*) FROM memory_entity_links l JOIN nodes n ON n.id = l.entity_node_id "
+            "WHERE n.status = 'merged'"
+        )
     print(f"{'APLICADO' if APPLY else 'SIMULACRO'} en {time.time() - t0:.1f} s")
     print("enlaces nuevos:", would, "| creados:", created, "| enlaces ahora:", links_after, "| errores:", errors)
     print("enlaces que apuntan a un nodo fusionado (toda la base):", to_merged)
     print("ambiguos (no enlazados):", dict(ambiguous.most_common(10)))
     print("entradas del diccionario sin nodo activo (no enlazadas):", len(missing), dict(missing.most_common(8)))
     await pool.close()
+
 
 asyncio.run(main())

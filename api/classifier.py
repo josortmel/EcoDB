@@ -5,6 +5,7 @@ Pass 2: LLM small — DEFERRED (same infra blocker as HyDE).
 
 Runs best-effort after memory save. Never blocks save.
 """
+
 import html
 import re
 import logging
@@ -23,22 +24,23 @@ def _outcome(reason: str) -> None:
     CLASSIFY_LLM_OUTCOMES[reason] += 1
     _perf.info("classify_with_llm outcome=%s", reason)
 
+
 PATTERNS = {
     "bug_fix": [
-        re.compile(r'(?:error|exception|bug|crash|fix|ValueError|TypeError|KeyError)', re.I),
-        re.compile(r'(?:causa|root.?cause|fixed|resolved|workaround)', re.I),
+        re.compile(r"(?:error|exception|bug|crash|fix|ValueError|TypeError|KeyError)", re.I),
+        re.compile(r"(?:causa|root.?cause|fixed|resolved|workaround)", re.I),
     ],
     "decision": [
-        re.compile(r'(?:decisi[oó]n|decidimos|alternativa|elegimos|descartamos|aprobado)', re.I),
-        re.compile(r'(?:raz[oó]n|motivo|trade.?off|vs\b|versus)', re.I),
+        re.compile(r"(?:decisi[oó]n|decidimos|alternativa|elegimos|descartamos|aprobado)", re.I),
+        re.compile(r"(?:raz[oó]n|motivo|trade.?off|vs\b|versus)", re.I),
     ],
     "agreement": [
-        re.compile(r'(?:acuerdo|consenso|unanimidad|votaci[oó]n|aprobado por)', re.I),
-        re.compile(r'(?:participantes|firmado|condiciones)', re.I),
+        re.compile(r"(?:acuerdo|consenso|unanimidad|votaci[oó]n|aprobado por)", re.I),
+        re.compile(r"(?:participantes|firmado|condiciones)", re.I),
     ],
     "learning": [
-        re.compile(r'(?:lecci[oó]n|aprendizaje|aprendimos|no vuelve|lección)', re.I),
-        re.compile(r'(?:regla|principio|patr[oó]n|anti.?pattern)', re.I),
+        re.compile(r"(?:lecci[oó]n|aprendizaje|aprendimos|no vuelve|lección)", re.I),
+        re.compile(r"(?:regla|principio|patr[oó]n|anti.?pattern)", re.I),
     ],
 }
 
@@ -76,6 +78,7 @@ async def classify_with_llm(content: str) -> dict | None:
     """
     import json as _json
     from llm_provider import get_llm_provider
+
     provider = get_llm_provider()
     if not provider:
         _outcome("no_provider")
@@ -118,22 +121,22 @@ async def classify_with_llm(content: str) -> dict | None:
 def _extract_fields(content: str, template_type: str) -> dict:
     fields = {}
     if template_type == "bug_fix":
-        err = re.search(r'(?:Error|Exception|ValueError|TypeError|KeyError)[:\s]+(.{10,100})', content)
+        err = re.search(r"(?:Error|Exception|ValueError|TypeError|KeyError)[:\s]+(.{10,100})", content)
         if err:
             fields["error_message"] = err.group(1).strip()[:200]
-        fix = re.search(r'(?:fix|fixed|resolved|workaround)[:\s]+(.{10,200})', content, re.I)
+        fix = re.search(r"(?:fix|fixed|resolved|workaround)[:\s]+(.{10,200})", content, re.I)
         if fix:
             fields["fix_applied"] = fix.group(1).strip()[:200]
     elif template_type == "decision":
-        m = re.search(r'(?:decidimos|decisi[oó]n|elegimos)[:\s]+(.{10,200})', content, re.I)
+        m = re.search(r"(?:decidimos|decisi[oó]n|elegimos)[:\s]+(.{10,200})", content, re.I)
         if m:
             fields["decision_tomada"] = m.group(1).strip()[:200]
     elif template_type == "agreement":
-        m = re.search(r'(?:acuerdo|consenso)[:\s]+(.{10,200})', content, re.I)
+        m = re.search(r"(?:acuerdo|consenso)[:\s]+(.{10,200})", content, re.I)
         if m:
             fields["acuerdo"] = m.group(1).strip()[:200]
     elif template_type == "learning":
-        m = re.search(r'(?:lecci[oó]n|aprendizaje|aprendimos)[:\s]+(.{10,200})', content, re.I)
+        m = re.search(r"(?:lecci[oó]n|aprendizaje|aprendimos)[:\s]+(.{10,200})", content, re.I)
         if m:
             fields["leccion"] = m.group(1).strip()[:200]
     return fields

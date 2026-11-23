@@ -1,4 +1,5 @@
 """Tests for reranker module: loading, degradation, SHA pinning."""
+
 from unittest.mock import patch
 
 
@@ -7,6 +8,7 @@ def test_reranker_disabled_by_env():
     with patch.dict("os.environ", {"RERANKER_ENABLED": "false"}):
         import importlib
         import reranker
+
         importlib.reload(reranker)
         assert not reranker.is_available()
         results = [{"content": "a", "score": 0.5}, {"content": "b", "score": 0.8}]
@@ -19,6 +21,7 @@ def test_rerank_graceful_on_load_failure():
     with patch.dict("os.environ", {"RERANKER_ENABLED": "true", "RERANKER_MODEL": "nonexistent/model"}):
         import importlib
         import reranker
+
         importlib.reload(reranker)
         assert not reranker.is_available()
         results = [{"content": "a"}, {"content": "b"}]
@@ -28,10 +31,10 @@ def test_rerank_graceful_on_load_failure():
 
 def test_rerank_truncates_to_top_k():
     """Reranker returns exactly top_k results."""
-    with patch("reranker._available", True), \
-         patch("reranker._model") as mock_model:
+    with patch("reranker._available", True), patch("reranker._model") as mock_model:
         mock_model.predict.return_value = [0.9, 0.1, 0.5]
         import reranker
+
         results = [{"content": "a"}, {"content": "b"}, {"content": "c"}]
         out = reranker.rerank("query", results, top_k=2)
         assert len(out) == 2

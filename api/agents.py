@@ -40,6 +40,7 @@ Hardening:
 - Auto-increment version dentro de transaction (UNIQUE constraint del schema
   protege contra race; UniqueViolationError → 409 limpio).
 """
+
 from __future__ import annotations
 
 import json
@@ -58,9 +59,9 @@ from shared_models import TensionAction
 
 
 # Límites duros (DoS prevention + sanity).
-MAX_FRAGMENT_SIZE = 32_000          # 32KB por fragmento individual.
-MAX_FRAGMENTS_PER_VERSION = 100      # Identidad típica = ~10-15 fragmentos.
-MAX_AGENT_IDENTIFIER_LEN = 200       # `agents.identifier` es TEXT, sin límite duro en schema.
+MAX_FRAGMENT_SIZE = 32_000  # 32KB por fragmento individual.
+MAX_FRAGMENTS_PER_VERSION = 100  # Identidad típica = ~10-15 fragmentos.
+MAX_AGENT_IDENTIFIER_LEN = 200  # `agents.identifier` es TEXT, sin límite duro en schema.
 
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -74,8 +75,10 @@ router_v1 = APIRouter(prefix="/agents", tags=["agents"])
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
+
 class IdentityFragment(BaseModel):
     """Un fragmento individual de identidad. Devuelto en GET."""
+
     model_config = ConfigDict(extra="forbid")
     fragment_idx: int = Field(..., ge=0)
     content: str
@@ -83,6 +86,7 @@ class IdentityFragment(BaseModel):
 
 class IdentityResponse(BaseModel):
     """Response de GET /agents/{id}/identity."""
+
     agent_identifier: str
     agent_id: int
     version: int
@@ -92,6 +96,7 @@ class IdentityResponse(BaseModel):
 class IdentityCreate(BaseModel):
     """Body de POST /agents/{id}/identity. Lista de strings — fragment_idx
     auto-asignado por orden (cliente NO gestiona idx)."""
+
     model_config = ConfigDict(extra="forbid")
     fragments: list[str] = Field(
         ...,
@@ -103,6 +108,7 @@ class IdentityCreate(BaseModel):
 
 class IdentityCreateResponse(BaseModel):
     """Response de POST /agents/{id}/identity (201)."""
+
     agent_identifier: str
     agent_id: int
     version: int
@@ -156,6 +162,7 @@ class ObservedIdentityResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _resolve_agent_or_404(conn, actor: dict, agent_identifier: str) -> dict:
     """Resuelve agent_identifier → row de agents + verifica permisos.
 
@@ -180,6 +187,7 @@ async def _resolve_agent_or_404(conn, actor: dict, agent_identifier: str) -> dic
 # GET /agents/{agent_identifier}/identity
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{agent_identifier}/identity", response_model=IdentityResponse)
 async def get_identity(
     agent_identifier: str = Path(..., min_length=1, max_length=MAX_AGENT_IDENTIFIER_LEN),
@@ -197,8 +205,7 @@ async def get_identity(
 
         if version is None:
             target_version = await conn.fetchval(
-                "SELECT MAX(version) FROM agent_identity "
-                "WHERE agent_id = $1 AND organization_id IS NULL",
+                "SELECT MAX(version) FROM agent_identity WHERE agent_id = $1 AND organization_id IS NULL",
                 agent_id,
             )
             if target_version is None:
@@ -219,7 +226,8 @@ async def get_identity(
             WHERE agent_id = $1 AND organization_id IS NULL AND version = $2
             ORDER BY fragment_idx ASC
             """,
-            agent_id, target_version,
+            agent_id,
+            target_version,
         )
 
     if not rows:
@@ -228,10 +236,7 @@ async def get_identity(
             f"version {target_version} not found for agent {agent_identifier!r}",
         )
 
-    fragments = [
-        IdentityFragment(fragment_idx=r["fragment_idx"], content=r["content"])
-        for r in rows
-    ]
+    fragments = [IdentityFragment(fragment_idx=r["fragment_idx"], content=r["content"]) for r in rows]
     return IdentityResponse(
         agent_identifier=agent_identifier,
         agent_id=agent_id,
@@ -243,6 +248,7 @@ async def get_identity(
 # ---------------------------------------------------------------------------
 # POST /agents/{agent_identifier}/identity
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/{agent_identifier}/identity",
@@ -295,12 +301,16 @@ async def create_identity_version(
                             (agent_id, organization_id, version, fragment_idx, content)
                         VALUES ($1, NULL, $2, $3, $4)
                         """,
-                        agent_id, new_version, idx, content,
+                        agent_id,
+                        new_version,
+                        idx,
+                        content,
                     )
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'save_identity', 'agent', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), agent_identifier,
+                int(actor["sub"]),
+                agent_identifier,
                 json.dumps({"version": new_version, "fragments_count": len(body.fragments)}),
                 actor.get("organization_id"),
             )
@@ -335,15 +345,15 @@ async def patch_agent(
             params.append(value)
             set_parts.append(f"{key} = ${len(params)}")
         params.append(agent["id"])
-        await conn.execute(
-            f"UPDATE agents SET {', '.join(set_parts)} WHERE id = ${len(params)}",
-            *params)
+        await conn.execute(f"UPDATE agents SET {', '.join(set_parts)} WHERE id = ${len(params)}", *params)
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'patch_agent', 'agent', $2::text, $3::jsonb, $4)""",
-            int(actor["sub"]), str(agent["id"]),
+            int(actor["sub"]),
+            str(agent["id"]),
             json.dumps(fields),
-            actor.get("organization_id"))
+            actor.get("organization_id"),
+        )
     return {"ok": True, "agent_identifier": agent_identifier}
 
 
@@ -359,98 +369,126 @@ async def get_observed_identity(
         traits = []
 
         # 1. Type distribution (last 90 days)
-        type_dist = await conn.fetch("""
+        type_dist = await conn.fetch(
+            """
             SELECT type::text, COUNT(*) AS cnt FROM memories
             WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'
             GROUP BY type ORDER BY cnt DESC
-        """, agent_id)
+        """,
+            agent_id,
+        )
         if type_dist:
             total = sum(r["cnt"] for r in type_dist)
-            traits.append({
-                "dimension": "type_distribution",
-                "observed_value": ", ".join(f"{r['type']}:{r['cnt']}" for r in type_dist),
-                "evidence_count": total,
-                "last_seen": datetime.now(timezone.utc),
-                "confidence": min(total / 50, 1.0),
-            })
+            traits.append(
+                {
+                    "dimension": "type_distribution",
+                    "observed_value": ", ".join(f"{r['type']}:{r['cnt']}" for r in type_dist),
+                    "evidence_count": total,
+                    "last_seen": datetime.now(timezone.utc),
+                    "confidence": min(total / 50, 1.0),
+                }
+            )
 
         # 2. Top entities via memory_entity_links
-        top_entities = await conn.fetch("""
+        top_entities = await conn.fetch(
+            """
             SELECT n.name, COUNT(*) AS cnt FROM memory_entity_links mel
             JOIN memories m ON m.id = mel.memory_id
             JOIN nodes n ON n.id = mel.entity_node_id
             WHERE m.agent_id=$1 AND m.created_at > NOW()-INTERVAL '90 days'
               AND n.status='active'
             GROUP BY n.name ORDER BY cnt DESC LIMIT 10
-        """, agent_id)
+        """,
+            agent_id,
+        )
         if top_entities:
-            traits.append({
-                "dimension": "top_entities",
-                "observed_value": ", ".join(f"{r['name']}:{r['cnt']}" for r in top_entities),
-                "evidence_count": sum(r["cnt"] for r in top_entities),
-                "last_seen": datetime.now(timezone.utc),
-                "confidence": min(len(top_entities) / 10, 1.0),
-            })
+            traits.append(
+                {
+                    "dimension": "top_entities",
+                    "observed_value": ", ".join(f"{r['name']}:{r['cnt']}" for r in top_entities),
+                    "evidence_count": sum(r["cnt"] for r in top_entities),
+                    "last_seen": datetime.now(timezone.utc),
+                    "confidence": min(len(top_entities) / 10, 1.0),
+                }
+            )
 
         # 3. Top predicates via triples
-        top_preds = await conn.fetch("""
+        top_preds = await conn.fetch(
+            """
             SELECT t.predicate, COUNT(*) AS cnt FROM triples t
             WHERE t.author = $1
             GROUP BY t.predicate ORDER BY cnt DESC LIMIT 10
-        """, agent_identifier)
+        """,
+            agent_identifier,
+        )
         if top_preds:
-            traits.append({
-                "dimension": "top_predicates",
-                "observed_value": ", ".join(f"{r['predicate']}:{r['cnt']}" for r in top_preds),
-                "evidence_count": sum(r["cnt"] for r in top_preds),
-                "last_seen": datetime.now(timezone.utc),
-                "confidence": min(len(top_preds) / 10, 1.0),
-            })
+            traits.append(
+                {
+                    "dimension": "top_predicates",
+                    "observed_value": ", ".join(f"{r['predicate']}:{r['cnt']}" for r in top_preds),
+                    "evidence_count": sum(r["cnt"] for r in top_preds),
+                    "last_seen": datetime.now(timezone.utc),
+                    "confidence": min(len(top_preds) / 10, 1.0),
+                }
+            )
 
         # 4. Weight distribution
-        weight_stats = await conn.fetchrow("""
+        weight_stats = await conn.fetchrow(
+            """
             SELECT AVG(weight) AS avg_w, STDDEV(weight) AS std_w,
                    MIN(weight) AS min_w, MAX(weight) AS max_w
             FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'
-        """, agent_id)
+        """,
+            agent_id,
+        )
         if weight_stats and weight_stats["avg_w"]:
-            traits.append({
-                "dimension": "weight_distribution",
-                "observed_value": f"avg:{weight_stats['avg_w']:.2f} std:{(weight_stats['std_w'] or 0):.2f} min:{weight_stats['min_w']:.2f} max:{weight_stats['max_w']:.2f}",
-                "evidence_count": await conn.fetchval(
-                    "SELECT COUNT(*) FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'",
-                    agent_id),
-                "last_seen": datetime.now(timezone.utc),
-                "confidence": 0.9,
-            })
+            traits.append(
+                {
+                    "dimension": "weight_distribution",
+                    "observed_value": f"avg:{weight_stats['avg_w']:.2f} std:{(weight_stats['std_w'] or 0):.2f} min:{weight_stats['min_w']:.2f} max:{weight_stats['max_w']:.2f}",
+                    "evidence_count": await conn.fetchval(
+                        "SELECT COUNT(*) FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'",
+                        agent_id,
+                    ),
+                    "last_seen": datetime.now(timezone.utc),
+                    "confidence": 0.9,
+                }
+            )
 
         # 5. Temporal patterns (day of week activity)
-        temporal = await conn.fetch("""
+        temporal = await conn.fetch(
+            """
             SELECT EXTRACT(DOW FROM created_at)::int AS dow, COUNT(*) AS cnt
             FROM memories WHERE agent_id=$1 AND created_at > NOW()-INTERVAL '90 days'
             GROUP BY dow ORDER BY cnt DESC
-        """, agent_id)
+        """,
+            agent_id,
+        )
         if temporal:
             day_names = ["dom", "lun", "mar", "mie", "jue", "vie", "sab"]
-            traits.append({
-                "dimension": "temporal_pattern",
-                "observed_value": ", ".join(f"{day_names[r['dow']]}:{r['cnt']}" for r in temporal),
-                "evidence_count": sum(r["cnt"] for r in temporal),
-                "last_seen": datetime.now(timezone.utc),
-                "confidence": min(len(temporal) / 7, 1.0),
-            })
+            traits.append(
+                {
+                    "dimension": "temporal_pattern",
+                    "observed_value": ", ".join(f"{day_names[r['dow']]}:{r['cnt']}" for r in temporal),
+                    "evidence_count": sum(r["cnt"] for r in temporal),
+                    "last_seen": datetime.now(timezone.utc),
+                    "confidence": min(len(temporal) / 7, 1.0),
+                }
+            )
 
         # Check precomputed observed_identity from latest cluster
-        precomp = await conn.fetchrow("""
+        precomp = await conn.fetchrow(
+            """
             SELECT metadata->'observed_identity' AS obs, created_at
             FROM memory_clusters
             WHERE agent_id=$1 AND status='active' AND metadata ? 'observed_identity'
             ORDER BY created_at DESC LIMIT 1
-        """, agent_id)
+        """,
+            agent_id,
+        )
         computed_at = precomp["created_at"] if precomp else None
 
-    return {"agent_identifier": agent_identifier, "traits": traits,
-            "computed_at": computed_at}
+    return {"agent_identifier": agent_identifier, "traits": traits, "computed_at": computed_at}
 
 
 @router.get("/{agent_identifier}/tensions")
@@ -466,16 +504,18 @@ async def get_tensions(
         params: list = [agent["id"]]
         if status:
             if status == "open":
-                conditions.append(
-                    "(metadata->>'tension_status' IS NULL OR metadata->>'tension_status' = 'open')")
+                conditions.append("(metadata->>'tension_status' IS NULL OR metadata->>'tension_status' = 'open')")
             else:
                 params.append(status)
                 conditions.append(f"metadata->>'tension_status' = ${len(params)}")
         where = " AND ".join(conditions)
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT * FROM memories WHERE {where}
             ORDER BY created_at DESC LIMIT 20
-        """, *params)
+        """,
+            *params,
+        )
         vis = await precompute_read_visibility(conn, actor)
         visible = [dict(r) for r in rows if check_read_memory(vis, r)]
     return {"items": visible, "total": len(visible)}
@@ -483,14 +523,16 @@ async def get_tensions(
 
 @router.put("/{agent_identifier}/tensions/{tension_id}")
 async def resolve_tension(
-    agent_identifier: str, tension_id: UUID,
-    body: TensionAction, actor: dict = Depends(get_current_user),
+    agent_identifier: str,
+    tension_id: UUID,
+    body: TensionAction,
+    actor: dict = Depends(get_current_user),
 ) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         agent = await _resolve_agent_or_404(conn, actor, agent_identifier)
         mem = await conn.fetchrow("SELECT * FROM memories WHERE id=$1", tension_id)
-        if mem is None or 'identity_tension' not in (mem["tags"] or []):
+        if mem is None or "identity_tension" not in (mem["tags"] or []):
             raise HTTPException(404)
         if mem["agent_id"] != agent["id"]:
             raise HTTPException(404)
@@ -499,14 +541,17 @@ async def resolve_tension(
         status_map = {"resolve": "resolved", "dismiss": "dismissed"}
         update = {"tension_status": status_map[body.action]}
         if body.action == "dismiss":
-            update["tension_cooldown_until"] = (
-                datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+            update["tension_cooldown_until"] = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         if body.note:
             update["tension_note"] = body.note
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE memories SET metadata = coalesce(metadata,'{}'::jsonb) || $1::jsonb,
               updated_at = NOW() WHERE id = $2
-        """, json.dumps(update), tension_id)
+        """,
+            json.dumps(update),
+            tension_id,
+        )
     return {"ok": True}
 
 
@@ -532,12 +577,11 @@ async def list_agents(actor: dict = Depends(get_current_user)) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         if actor.get("is_super"):
-            rows = await conn.fetch(
-                _AGENT_SUMMARY_SELECT + " ORDER BY a.identifier")
+            rows = await conn.fetch(_AGENT_SUMMARY_SELECT + " ORDER BY a.identifier")
         else:
             rows = await conn.fetch(
-                _AGENT_SUMMARY_SELECT + " WHERE a.user_id = $1 ORDER BY a.identifier",
-                int(actor["sub"]))
+                _AGENT_SUMMARY_SELECT + " WHERE a.user_id = $1 ORDER BY a.identifier", int(actor["sub"])
+            )
     items = [AgentSummary(**dict(r)) for r in rows]
     return {"items": items, "total": len(items)}
 
@@ -559,17 +603,21 @@ async def create_agent(
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
                 """,
-                body.identifier, body.display_name, body.description,
-                body.cognition_class, int(actor["sub"]))
+                body.identifier,
+                body.display_name,
+                body.description,
+                body.cognition_class,
+                int(actor["sub"]),
+            )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"agent {body.identifier!r} already exists")
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_agent', 'agent', $2::text, $3::jsonb, $4)""",
-            int(actor["sub"]), str(new_id),
-            json.dumps({"identifier": body.identifier,
-                        "cognition_class": body.cognition_class}),
-            actor.get("organization_id"))
-        row = await conn.fetchrow(
-            _AGENT_SUMMARY_SELECT + " WHERE a.id = $1", new_id)
+            int(actor["sub"]),
+            str(new_id),
+            json.dumps({"identifier": body.identifier, "cognition_class": body.cognition_class}),
+            actor.get("organization_id"),
+        )
+        row = await conn.fetchrow(_AGENT_SUMMARY_SELECT + " WHERE a.id = $1", new_id)
     return AgentSummary(**dict(row))

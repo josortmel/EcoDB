@@ -3,6 +3,7 @@ wraps asyncpg.connect/create_pool in conftest, so it covers every path (direct
 connects, module-level DATABASE_URL, the app's pool). Pure — no DB is reached:
 the wrapped originals are replaced by stubs.
 """
+
 import asyncpg
 import pytest
 
@@ -18,11 +19,14 @@ def test_default_test_port_is_not_live():
     assert asyncpg.create_pool is not conftest._ORIGINALS["create_pool"], "create_pool not guarded"
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"dsn": LIVE},
-    {"dsn": "postgresql://ecodb@postgres:5432/ecodb"},        # in-container live host
-    {"dsn": None, "host": "localhost", "port": 5435},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"dsn": LIVE},
+        {"dsn": "postgresql://ecodb@postgres:5432/ecodb"},  # in-container live host
+        {"dsn": None, "host": "localhost", "port": 5435},
+    ],
+)
 def test_guard_refuses_live_without_opt_in(monkeypatch, kwargs):
     monkeypatch.delenv("ECODB_ALLOW_LIVE_TESTS", raising=False)
     with pytest.raises(pytest.exit.Exception, match="live"):
@@ -49,15 +53,18 @@ def test_wrapped_connect_never_reaches_asyncpg_for_live(monkeypatch):
     assert calls == [THROWAWAY]
 
 
-@pytest.mark.parametrize("dsn,env", [
-    ("postgresql:///ecodb", {"PGPORT": "5435"}),                      # port from env
-    ("postgresql://ecodb@/ecodb", {"PGHOST": "postgres"}),             # host from env
-    (None, {"PGPORT": "5435"}),                                        # no dsn at all
-    ("postgresql://ecodb@localhost/ecodb?port=5435", {}),              # port in query string
-    ("postgresql://ecodb@/ecodb?host=ecodb-postgres", {}),             # host in query string
-    ("postgresql://ecodb@localhost:5436,localhost:5435/ecodb", {}),    # multi-host list
-    ("postgresql://ecodb@[::1]:5435/ecodb", {}),                       # bracketed IPv6
-])
+@pytest.mark.parametrize(
+    "dsn,env",
+    [
+        ("postgresql:///ecodb", {"PGPORT": "5435"}),  # port from env
+        ("postgresql://ecodb@/ecodb", {"PGHOST": "postgres"}),  # host from env
+        (None, {"PGPORT": "5435"}),  # no dsn at all
+        ("postgresql://ecodb@localhost/ecodb?port=5435", {}),  # port in query string
+        ("postgresql://ecodb@/ecodb?host=ecodb-postgres", {}),  # host in query string
+        ("postgresql://ecodb@localhost:5436,localhost:5435/ecodb", {}),  # multi-host list
+        ("postgresql://ecodb@[::1]:5435/ecodb", {}),  # bracketed IPv6
+    ],
+)
 def test_guard_resolves_env_and_libpq_forms(monkeypatch, dsn, env):
     monkeypatch.delenv("ECODB_ALLOW_LIVE_TESTS", raising=False)
     for k in ("PGHOST", "PGPORT"):

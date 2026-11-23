@@ -1,4 +1,5 @@
 """#919: save_memory del MCP reenvía supersedes y compañía a la API solo cuando vienen."""
+
 import os
 import sys
 from pathlib import Path
@@ -28,9 +29,15 @@ def _fn(tool):
 
 def test_supersedes_y_compania_llegan_a_la_api(monkeypatch):
     enviados = _captura(monkeypatch)
-    _fn(server.save_memory)(content="nueva", type="decision", supersedes=["a", "b"],
-                            supersede_kind="parcial", supersede_reason="cambia el horario",
-                            valid_until="2026-12-31", decidido_por={"tipo": "humano", "quien": "Pepe"})
+    _fn(server.save_memory)(
+        content="nueva",
+        type="decision",
+        supersedes=["a", "b"],
+        supersede_kind="parcial",
+        supersede_reason="cambia el horario",
+        valid_until="2026-12-31",
+        decidido_por={"tipo": "humano", "quien": "Pepe"},
+    )
     payload = [p for m, path, p in enviados if path == "/memories"][-1]
     assert payload["supersedes"] == ["a", "b"]
     assert payload["supersede_kind"] == "parcial"

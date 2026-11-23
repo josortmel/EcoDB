@@ -21,6 +21,7 @@ previamente). Sin DB round-trip — evitan timing oracles (lección VS1-WS + VS1
 
 Helpers ASÍNCRONOS: hacen DB queries. Reciben `conn` asyncpg como primer parámetro.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -30,16 +31,16 @@ from typing import Optional
 # DB helpers
 # ---------------------------------------------------------------------------
 
+
 async def _ws_org_id(conn, ws_id: int) -> Optional[int]:
     """Return organization_id for a workspace, or None if not found."""
-    return await conn.fetchval(
-        "SELECT organization_id FROM workspaces WHERE id = $1", ws_id
-    )
+    return await conn.fetchval("SELECT organization_id FROM workspaces WHERE id = $1", ws_id)
 
 
 # ---------------------------------------------------------------------------
 # Validación común — null bytes
 # ---------------------------------------------------------------------------
+
 
 def no_null_bytes(value: str, field_name: str) -> str:
     """Rechazar null bytes (\\x00) en TEXT input — rompen JSONB del soft-delete
@@ -72,6 +73,7 @@ def validate_name_strip_blank(value: str, field_name: str = "name") -> str:
 # ---------------------------------------------------------------------------
 # Workspace permissions
 # ---------------------------------------------------------------------------
+
 
 def user_can_create_workspace(actor: dict, organization_id: Optional[int]) -> bool:
     """Cascada de creación de workspace:
@@ -125,6 +127,7 @@ def user_can_delete_workspace(actor: dict, ws_row) -> bool:
 # del LEFT JOIN, patrón VS1-PROJ)
 # ---------------------------------------------------------------------------
 
+
 def user_can_modify_project(actor: dict, project_row) -> bool:
     """Cascada de modificación: super | CEO de la org del ws | lead del ws.
     Worker NO modifica.
@@ -169,6 +172,7 @@ def user_can_manage_project_leads(actor: dict, project_row) -> bool:
 # Project create — async (necesita validar existencia + org del workspace)
 # ---------------------------------------------------------------------------
 
+
 async def user_can_create_project_in_ws(conn, actor: dict, workspace_id: int) -> bool:
     """Cascada de creación de project: super | CEO de la org del ws | lead del ws.
 
@@ -178,9 +182,7 @@ async def user_can_create_project_in_ws(conn, actor: dict, workspace_id: int) ->
     """
     if actor.get("is_super"):
         return True
-    ws_row = await conn.fetchrow(
-        "SELECT id, organization_id FROM workspaces WHERE id = $1", workspace_id
-    )
+    ws_row = await conn.fetchrow("SELECT id, organization_id FROM workspaces WHERE id = $1", workspace_id)
     if ws_row is None:
         return False
     ws_org = ws_row["organization_id"]
@@ -201,14 +203,16 @@ async def user_can_create_project_in_ws(conn, actor: dict, workspace_id: int) ->
 # Admin operation permissions (multi-tenant v0.9)
 # ---------------------------------------------------------------------------
 
-_CEO_ALLOWED_ADMIN_OPS = frozenset({
-    "alias_candidates",
-    "merge_entities",
-    "undo_merge",
-    "trust_tier",
-    "confirm_related_docs",
-    "graph_vocabulary",
-})
+_CEO_ALLOWED_ADMIN_OPS = frozenset(
+    {
+        "alias_candidates",
+        "merge_entities",
+        "undo_merge",
+        "trust_tier",
+        "confirm_related_docs",
+        "graph_vocabulary",
+    }
+)
 
 
 async def resolve_entity_org_ids(conn, entity_name: str) -> set[int]:
@@ -227,9 +231,7 @@ async def resolve_entity_org_ids(conn, entity_name: str) -> set[int]:
     return {r["organization_id"] for r in rows}
 
 
-async def user_can_admin_operation(
-    conn, actor: dict, operation: str, target_org_id: Optional[int] = None
-) -> bool:
+async def user_can_admin_operation(conn, actor: dict, operation: str, target_org_id: Optional[int] = None) -> bool:
     """Check if actor can perform an admin operation.
 
     - super: any operation, any org.
@@ -259,9 +261,7 @@ async def visible_workspace_ids(conn, actor: dict) -> set[int]:
         return {r["id"] for r in rows}
     org_id = actor.get("organization_id")
     if actor.get("is_ceo") and org_id is not None:
-        rows = await conn.fetch(
-            "SELECT id FROM workspaces WHERE organization_id = $1", org_id
-        )
+        rows = await conn.fetch("SELECT id FROM workspaces WHERE organization_id = $1", org_id)
         return {r["id"] for r in rows}
     leads = set(actor.get("lead_workspaces") or [])
     rows = await conn.fetch(
@@ -325,7 +325,8 @@ async def visible_project_ids(conn, actor: dict) -> set[int]:
                 SELECT project_id FROM project_leads WHERE user_id = $2
               )
         """,
-        lead_ws, user_id,
+        lead_ws,
+        user_id,
     )
     return {r["id"] for r in rows}
 
@@ -340,14 +341,15 @@ async def precompute_read_visibility(conn, actor: dict) -> dict:
     org_id = actor.get("organization_id") if is_ceo else None
     ws_org_map = {}
     if is_ceo and org_id and vis_ws:
-        rows = await conn.fetch(
-            "SELECT id, organization_id FROM workspaces WHERE id = ANY($1::int[])",
-            list(vis_ws))
+        rows = await conn.fetch("SELECT id, organization_id FROM workspaces WHERE id = ANY($1::int[])", list(vis_ws))
         ws_org_map = {r["id"]: r["organization_id"] for r in rows}
     return {
-        "is_super": False, "user_id": user_id,
-        "is_ceo": is_ceo, "org_id": org_id,
-        "visible_ws": vis_ws, "ws_org_map": ws_org_map,
+        "is_super": False,
+        "user_id": user_id,
+        "is_ceo": is_ceo,
+        "org_id": org_id,
+        "visible_ws": vis_ws,
+        "ws_org_map": ws_org_map,
     }
 
 
@@ -390,6 +392,7 @@ async def ids_legibles(conn, actor: dict, ids) -> set[str]:
     """#919: de estos ids de memoria, los que el actor puede leer (la misma check_visibility que
     GET /memories/{id}). Un id mal formado cuenta como no legible."""
     import uuid
+
     validos = []
     for i in ids:
         try:
@@ -403,8 +406,12 @@ async def ids_legibles(conn, actor: dict, ids) -> set[str]:
            WHERE m.id = ANY($1::uuid[])
              AND check_visibility(m.user_id, m.visibility::text, m.workspace_id, m.project_id,
                                   $2, $3::bool, $4::bool, $5, $6::int[], false)""",
-        validos, int(actor["sub"]), bool(actor.get("is_super")), bool(actor.get("is_ceo")),
-        actor.get("organization_id"), list(actor.get("lead_workspaces") or []),
+        validos,
+        int(actor["sub"]),
+        bool(actor.get("is_super")),
+        bool(actor.get("is_ceo")),
+        actor.get("organization_id"),
+        list(actor.get("lead_workspaces") or []),
     )
     return {str(r["id"]) for r in rows}
 
@@ -434,10 +441,10 @@ async def resolve_agent_for_actor(conn, actor: dict, agent_identifier: str) -> d
     """Resolve agent + verify ownership. 404 anti-discovery.
     Shared by all metacognition endpoints."""
     from fastapi import HTTPException
+
     row = await conn.fetchrow(
-        "SELECT id, identifier, user_id FROM agents "
-        "WHERE identifier = $1 AND active = true",
-        agent_identifier)
+        "SELECT id, identifier, user_id FROM agents WHERE identifier = $1 AND active = true", agent_identifier
+    )
     if row is None:
         raise HTTPException(404, f"agent {agent_identifier!r} not found")
     if actor.get("is_super"):
@@ -451,17 +458,19 @@ async def resolve_cluster_for_actor(conn, actor: dict, cluster_id) -> dict:
     """Resolve cluster + verify agent ownership. 404 anti-discovery."""
     from fastapi import HTTPException
     from uuid import UUID as _UUID
+
     cid = cluster_id if isinstance(cluster_id, _UUID) else _UUID(str(cluster_id))
     row = await conn.fetchrow(
         "SELECT mc.*, a.user_id AS agent_user_id, a.identifier AS agent_identifier "
         "FROM memory_clusters mc "
         "JOIN agents a ON a.id = mc.agent_id "
-        "WHERE mc.id = $1", cid)
+        "WHERE mc.id = $1",
+        cid,
+    )
     if row is None:
         raise HTTPException(404)
     if actor.get("is_super"):
         return dict(row)
-    if row["agent_user_id"] is not None \
-       and int(row["agent_user_id"]) == int(actor["sub"]):
+    if row["agent_user_id"] is not None and int(row["agent_user_id"]) == int(actor["sub"]):
         return dict(row)
     raise HTTPException(404)

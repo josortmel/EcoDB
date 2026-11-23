@@ -4,6 +4,7 @@ deepseek-reasoner were discontinued on 2026-07-24 (api-docs.deepseek.com/updates
 longer exists. (2) DeepSeek ships new builds under the SAME name (V4.1-Flash-1017 on
 17-oct, still «deepseek-flash»), so each cell run records the `model` the API ANSWERED
 with, not just the one we asked for. Test (2) runs against the TEST database (conftest)."""
+
 import asyncio
 import os
 import re
@@ -28,9 +29,12 @@ RETIRED = re.compile(r"""["'](deepseek-chat|deepseek-reasoner)["']""")
 
 
 def test_no_default_names_a_retired_model():
-    hits = [f"{p.name}:{i}" for p in API_DIR.glob("*.py")
-            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
-            if RETIRED.search(line)]
+    hits = [
+        f"{p.name}:{i}"
+        for p in API_DIR.glob("*.py")
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if RETIRED.search(line)
+    ]
     assert hits == [], f"retired DeepSeek model as a default in: {hits}"
 
 
@@ -56,8 +60,10 @@ async def _one_run():
         run_id = await cw._create_run(conn, "pytest-716", agent_id, "2031-01-01", "2031-01-07")
         await cw._llm_call("sys", "user")
         await cw._complete_run(conn, run_id, 0)
-        return await conn.fetchrow("SELECT metrics->'responded_models' AS m, metrics->'system_fingerprints' AS f "
-                                   "FROM cell_runs WHERE id=$1", run_id)
+        return await conn.fetchrow(
+            "SELECT metrics->'responded_models' AS m, metrics->'system_fingerprints' AS f FROM cell_runs WHERE id=$1",
+            run_id,
+        )
     finally:
         cw._active_cell.reset(token)
         if run_id:
@@ -67,8 +73,12 @@ async def _one_run():
 
 @respx.mock
 def test_the_run_records_the_model_that_answered():
-    respx.post("https://api.deepseek.com/v1/chat/completions").mock(return_value=httpx.Response(200, json={
-        "model": ANSWERED, "system_fingerprint": FINGERPRINT, "choices": [{"message": {"content": "{}"}}]}))
+    respx.post("https://api.deepseek.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"model": ANSWERED, "system_fingerprint": FINGERPRINT, "choices": [{"message": {"content": "{}"}}]},
+        )
+    )
     row = asyncio.run(_one_run())
     assert row["m"] is not None and ANSWERED in row["m"]
     assert row["f"] is not None and FINGERPRINT in row["f"]

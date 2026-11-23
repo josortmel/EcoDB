@@ -5,6 +5,7 @@ Processes documents: parse → chunk → GLiNER → embed → graph link.
 Entrypoint: python worker.py
 Docker: docker compose --profile with-ingestion up
 """
+
 import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 import asyncio
 import hashlib
@@ -24,19 +25,21 @@ log = logging.getLogger("ecodb.worker")
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 from settings import EMBEDDINGS_URL
+
 API_URL = os.environ.get("ECODB_API_INTERNAL_URL", "http://ecodb-api:8080")
 MEDIA_STORE_DIR = os.environ.get("MEDIA_STORE_DIR", "/app/media")
 
-_URL_SCHEME_RE = re.compile(r'^(https?|ftp|file|rtsp|rtmp)://', re.IGNORECASE)
+_URL_SCHEME_RE = re.compile(r"^(https?|ftp|file|rtsp|rtmp)://", re.IGNORECASE)
 
 
 def _extract_frontmatter_tags(text: str) -> list[str]:
     """Extract tags list from YAML frontmatter (---...---) at top of text."""
-    match = re.match(r'^---\s*\n(.*?)\n---', text, re.DOTALL)
+    match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
     if not match:
         return []
     try:
         import yaml
+
         fm = yaml.safe_load(match.group(1))
         if not isinstance(fm, dict):
             return []
@@ -44,6 +47,7 @@ def _extract_frontmatter_tags(text: str) -> list[str]:
         return [str(t) for t in tags] if isinstance(tags, list) else []
     except Exception:
         return []
+
 
 # Timeouts per stage (seconds)
 PARSE_TIMEOUT = int(os.environ.get("PARSE_TIMEOUT", "300"))
@@ -53,6 +57,7 @@ WHISPER_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "1800"))
 
 # Circuit breaker for embeddings
 from settings import CB_THRESHOLD, CB_WINDOW, CB_COOLDOWN
+
 _cb_failures: list[float] = []
 _cb_open_until: float = 0.0
 
@@ -60,15 +65,17 @@ _cb_open_until: float = 0.0
 class EmbeddingsServiceError(RuntimeError):
     pass
 
+
 # Recovery
-RECOVERY_INTERVAL = 300          # 5 min
-RECOVERY_STALE_THRESHOLD = 600   # 10 min
+RECOVERY_INTERVAL = 300  # 5 min
+RECOVERY_STALE_THRESHOLD = 600  # 10 min
 MAX_RETRIES = 3
 
 
 # ---------------------------------------------------------------------------
 # Path validation (B1-1 LFI/SSRF guard)
 # ---------------------------------------------------------------------------
+
 
 def _validate_document_path(uri: str) -> str:
     """Validate uri is a real file within allowed base dir. Raises ValueError on violation."""
@@ -87,6 +94,7 @@ def _validate_document_path(uri: str) -> str:
 # Circuit breaker
 # ---------------------------------------------------------------------------
 
+
 def _circuit_breaker_ok() -> bool:
     now = time.time()
     if now < _cb_open_until:
@@ -104,7 +112,9 @@ def _circuit_breaker_record_failure() -> None:
         _cb_open_until = now + CB_COOLDOWN
         log.warning(
             "Circuit breaker OPEN — embeddings failures >= %d in %ds. Cooling %ds.",
-            CB_THRESHOLD, CB_WINDOW, CB_COOLDOWN,
+            CB_THRESHOLD,
+            CB_WINDOW,
+            CB_COOLDOWN,
         )
 
 
@@ -135,6 +145,7 @@ async def _broadcast_sse(event_type: str, data: dict, org_id: int | None = None)
 # Document pipeline
 # ---------------------------------------------------------------------------
 
+
 async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
     """Main pipeline: parse → chunk → embed → GLiNER → graph link."""
     t0 = time.time()
@@ -162,6 +173,7 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
     try:
         async with pool.acquire() as conn:
             from events import resolve_org_id_from_project
+
             _doc_org_id = await resolve_org_id_from_project(conn, row["project_id"])
     except Exception:
         pass
@@ -181,13 +193,9 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
         # Re-index: clear old chunks if present (Task 4.13 Part A)
         linked_memory_ids: list[str] = []
         async with pool.acquire() as conn:
-            existing_chunks = await conn.fetchval(
-                "SELECT count(*) FROM document_chunks WHERE document_id = $1", doc_id
-            )
+            existing_chunks = await conn.fetchval("SELECT count(*) FROM document_chunks WHERE document_id = $1", doc_id)
             if existing_chunks > 0:
-                await conn.execute(
-                    "DELETE FROM document_chunks WHERE document_id = $1", doc_id
-                )
+                await conn.execute("DELETE FROM document_chunks WHERE document_id = $1", doc_id)
                 log.info("Re-index: deleted %d old chunks for %s", existing_chunks, doc_id)
                 # Task 5.16 — Increment document_version on re-index
                 await conn.execute(
@@ -202,17 +210,14 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
 
         # Stage 1: Parse (Task 4.2 Docling / Task 4.3 Whisper)
         from parsers import AUDIO_EXTENSIONS, parse_document, transcribe_audio
+
         t_parse = time.time()
         file_ext = os.path.splitext(safe_path)[1].lower()
         if file_ext in AUDIO_EXTENSIONS:
-            parse_result = await asyncio.wait_for(
-                transcribe_audio(safe_path), timeout=WHISPER_TIMEOUT
-            )
+            parse_result = await asyncio.wait_for(transcribe_audio(safe_path), timeout=WHISPER_TIMEOUT)
             metrics["parser"] = "whisper"
         else:
-            parse_result = await asyncio.wait_for(
-                parse_document(safe_path, doc_type), timeout=PARSE_TIMEOUT
-            )
+            parse_result = await asyncio.wait_for(parse_document(safe_path, doc_type), timeout=PARSE_TIMEOUT)
             metrics["parser"] = "docling"
         metrics["parse_ms"] = round((time.time() - t_parse) * 1000)
 
@@ -238,7 +243,8 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                 # Exact duplicate check (same raw file)
                 dup_exact = await conn.fetchrow(
                     "SELECT id FROM documents WHERE file_hash = $1 AND id != $2 AND status != 'deleted'",
-                    file_hash, doc_id,
+                    file_hash,
+                    doc_id,
                 )
                 if dup_exact:
                     log.info("Document %s is exact duplicate of %s — skipping", doc_id, dup_exact["id"])
@@ -247,16 +253,22 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                         json.dumps({"reason": "duplicate", "duplicate_of": str(dup_exact["id"])}),
                         doc_id,
                     )
-                    await _broadcast_sse("duplicate_detected", {
-                        "document_id": str(doc_id),
-                        "duplicate_of": str(dup_exact["id"]),
-                        "match": "exact",
-                    }, _doc_org_id)
+                    await _broadcast_sse(
+                        "duplicate_detected",
+                        {
+                            "document_id": str(doc_id),
+                            "duplicate_of": str(dup_exact["id"]),
+                            "match": "exact",
+                        },
+                        _doc_org_id,
+                    )
                     return
 
                 await conn.execute(
                     "UPDATE documents SET file_hash = $1, content_fingerprint = $2 WHERE id = $3",
-                    file_hash, content_fingerprint, doc_id,
+                    file_hash,
+                    content_fingerprint,
+                    doc_id,
                 )
         except Exception as _fh_exc:
             log.debug("file_hash/fingerprint update skipped: %r", _fh_exc)
@@ -264,7 +276,9 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
         # Extract frontmatter tags from parsed text (propagated to all chunks)
         _parsed_text_for_tags = ""
         try:
-            _parsed_text_for_tags = parse_result.get("text", "") if isinstance(parse_result, dict) else str(parse_result)
+            _parsed_text_for_tags = (
+                parse_result.get("text", "") if isinstance(parse_result, dict) else str(parse_result)
+            )
         except Exception:
             pass
         doc_tags = _extract_frontmatter_tags(_parsed_text_for_tags)
@@ -272,6 +286,7 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
         # Stage 2: Chunk
         t_chunk = time.time()
         from chunker import chunk_document
+
         chunks = chunk_document(parse_result, doc_type)
         async with pool.acquire() as conn:
             for chunk in chunks:
@@ -279,8 +294,12 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                     "INSERT INTO document_chunks"
                     " (document_id, chunk_index, content, section_path, metadata, tags)"
                     " VALUES ($1, $2, $3, $4, $5::jsonb, $6::text[])",
-                    doc_id, chunk.chunk_index, chunk.content,
-                    chunk.section_path, json.dumps(chunk.metadata), doc_tags,
+                    doc_id,
+                    chunk.chunk_index,
+                    chunk.content,
+                    chunk.section_path,
+                    json.dumps(chunk.metadata),
+                    doc_tags,
                 )
         metrics["chunk_count"] = len(chunks)
         metrics["chunk_ms"] = round((time.time() - t_chunk) * 1000)
@@ -288,9 +307,8 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
         # Stage 3: GLiNER entity extraction
         t_gliner = time.time()
         from gliner_service import extract_entities_from_chunks
-        entity_results = await asyncio.wait_for(
-            extract_entities_from_chunks(chunks, pool), timeout=GLINER_TIMEOUT
-        )
+
+        entity_results = await asyncio.wait_for(extract_entities_from_chunks(chunks, pool), timeout=GLINER_TIMEOUT)
         metrics["gliner_entity_count"] = sum(len(r["entities"]) for r in entity_results)
         metrics["gliner_ms"] = round((time.time() - t_gliner) * 1000)
 
@@ -301,7 +319,7 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
         batch_size = int(os.environ.get("EMBED_BATCH_SIZE", "16"))
         async with httpx.AsyncClient(timeout=float(EMBED_TIMEOUT)) as client:
             for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
+                batch = chunks[i : i + batch_size]
                 texts = [c.content for c in batch]
                 resp = await client.post(
                     f"{EMBEDDINGS_URL}/embed/text",
@@ -322,13 +340,16 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                         await conn.execute(
                             "UPDATE document_chunks SET embedding = $1::vector"
                             " WHERE document_id = $2 AND chunk_index = $3",
-                            emb_literal, doc_id, chunk_idx,
+                            emb_literal,
+                            doc_id,
+                            chunk_idx,
                         )
         metrics["embed_ms"] = round((time.time() - t_embed) * 1000)
 
         # Stage 5: Graph entity linking
         t_graph = time.time()
         from graph import _ensure_node
+
         entity_link_count = 0
         async with pool.acquire() as conn:
             chunk_id_rows = await conn.fetch(
@@ -351,7 +372,9 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                                 VALUES ($1, $2, $3)
                                 ON CONFLICT (document_id, entity_node_id, chunk_id) DO NOTHING
                                 """,
-                                doc_id, node_sql_id, chunk_id,
+                                doc_id,
+                                node_sql_id,
+                                chunk_id,
                             )
                             entity_link_count += 1
                     except Exception as exc:
@@ -378,7 +401,8 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                     processing_metrics = $2::jsonb
                 WHERE id = $1
                 """,
-                doc_id, json.dumps(metrics),
+                doc_id,
+                json.dumps(metrics),
             )
 
         # Task 5.15 — Near-duplicate check (same text, different file format)
@@ -387,37 +411,53 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                 async with pool.acquire() as conn:
                     near_dup = await conn.fetchrow(
                         "SELECT id FROM documents WHERE content_fingerprint = $1 AND id != $2 AND status = 'indexed'",
-                        content_fingerprint, doc_id,
+                        content_fingerprint,
+                        doc_id,
                     )
                     if near_dup:
                         await conn.execute(
                             """INSERT INTO related_documents (source_id, target_id, relation_type, similarity)
                                VALUES ($1, $2, 'near_duplicate', 1.0)
                                ON CONFLICT DO NOTHING""",
-                            doc_id, near_dup["id"],
+                            doc_id,
+                            near_dup["id"],
                         )
-                        await _broadcast_sse("duplicate_detected", {
-                            "document_id": str(doc_id),
-                            "similar_to": str(near_dup["id"]),
-                            "match": "normalized",
-                        }, _doc_org_id)
+                        await _broadcast_sse(
+                            "duplicate_detected",
+                            {
+                                "document_id": str(doc_id),
+                                "similar_to": str(near_dup["id"]),
+                                "match": "normalized",
+                            },
+                            _doc_org_id,
+                        )
             except Exception as _nd_exc:
                 log.debug("near-dup check skipped: %r", _nd_exc)
 
         # SSE broadcasts (Task 4.13 Part B)
-        await _broadcast_sse("document_indexed", {
-            "document_id": str(doc_id),
-            "chunks": metrics.get("chunk_count", 0),
-        }, _doc_org_id)
-        if linked_memory_ids:
-            await _broadcast_sse("source_updated", {
+        await _broadcast_sse(
+            "document_indexed",
+            {
                 "document_id": str(doc_id),
-                "affected_memory_ids": linked_memory_ids,
-            }, _doc_org_id)
+                "chunks": metrics.get("chunk_count", 0),
+            },
+            _doc_org_id,
+        )
+        if linked_memory_ids:
+            await _broadcast_sse(
+                "source_updated",
+                {
+                    "document_id": str(doc_id),
+                    "affected_memory_ids": linked_memory_ids,
+                },
+                _doc_org_id,
+            )
 
         log.info(
             "Document %s indexed in %dms (%d chunks)",
-            doc_id, metrics["total_ms"], metrics.get("chunk_count", 0),
+            doc_id,
+            metrics["total_ms"],
+            metrics.get("chunk_count", 0),
         )
 
     except Exception as exc:
@@ -438,22 +478,29 @@ async def process_document(pool: asyncpg.Pool, document_id: str) -> None:
                 """,
                 doc_id,
                 MAX_RETRIES,
-                json.dumps({
-                    **metrics,
-                    "error": type(exc).__name__,
-                    "error_detail": str(exc)[:200],
-                }),
+                json.dumps(
+                    {
+                        **metrics,
+                        "error": type(exc).__name__,
+                        "error_detail": str(exc)[:200],
+                    }
+                ),
             )
         if fail_row and fail_row["status"] == "failed":
-            await _broadcast_sse("document_failed", {
-                "document_id": str(doc_id),
-                "error": type(exc).__name__,
-            }, _doc_org_id)
+            await _broadcast_sse(
+                "document_failed",
+                {
+                    "document_id": str(doc_id),
+                    "error": type(exc).__name__,
+                },
+                _doc_org_id,
+            )
 
 
 # ---------------------------------------------------------------------------
 # Recovery helpers
 # ---------------------------------------------------------------------------
+
 
 async def recover_stuck_documents(pool: asyncpg.Pool, stuck_timeout_minutes: int = 30) -> int:
     """Reset documents stuck in 'processing' for longer than timeout.
@@ -461,7 +508,8 @@ async def recover_stuck_documents(pool: asyncpg.Pool, stuck_timeout_minutes: int
     Runs at worker startup to recover from process crashes.
     """
     async with pool.acquire() as conn:
-        result = await conn.execute("""
+        result = await conn.execute(
+            """
             UPDATE documents
             SET status = 'queued',
                 processing_started_at = NULL,
@@ -469,18 +517,25 @@ async def recover_stuck_documents(pool: asyncpg.Pool, stuck_timeout_minutes: int
             WHERE status = 'processing'
               AND processing_started_at < now() - ($1 || ' minutes')::interval
               AND retry_count < $2
-        """, str(stuck_timeout_minutes), MAX_RETRIES)
+        """,
+            str(stuck_timeout_minutes),
+            MAX_RETRIES,
+        )
         count = int(result.split()[-1]) if result else 0
         if count > 0:
             log.info("Recovered %d stuck documents (processing > %d min)", count, stuck_timeout_minutes)
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE documents
             SET status = 'failed',
                 processing_metrics = jsonb_build_object('error', 'WorkerCrash', 'error_detail', 'stuck in processing after worker restart')
             WHERE status = 'processing'
               AND processing_started_at < now() - ($1 || ' minutes')::interval
               AND retry_count >= $2
-        """, str(stuck_timeout_minutes), MAX_RETRIES)
+        """,
+            str(stuck_timeout_minutes),
+            MAX_RETRIES,
+        )
         return count
 
 
@@ -511,6 +566,7 @@ async def recovery_loop(pool: asyncpg.Pool) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 async def main() -> None:
     log.info("Worker starting. DATABASE_URL=%s...", DATABASE_URL[:30])
 
@@ -537,6 +593,7 @@ async def main() -> None:
             await asyncio.sleep(300)
             try:
                 from search import flush_accessed_buffer
+
                 await flush_accessed_buffer(pool)
             except Exception as exc:
                 log.error("Access flush failed: %r", exc)
@@ -557,9 +614,7 @@ async def main() -> None:
     try:
         # Drain already-queued documents on startup
         async with pool.acquire() as conn:
-            queued = await conn.fetch(
-                "SELECT id FROM documents WHERE status = 'queued' ORDER BY created_at LIMIT 10"
-            )
+            queued = await conn.fetch("SELECT id FROM documents WHERE status = 'queued' ORDER BY created_at LIMIT 10")
         for row in queued:
             await process_document(pool, str(row["id"]))
 

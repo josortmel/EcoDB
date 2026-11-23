@@ -4,6 +4,7 @@ All call sites use `get_llm_provider().generate(prompt, max_tokens, temperature)
 Provider selected by ECODB_LLM_PROVIDER env var. If provider is unavailable,
 generate() returns None — callers treat this as feature-off (same as flag disabled).
 """
+
 import logging
 from abc import ABC, abstractmethod
 
@@ -13,10 +14,10 @@ import settings
 
 log = logging.getLogger("ecodb.llm")
 
+
 class LLMProvider(ABC):
     @abstractmethod
-    async def generate(self, prompt: str, max_tokens: int = 256,
-                       temperature: float = 0.3) -> str | None:
+    async def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.3) -> str | None:
         """Generate text from prompt. Callers MUST sanitize user content
         in the prompt to prevent prompt injection (VS_NEW2). Never pass
         raw user-stored memories without defensive system prompt."""
@@ -34,8 +35,7 @@ class LlamaCppProvider(LLMProvider):
         self.url = url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=60.0)
 
-    async def generate(self, prompt: str, max_tokens: int = 256,
-                       temperature: float = 0.3) -> str | None:
+    async def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.3) -> str | None:
         max_tokens = min(max_tokens, settings.MAX_LLM_TOKENS)
         payload = {
             "messages": [{"role": "user", "content": prompt}],
@@ -72,8 +72,7 @@ class HaikuProvider(LLMProvider):
         self.model = model
         self._client = httpx.AsyncClient(timeout=30.0)
 
-    async def generate(self, prompt: str, max_tokens: int = 256,
-                       temperature: float = 0.3) -> str | None:
+    async def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.3) -> str | None:
         max_tokens = min(max_tokens, settings.MAX_LLM_TOKENS)
         payload = {
             "model": self.model,
@@ -89,7 +88,8 @@ class HaikuProvider(LLMProvider):
         try:
             r = await self._client.post(
                 "https://api.anthropic.com/v1/messages",
-                json=payload, headers=headers,
+                json=payload,
+                headers=headers,
             )
             r.raise_for_status()
             data = r.json()
@@ -116,8 +116,7 @@ class DeepSeekProvider(LLMProvider):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=30.0)
 
-    async def generate(self, prompt: str, max_tokens: int = 256,
-                       temperature: float = 0.3) -> str | None:
+    async def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.3) -> str | None:
         max_tokens = min(max_tokens, settings.MAX_LLM_TOKENS)
         payload = {
             "model": self.model,
@@ -132,7 +131,8 @@ class DeepSeekProvider(LLMProvider):
         try:
             r = await self._client.post(
                 f"{self.base_url}/v1/chat/completions",
-                json=payload, headers=headers,
+                json=payload,
+                headers=headers,
             )
             r.raise_for_status()
             data = r.json()
@@ -153,6 +153,7 @@ class DeepSeekProvider(LLMProvider):
 
 
 _provider: LLMProvider | None = None
+
 
 def init_llm_provider() -> LLMProvider | None:
     global _provider
@@ -179,6 +180,7 @@ def init_llm_provider() -> LLMProvider | None:
     if _provider:
         log.info("LLM provider initialized: %s", name)
     return _provider
+
 
 def get_llm_provider() -> LLMProvider | None:
     return _provider

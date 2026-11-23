@@ -3,6 +3,7 @@
 history read by the access wake-up (C28) is right after an unarchive. Integration on
 the THROWAWAY DB (conftest default 5436; live refused) in a rolled-back transaction.
 """
+
 import asyncio
 import sys
 from contextlib import asynccontextmanager
@@ -28,10 +29,12 @@ async def _scenario(monkeypatch):
     try:
         archived = await conn.fetchval(
             "INSERT INTO memories (workspace_id, project_id, user_id, type, content, staleness) "
-            "VALUES (1, 1, 1, 'observacion', 'pytest-c29', 'archived') RETURNING id")
+            "VALUES (1, 1, 1, 'observacion', 'pytest-c29', 'archived') RETURNING id"
+        )
         active = await conn.fetchval(
             "INSERT INTO memories (workspace_id, project_id, user_id, type, content, staleness) "
-            "VALUES (1, 1, 1, 'observacion', 'pytest-c29', 'active') RETURNING id")
+            "VALUES (1, 1, 1, 'observacion', 'pytest-c29', 'active') RETURNING id"
+        )
 
         class _Pool:
             @asynccontextmanager
@@ -48,6 +51,7 @@ async def _scenario(monkeypatch):
 
         async def _call(mid):
             import httpx
+
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
                 return await c.put(f"/memories/{mid}/unarchive")
 
@@ -55,10 +59,17 @@ async def _scenario(monkeypatch):
         r_404 = await _call(active)
         rows = await conn.fetch(
             "SELECT resource_id, details FROM audit_log WHERE action = 'update_staleness' "
-            "AND resource = 'memory' AND resource_id = ANY($1::text[])", [str(archived), str(active)])
+            "AND resource = 'memory' AND resource_id = ANY($1::text[])",
+            [str(archived), str(active)],
+        )
         staleness = await conn.fetchval("SELECT staleness FROM memories WHERE id = $1", archived)
-        return r_ok.status_code, r_404.status_code, [(r["resource_id"], r["details"]) for r in rows], \
-            str(archived), staleness
+        return (
+            r_ok.status_code,
+            r_404.status_code,
+            [(r["resource_id"], r["details"]) for r in rows],
+            str(archived),
+            staleness,
+        )
     finally:
         await tx.rollback()
         await conn.close()
@@ -71,7 +82,7 @@ def test_unarchive_writes_update_staleness_audit(monkeypatch):
         pytest.skip(f"throwaway DB not reachable: {e}")
     assert ok == 200 and not_archived == 404
     assert staleness == "active"
-    assert len(rows) == 1, rows                      # none for the 404 (nothing changed)
+    assert len(rows) == 1, rows  # none for the 404 (nothing changed)
     rid, details = rows[0]
     assert rid == archived_id
     assert (details if isinstance(details, dict) else __import__("json").loads(details)) == {"staleness": "active"}

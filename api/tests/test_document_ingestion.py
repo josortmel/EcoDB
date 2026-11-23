@@ -7,6 +7,7 @@ Cubre:
 - Restricción worker + expand_scope + user_id ajeno → 403.
 - Audit log entries en operaciones expand_scope.
 """
+
 import asyncio
 import os
 import sys
@@ -17,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -70,14 +72,22 @@ def super_jwt(client):
                   AND (user_id = 1 OR user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%'))
                 """
             )
-            await conn.execute("DELETE FROM project_leads WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%') OR project_id IN (SELECT id FROM projects WHERE name LIKE 'pytest-t210-%')")
-            await conn.execute("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%')")
-            await conn.execute("DELETE FROM workspace_leads WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%')")
+            await conn.execute(
+                "DELETE FROM project_leads WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%') OR project_id IN (SELECT id FROM projects WHERE name LIKE 'pytest-t210-%')"
+            )
+            await conn.execute(
+                "DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%')"
+            )
+            await conn.execute(
+                "DELETE FROM workspace_leads WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%')"
+            )
             await conn.execute("DELETE FROM memories WHERE content LIKE 'pytest-t210-%'")
             await conn.execute("DELETE FROM projects WHERE name LIKE 'pytest-t210-%'")
             await conn.execute("DELETE FROM workspaces WHERE name LIKE 'pytest-t210-%'")
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-t210-%'")
-            await conn.execute("DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%')")
+            await conn.execute(
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-t210-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-t210-%'")
         finally:
             await conn.close()
@@ -91,17 +101,18 @@ def super_jwt(client):
 async def _create_user(name: str) -> tuple[int, str]:
     conn = await _aconn()
     try:
-        u = await conn.fetchrow(
-            "INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name
-        )
+        u = await conn.fetchrow("INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name)
         await conn.execute(
             "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-            u["id"], f"{name}@pytest.local",
+            u["id"],
+            f"{name}@pytest.local",
         )
         key_plain, key_hash = generate_api_key()
         await conn.execute(
             "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true)",
-            key_hash, f"pytest-t210-key-{name}", u["id"],
+            key_hash,
+            f"pytest-t210-key-{name}",
+            u["id"],
         )
         return u["id"], key_plain
     finally:
@@ -114,6 +125,7 @@ def world(client, super_jwt):
 
     El worker creará una memoria private. El lead testea expand_scope para verla.
     """
+
     async def _setup():
         conn = await _aconn()
         try:
@@ -123,9 +135,7 @@ def world(client, super_jwt):
             outsider_id, outsider_key = await _create_user_inline(conn, "pytest-t210-outsider")
 
             # Workspace + project.
-            ws = await conn.fetchrow(
-                "INSERT INTO workspaces (name) VALUES ('pytest-t210-ws') RETURNING id"
-            )
+            ws = await conn.fetchrow("INSERT INTO workspaces (name) VALUES ('pytest-t210-ws') RETURNING id")
             ws_id = ws["id"]
             proj = await conn.fetchrow(
                 "INSERT INTO projects (workspace_id, name, is_common) VALUES ($1, 'pytest-t210-proj', false) RETURNING id",
@@ -136,18 +146,24 @@ def world(client, super_jwt):
             # worker: project_member.
             await conn.execute(
                 "INSERT INTO project_members (project_id, user_id) VALUES ($1, $2)",
-                proj_id, worker_id,
+                proj_id,
+                worker_id,
             )
             # lead: workspace_lead.
             await conn.execute(
                 "INSERT INTO workspace_leads (workspace_id, user_id) VALUES ($1, $2)",
-                ws_id, lead_id,
+                ws_id,
+                lead_id,
             )
             return {
-                "worker_id": worker_id, "worker_key": worker_key,
-                "lead_id": lead_id, "lead_key": lead_key,
-                "outsider_id": outsider_id, "outsider_key": outsider_key,
-                "ws_id": ws_id, "proj_id": proj_id,
+                "worker_id": worker_id,
+                "worker_key": worker_key,
+                "lead_id": lead_id,
+                "lead_key": lead_key,
+                "outsider_id": outsider_id,
+                "outsider_key": outsider_key,
+                "ws_id": ws_id,
+                "proj_id": proj_id,
             }
         finally:
             await conn.close()
@@ -193,17 +209,18 @@ def world(client, super_jwt):
 
 
 async def _create_user_inline(conn, name: str) -> tuple[int, str]:
-    u = await conn.fetchrow(
-        "INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name
-    )
+    u = await conn.fetchrow("INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name)
     await conn.execute(
         "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-        u["id"], f"{name}@pytest.local",
+        u["id"],
+        f"{name}@pytest.local",
     )
     key_plain, key_hash = generate_api_key()
     await conn.execute(
         "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true)",
-        key_hash, f"pytest-t210-key-{name}", u["id"],
+        key_hash,
+        f"pytest-t210-key-{name}",
+        u["id"],
     )
     return u["id"], key_plain
 
@@ -215,6 +232,7 @@ def auth(jwt):
 # ===========================================================================
 # Endpoints project_leads
 # ===========================================================================
+
 
 def test_super_adds_project_lead(client, super_jwt, world):
     r = client.post(
@@ -337,6 +355,7 @@ def test_add_project_lead_writes_audit_log(client, super_jwt, world):
 # expand_scope override visibility
 # ===========================================================================
 
+
 def test_lead_sees_worker_private_with_expand_scope_true(client, world):
     """Lead del ws con expand_scope=true ve memorias private de worker en su ws."""
     r = client.post(
@@ -350,9 +369,7 @@ def test_lead_sees_worker_private_with_expand_scope_true(client, world):
     )
     assert r.status_code == 200
     body = r.json()
-    private_seen = any(
-        res["id"] == world["private_memory_id"] for res in body["results"]
-    )
+    private_seen = any(res["id"] == world["private_memory_id"] for res in body["results"])
     assert private_seen, f"Lead with expand_scope=true should see worker's private; results={body}"
     assert body["audit_id"] is not None
 
@@ -369,13 +386,13 @@ def test_lead_does_not_see_worker_private_without_expand_scope(client, world):
         },
     )
     assert r.status_code == 200
-    private_seen = any(
-        res["id"] == world["private_memory_id"] for res in r.json()["results"]
-    )
+    private_seen = any(res["id"] == world["private_memory_id"] for res in r.json()["results"])
     assert not private_seen, "Lead without expand_scope should NOT see worker's private"
 
 
-@pytest.mark.skip(reason="Test setup leak: outsider creado en módulo de tests previos puede tener project_member residual. Investigar en sesión post-compactación. El comportamiento del backend es correcto (verificado con test_lead_does_not_see_worker_private_without_expand_scope que sí pasa).")
+@pytest.mark.skip(
+    reason="Test setup leak: outsider creado en módulo de tests previos puede tener project_member residual. Investigar en sesión post-compactación. El comportamiento del backend es correcto (verificado con test_lead_does_not_see_worker_private_without_expand_scope que sí pasa)."
+)
 def test_outsider_does_not_see_with_expand_scope(client, world):
     """Outsider con expand_scope=true NO ve memorias de proyectos donde no
     es member ni lead — incluso con expand_scope. expand_scope amplía DENTRO
@@ -395,9 +412,7 @@ def test_outsider_does_not_see_with_expand_scope(client, world):
     # workspace si tiene project_member en algún ws, pero NO la private del
     # proj de pytest-t210 donde no tiene assignment.
     proj_ids_seen = {res["project_id"] for res in r.json()["results"]}
-    assert world["proj_id"] not in proj_ids_seen, (
-        f"outsider should NOT see project {world['proj_id']} memories"
-    )
+    assert world["proj_id"] not in proj_ids_seen, f"outsider should NOT see project {world['proj_id']} memories"
 
 
 def test_get_memory_by_id_with_expand_scope(client, world):
@@ -422,6 +437,7 @@ def test_get_memory_by_id_without_expand_scope_403(client, world):
 # ===========================================================================
 # Filtros extendidos
 # ===========================================================================
+
 
 def test_search_with_user_id_filter(client, super_jwt, world):
     """Filtro user_id en /search."""
@@ -497,6 +513,7 @@ def test_search_unknown_agent_identifier_returns_422(client, super_jwt):
 # Worker + expand_scope + user_id ajeno → 403 (restricción adv-seg)
 # ===========================================================================
 
+
 def test_worker_expand_scope_user_id_ajeno_returns_403(client, world):
     """Restricción adv-seg: worker (no super, no CEO, sin lead_ws) + expand_scope=true
     + user_id ajeno → 403. Worker no puede pedir contenido dirigido a otros."""
@@ -529,6 +546,7 @@ def test_worker_expand_scope_user_id_propio_ok(client, world):
 # ===========================================================================
 # Audit log search_expanded
 # ===========================================================================
+
 
 def test_search_expanded_writes_audit_log(client, world):
     r = client.post(

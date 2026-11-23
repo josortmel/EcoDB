@@ -1,5 +1,6 @@
 """#1144 (parche del grafo): el salto 2 se puede apagar en todo el servicio (EXPAND_GRAPH_HOP2) o en una
 llamada (graph_hop2), para medir encendido y apagado intercalados sobre los mismos datos."""
+
 import importlib
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ def _search(monkeypatch, valor=None):
     else:
         monkeypatch.setenv("EXPAND_GRAPH_HOP2", valor)
     import search
+
     return importlib.reload(search)
 
 
@@ -42,6 +44,7 @@ def _search_grafo(monkeypatch, valor=None):
     else:
         monkeypatch.setenv("EXPAND_GRAPH", valor)
     import search
+
     return importlib.reload(search)
 
 

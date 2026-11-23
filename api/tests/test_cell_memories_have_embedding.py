@@ -2,6 +2,7 @@
 (90 identity tensions, 5 skills, 2 técnico) were invisible to vector search. Every INSERT
 INTO memories in cell_worker must carry an embedding, and an embeddings outage must not
 cost the memory (it is saved without one and left for the backfill). Offline: respx."""
+
 import asyncio
 import os
 import re
@@ -32,8 +33,7 @@ def test_every_cell_memory_insert_carries_an_embedding():
 
 @respx.mock
 def test_embed_for_memory_returns_a_vector_literal():
-    respx.post(EMBED).mock(return_value=httpx.Response(200, json={
-        "embeddings": [[0.5] * settings.EMBEDDING_DIM]}))
+    respx.post(EMBED).mock(return_value=httpx.Response(200, json={"embeddings": [[0.5] * settings.EMBEDDING_DIM]}))
     vec = asyncio.run(cw._embed_for_memory("Identity tension: x vs y"))
     assert vec.startswith("[") and vec.count(",") == settings.EMBEDDING_DIM - 1
 

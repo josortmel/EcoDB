@@ -7,6 +7,7 @@ caducadas (valid_until pasado) y, con incluir_superadas, deja también las super
 El id de una sustituta que `leer` no devuelve (borrada o de otro sin permiso) no sale nunca (#919, Prima).
 EcoDB no sabe nada de FarOS: esto solo mira memorias.
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -47,13 +48,18 @@ def _fila(m: dict, sustituye: list[str]) -> dict:
     return fila
 
 
-def vigentes(candidatas: list[dict], leer: Callable[[str], Optional[dict]], hoy: Optional[date] = None,
-             incluir_superadas: bool = False, limit: int = 10) -> dict:
+def vigentes(
+    candidatas: list[dict],
+    leer: Callable[[str], Optional[dict]],
+    hoy: Optional[date] = None,
+    incluir_superadas: bool = False,
+    limit: int = 10,
+) -> dict:
     """Devuelve {"vigentes": [...], "superadas": [...], "errores": [...]} en el orden de las candidatas."""
     hoy = hoy or date.today()
     vistas: dict[str, dict] = {}
     salida, superadas, errores = [], [], []
-    ya: dict[str, dict] = {}   # id de vigente → su fila
+    ya: dict[str, dict] = {}  # id de vigente → su fila
 
     def cargar(mid: str) -> Optional[dict]:
         if mid not in vistas:
@@ -71,29 +77,34 @@ def vigentes(candidatas: list[dict], leer: Callable[[str], Optional[dict]], hoy:
                 actual = None
                 break
             siguiente = cargar(str(_meta(actual)["superseded_by"]))
-            if siguiente is None:   # la sustituta no se puede leer (borrada o ajena): se avisa sin su id
+            if siguiente is None:  # la sustituta no se puede leer (borrada o ajena): se avisa sin su id
                 errores.append({"sustituta_no_legible": True, "de": str(actual["id"])})
                 break
             camino.append(str(actual["id"]))
             actual = siguiente
         if actual is None:
             continue
-        if incluir_superadas and camino:   # solo cadenas seguidas: su sustituta se pudo leer
+        if incluir_superadas and camino:  # solo cadenas seguidas: su sustituta se pudo leer
             original = vistas[str(c["id"])]
-            superadas.append({**_fila(original, []), "superada_por": str(_meta(original)["superseded_by"]),
-                              "supersede_kind": _meta(original).get("supersede_kind", "total"),
-                              "motivo": _meta(original).get("supersede_reason")})
+            superadas.append(
+                {
+                    **_fila(original, []),
+                    "superada_por": str(_meta(original)["superseded_by"]),
+                    "supersede_kind": _meta(original).get("supersede_kind", "total"),
+                    "motivo": _meta(original).get("supersede_reason"),
+                }
+            )
         if _caducada(actual, hoy):
             continue
         if str(actual["id"]) in ya:
             # #1315: la vigente ya salió por otra candidata (la búsqueda puede traerla ANTES que su anterior):
             # su camino se suma al de esa fila en vez de tirarse.
             fila = ya[str(actual["id"])]
-            for mid in camino:   # sin camino no se toca: una fila sin «sustituye_a» no lo lleva vacío
+            for mid in camino:  # sin camino no se toca: una fila sin «sustituye_a» no lo lleva vacío
                 if mid not in fila.setdefault("sustituye_a", []):
                     fila["sustituye_a"].append(mid)
             continue
-        if len(salida) >= limit:   # sin sitio para filas nuevas, pero las que quedan pueden alargar un camino
+        if len(salida) >= limit:  # sin sitio para filas nuevas, pero las que quedan pueden alargar un camino
             continue
         ya[str(actual["id"])] = _fila(actual, camino)
         salida.append(ya[str(actual["id"])])
@@ -118,9 +129,14 @@ def con_previas(resultado: dict, previas: dict[str, list[dict]]) -> dict:
                 sustituye.append(pid)
             if "superadas" in resultado and pid not in ya_superadas:
                 ya_superadas.add(pid)
-                resultado["superadas"].append({**_fila(p, []), "superada_por": str(_meta(p)["superseded_by"]),
-                                               "supersede_kind": _meta(p).get("supersede_kind", "total"),
-                                               "motivo": _meta(p).get("supersede_reason")})
+                resultado["superadas"].append(
+                    {
+                        **_fila(p, []),
+                        "superada_por": str(_meta(p)["superseded_by"]),
+                        "supersede_kind": _meta(p).get("supersede_kind", "total"),
+                        "motivo": _meta(p).get("supersede_reason"),
+                    }
+                )
         if sustituye:
             fila["sustituye_a"] = sustituye
     return resultado

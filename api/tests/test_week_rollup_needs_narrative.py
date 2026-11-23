@@ -3,6 +3,7 @@ narrative NULL (Prima 12-18 oct, Lienzo 7-13 sep): an LLM answer without the key
 and the monthly, which reads the rollups, lost that week. Now an answer without narrative or label
 is retried, and if it never comes nothing is inserted, so the next pass rebuilds the rollup.
 Offline: a fake connection and a fake LLM, no database."""
+
 import asyncio
 import json
 import os
@@ -32,9 +33,20 @@ class FakeConn:
 
     async def fetch(self, q, *a):
         if "FROM memory_clusters" in q:
-            return [{"id": "c1", "workspace_id": 1, "label": "tema", "narrative": "n", "detail": None,
-                     "centroid": None, "member_ids": ["m1"], "metadata": {},
-                     "period_start": date(2026, 10, 12), "period_end": date(2026, 10, 18)}]
+            return [
+                {
+                    "id": "c1",
+                    "workspace_id": 1,
+                    "label": "tema",
+                    "narrative": "n",
+                    "detail": None,
+                    "centroid": None,
+                    "member_ids": ["m1"],
+                    "metadata": {},
+                    "period_start": date(2026, 10, 12),
+                    "period_end": date(2026, 10, 18),
+                }
+            ]
         return []
 
 

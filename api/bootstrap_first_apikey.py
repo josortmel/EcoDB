@@ -17,6 +17,7 @@ Variables de entorno necesarias:
 - DATABASE_URL  : DSN postgres (default: localhost:5435 ecodb_test_pass).
 - API_KEY_PEPPER: pepper compartido con el API (debe coincidir).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,9 +36,7 @@ async def main(user_id: int | None, name: str) -> int:
         if user_id is None:
             # Sin --user-id: el super user. El partial unique index de init.sql
             # garantiza que solo hay uno (el admin sembrado en fresh install).
-            target = await conn.fetchrow(
-                "SELECT id, name, active FROM users WHERE is_super = true"
-            )
+            target = await conn.fetchrow("SELECT id, name, active FROM users WHERE is_super = true")
             if target is None:
                 print(
                     "[bootstrap] ERROR: no hay super user. Pasa --user-id explicitamente.",
@@ -46,9 +45,7 @@ async def main(user_id: int | None, name: str) -> int:
                 return 2
             user_id = target["id"]
         else:
-            target = await conn.fetchrow(
-                "SELECT id, name, active FROM users WHERE id = $1", user_id
-            )
+            target = await conn.fetchrow("SELECT id, name, active FROM users WHERE id = $1", user_id)
             if target is None:
                 print(f"[bootstrap] ERROR: user_id={user_id} no existe", file=sys.stderr)
                 return 2
@@ -75,7 +72,9 @@ async def main(user_id: int | None, name: str) -> int:
             VALUES ($1, $2, $3, true)
             RETURNING id
             """,
-            key_hash, name, user_id,
+            key_hash,
+            name,
+            user_id,
         )
 
         print()
@@ -97,9 +96,7 @@ async def main(user_id: int | None, name: str) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--user-id", type=int, default=None,
-                        help="ID del user destino (default: el super user)")
-    parser.add_argument("--name", type=str, default="bootstrap",
-                        help="Nombre legible de la key (default: 'bootstrap')")
+    parser.add_argument("--user-id", type=int, default=None, help="ID del user destino (default: el super user)")
+    parser.add_argument("--name", type=str, default="bootstrap", help="Nombre legible de la key (default: 'bootstrap')")
     args = parser.parse_args()
     sys.exit(asyncio.run(main(args.user_id, args.name)))

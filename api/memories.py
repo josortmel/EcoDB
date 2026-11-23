@@ -25,6 +25,7 @@ Embeddings:
 
 Entity linking (memory_entity_links) activo via GLiNER multilingual desde Fase 3.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -57,10 +58,10 @@ from settings import ENABLE_AUTO_LINK, ENABLE_POST_HOC_CLASSIFIER
 # tamaño tarda ~30s en la 2080 Ti — justo en el timeout HTTP. Bajamos a 16k
 # para garantizar margen funcional. Documentos largos van por Fase 4 (Docling
 # + chunking), no entran como memoria literal.
-MAX_CONTENT_LEN = 16_000      # ~16KB, margen funcional sobre la GPU disponible
-MAX_TAGS = 50                 # max numero de tags por memoria
+MAX_CONTENT_LEN = 16_000  # ~16KB, margen funcional sobre la GPU disponible
+MAX_TAGS = 50  # max numero de tags por memoria
 OCCURRED_AT_MAX_AGE_DAYS = 7  # #547: how far back a queued save may date itself
-MAX_TAG_LEN = 200             # max chars por tag individual
+MAX_TAG_LEN = 200  # max chars por tag individual
 MAX_MEDIA_PATH_LEN = 1_024
 
 
@@ -83,13 +84,16 @@ router = APIRouter(prefix="/memories", tags=["memories"])
 
 # OBS-2 (verificador L1): Literal explícitos para validacion 422 desde Pydantic
 # ANTES de tocar DB. Coincide con los ENUMs del schema §1.5.
-MemoryType = Literal["momento", "decision", "acuerdo", "tecnico", "descubrimiento", "observacion", "referencia", "caso", "skill"]
+MemoryType = Literal[
+    "momento", "decision", "acuerdo", "tecnico", "descubrimiento", "observacion", "referencia", "caso", "skill"
+]
 ContentModality = Literal["text", "image", "audio", "document", "video"]
 Visibility = Literal["public", "private"]
 
 
 class DecididoPor(BaseModel):
     """#919: quién DECIDIÓ (no quién guardó). Sin nombres de una casa escritos a fuego."""
+
     model_config = ConfigDict(extra="forbid")
     tipo: Literal["humano", "agente", "equipo"]
     quien: str = Field(..., min_length=1, max_length=80)
@@ -105,11 +109,16 @@ class MemoryCreate(BaseModel):
     # silencioso con su memoria sin agente.
     model_config = ConfigDict(extra="forbid")
 
-    type: MemoryType = Field(..., description="Uno de: momento, decision, acuerdo, tecnico, descubrimiento, observacion, referencia, caso, skill")
+    type: MemoryType = Field(
+        ...,
+        description="Uno de: momento, decision, acuerdo, tecnico, descubrimiento, observacion, referencia, caso, skill",
+    )
     content: str = Field(..., min_length=1, max_length=MAX_CONTENT_LEN, description="Texto de la memoria")
     workspace_id: int
     project_id: int
-    agent_identifier: Optional[str] = Field(None, min_length=1, max_length=128, description="Agent identifier. Must match a registered agent name.")
+    agent_identifier: Optional[str] = Field(
+        None, min_length=1, max_length=128, description="Agent identifier. Must match a registered agent name."
+    )
     content_type: ContentModality = "text"
     visibility: Visibility = "public"
     tags: list[str] = Field(default_factory=list, max_length=MAX_TAGS)
@@ -129,14 +138,21 @@ class MemoryCreate(BaseModel):
     # #547: a save that the MCP queued during an embeddings outage is re-sent later with the id
     # it already gave the agent and the time it really happened. Re-sending the same id is a no-op.
     client_id: Optional[UUID] = Field(
-        None, description="Id chosen by the client; a repeated id from the same owner returns the existing memory.")
+        None, description="Id chosen by the client; a repeated id from the same owner returns the existing memory."
+    )
     occurred_at: Optional[datetime] = Field(
-        None, description=f"When it happened (default now). Not in the future, at most {OCCURRED_AT_MAX_AGE_DAYS} days back.")
+        None,
+        description=f"When it happened (default now). Not in the future, at most {OCCURRED_AT_MAX_AGE_DAYS} days back.",
+    )
     # #919 (decisiones vigentes): esta memoria sustituye a otras. La marca va en la VIEJA y la escribe la API.
-    supersedes: list[UUID] = Field(default_factory=list, max_length=MAX_SUPERSEDES,
-                                   description="Ids de las memorias que esta sustituye (se marcan como superadas).")
+    supersedes: list[UUID] = Field(
+        default_factory=list,
+        max_length=MAX_SUPERSEDES,
+        description="Ids de las memorias que esta sustituye (se marcan como superadas).",
+    )
     supersede_kind: Optional[SupersedeKind] = Field(
-        None, description="total (default), parcial o nunca_valida (esta solo la autora de la vieja o un humano).")
+        None, description="total (default), parcial o nunca_valida (esta solo la autora de la vieja o un humano)."
+    )
     supersede_reason: Optional[str] = Field(None, max_length=300, description="Una línea: por qué se sustituye.")
     valid_until: Optional[date] = Field(None, description="Hasta cuándo vale (instrucciones para un día).")
     decidido_por: Optional[DecididoPor] = None
@@ -190,6 +206,7 @@ class MemoryCreate(BaseModel):
             if v <= fs:
                 raise ValueError("foresight_end must be after foresight_start")
             from datetime import timedelta
+
             if v - fs > timedelta(days=730):
                 raise ValueError("foresight window cannot exceed 2 years")
         return v
@@ -204,6 +221,7 @@ class MemoryCreate(BaseModel):
             if mem_type == "skill":
                 raise ValueError("skill requires metadata with task_signature and steps")
             return v
+
         def _has_null(obj):
             if isinstance(obj, str):
                 return "\x00" in obj
@@ -212,6 +230,7 @@ class MemoryCreate(BaseModel):
             if isinstance(obj, (list, tuple)):
                 return any(_has_null(item) for item in obj)
             return False
+
         if _has_null(v):
             raise ValueError("metadata contains null bytes")
         raw = json.dumps(v)
@@ -267,6 +286,7 @@ class MemoryUpdate(BaseModel):
     def _v_metadata(cls, v):
         if v is None:
             return v
+
         def _has_null(obj):
             if isinstance(obj, str):
                 return "\x00" in obj
@@ -275,6 +295,7 @@ class MemoryUpdate(BaseModel):
             if isinstance(obj, (list, tuple)):
                 return any(_has_null(item) for item in obj)
             return False
+
         if _has_null(v):
             raise ValueError("null bytes in metadata")
         raw = json.dumps(v)
@@ -325,7 +346,9 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 
 def _date_window_warnings(
-    fecha_desde: Optional[datetime], fecha_hasta: Optional[datetime], result_empty: bool,
+    fecha_desde: Optional[datetime],
+    fecha_hasta: Optional[datetime],
+    result_empty: bool,
 ) -> list[str]:
     """#340: fecha_desde/fecha_hasta son instantes inclusivos; un cero por
     ventana mal formada no debe confundirse con "no hay memorias"."""
@@ -335,12 +358,12 @@ def _date_window_warnings(
             "zero-width window: fecha_desde == fecha_hasta (bounds are instants, not days); "
             "to cover a whole day D use fecha_desde=D, fecha_hasta=DT23:59:59.999999"
         )
-    if (fecha_hasta is not None and result_empty
-            and (fecha_hasta.hour, fecha_hasta.minute, fecha_hasta.second, fecha_hasta.microsecond) == (0, 0, 0, 0)):
-        warnings.append(
-            "fecha_hasta is midnight = start of that day; did you mean end of day "
-            "(DT23:59:59.999999)?"
-        )
+    if (
+        fecha_hasta is not None
+        and result_empty
+        and (fecha_hasta.hour, fecha_hasta.minute, fecha_hasta.second, fecha_hasta.microsecond) == (0, 0, 0, 0)
+    ):
+        warnings.append("fecha_hasta is midnight = start of that day; did you mean end of day (DT23:59:59.999999)?")
     return warnings
 
 
@@ -353,6 +376,7 @@ def _date_window_warnings(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("", response_model=MemoryResponse, status_code=201)
 async def create_memory(
@@ -374,14 +398,10 @@ async def create_memory(
         # BC1 fix (adv-code): la query previa con fetchval `if ws_org is False`
         # era dead code (asyncpg.fetchval devuelve None, no False, cuando no
         # hay row). El check correcto es el `if ws is None` de abajo.
-        ws = await conn.fetchrow(
-            "SELECT organization_id FROM workspaces WHERE id = $1", body.workspace_id
-        )
+        ws = await conn.fetchrow("SELECT organization_id FROM workspaces WHERE id = $1", body.workspace_id)
         if ws is None:
             raise HTTPException(404, "workspace not found")
-        proj = await conn.fetchrow(
-            "SELECT workspace_id FROM projects WHERE id = $1", body.project_id
-        )
+        proj = await conn.fetchrow("SELECT workspace_id FROM projects WHERE id = $1", body.project_id)
         if proj is None:
             raise HTTPException(404, "project not found")
         if proj["workspace_id"] != body.workspace_id:
@@ -401,15 +421,14 @@ async def create_memory(
                 if body.workspace_id not in lead_ws:
                     is_member = await conn.fetchval(
                         "SELECT 1 FROM project_members WHERE user_id=$1 AND project_id=$2",
-                        int(actor["sub"]), body.project_id,
+                        int(actor["sub"]),
+                        body.project_id,
                     )
                     if not is_member:
                         raise HTTPException(403, "user is not member of the target project")
 
         # weight desde memory_type_config
-        weight_row = await conn.fetchrow(
-            "SELECT base_weight FROM memory_type_config WHERE type = $1", body.type
-        )
+        weight_row = await conn.fetchrow("SELECT base_weight FROM memory_type_config WHERE type = $1", body.type)
         if weight_row is None:
             raise HTTPException(422, f"unknown memory type: {body.type}")
         weight_base = float(weight_row["base_weight"])
@@ -420,8 +439,8 @@ async def create_memory(
         resolved_agent_id: Optional[int] = None
         if body.agent_identifier:
             agent_row = await conn.fetchrow(
-                "SELECT id, user_id FROM agents WHERE identifier = $1 AND active = true",
-                body.agent_identifier)
+                "SELECT id, user_id FROM agents WHERE identifier = $1 AND active = true", body.agent_identifier
+            )
             if agent_row is None:
                 raise HTTPException(422, f"agent '{body.agent_identifier}' not found")
             if not is_super:
@@ -436,9 +455,12 @@ async def create_memory(
         # «nunca_valida» solo la pone la autora de la vieja o un humano (sin agent_identifier).
         supersede_targets: list[UUID] = []
         if body.supersedes:
-            found = {r["id"]: r for r in await conn.fetch(
-                "SELECT id, user_id, agent_id, metadata FROM memories WHERE id = ANY($1::uuid[])",
-                body.supersedes)}
+            found = {
+                r["id"]: r
+                for r in await conn.fetch(
+                    "SELECT id, user_id, agent_id, metadata FROM memories WHERE id = ANY($1::uuid[])", body.supersedes
+                )
+            }
             for sid in body.supersedes:
                 r = found.get(sid)
                 if r is None or (not is_super and int(r["user_id"]) != actor_id):
@@ -447,12 +469,18 @@ async def create_memory(
                 old_meta = json.loads(old_meta) if isinstance(old_meta, str) else (old_meta or {})
                 if old_meta.get("superseded_by"):
                     raise HTTPException(409, f"supersedes: {sid} is already superseded by {old_meta['superseded_by']}")
-                if (body.supersede_kind == "nunca_valida" and resolved_agent_id is not None
-                        and r["agent_id"] != resolved_agent_id):
+                if (
+                    body.supersede_kind == "nunca_valida"
+                    and resolved_agent_id is not None
+                    and r["agent_id"] != resolved_agent_id
+                ):
                     raise HTTPException(403, "supersede_kind nunca_valida: only the old memory's author or a human")
             supersede_targets = list(body.supersedes)
-        marker = {"user_id": actor_id, "agent": body.agent_identifier,
-                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        marker = {
+            "user_id": actor_id,
+            "agent": body.agent_identifier,
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
         new_metadata = dict(body.metadata or {})
         if body.valid_until is not None:
             new_metadata["valid_until"] = body.valid_until.isoformat()
@@ -464,13 +492,12 @@ async def create_memory(
         # (before embedding, so a replay costs nothing). Another owner's id = 409.
         occurred_at = None
         if body.occurred_at is not None:
-            occurred_at = (body.occurred_at if body.occurred_at.tzinfo
-                           else body.occurred_at.replace(tzinfo=timezone.utc))
+            occurred_at = body.occurred_at if body.occurred_at.tzinfo else body.occurred_at.replace(tzinfo=timezone.utc)
             now = datetime.now(timezone.utc)
-            if (occurred_at > now + timedelta(minutes=5)
-                    or occurred_at < now - timedelta(days=OCCURRED_AT_MAX_AGE_DAYS)):
+            if occurred_at > now + timedelta(minutes=5) or occurred_at < now - timedelta(days=OCCURRED_AT_MAX_AGE_DAYS):
                 raise HTTPException(
-                    422, f"occurred_at must be in the last {OCCURRED_AT_MAX_AGE_DAYS} days and not in the future")
+                    422, f"occurred_at must be in the last {OCCURRED_AT_MAX_AGE_DAYS} days and not in the future"
+                )
         if body.client_id is not None:
             existing = await _fetch_for_replay(conn, body.client_id, actor_id)
             if existing is not None:
@@ -481,6 +508,7 @@ async def create_memory(
     # . Imagen si presente.
     import time as _time
     import logging as _logging
+
     _perf_log = _logging.getLogger("ecodb.perf")
     _t0 = _time.time()
 
@@ -489,6 +517,7 @@ async def create_memory(
     image_embedding_literal: Optional[str] = None
     if body.image_base64 is not None:
         from embeddings_client import embed_image
+
         image_embedding_literal = await embed_image(body.image_base64)
 
     _t_embed = _time.time()
@@ -522,18 +551,31 @@ async def create_memory(
                 FROM inserted i
                 LEFT JOIN agents a ON a.id = i.agent_id
                 """,
-                int(actor["sub"]), resolved_agent_id, body.workspace_id, body.project_id,
-                body.type, body.content_type, body.visibility, body.content,
-                body.tags, weight_base, weight_base, body.media_path,
-                embedding_literal, EMBEDDING_MODEL_TAG,
-                body.foresight_start, body.foresight_end,
+                int(actor["sub"]),
+                resolved_agent_id,
+                body.workspace_id,
+                body.project_id,
+                body.type,
+                body.content_type,
+                body.visibility,
+                body.content,
+                body.tags,
+                weight_base,
+                weight_base,
+                body.media_path,
+                embedding_literal,
+                EMBEDDING_MODEL_TAG,
+                body.foresight_start,
+                body.foresight_end,
                 json.dumps(new_metadata),
-                body.client_id, occurred_at,
+                body.client_id,
+                occurred_at,
             )
         except UniqueViolationError:
             # #547: two senders of the same queued save raced past the replay check.
-            existing = (await _fetch_for_replay(conn, body.client_id, int(actor["sub"]))
-                        if body.client_id is not None else None)
+            existing = (
+                await _fetch_for_replay(conn, body.client_id, int(actor["sub"])) if body.client_id is not None else None
+            )
             if existing is None:
                 raise
             return (await tapar_sustitutas(actor, [_row_to_response(existing)]))[0]
@@ -551,14 +593,19 @@ async def create_memory(
         # #919: la marca en las viejas, con quién y cuándo. Si otra petición la marcó entre la validación
         # y aquí, esa gana (no se pisa una marca).
         if supersede_targets:
-            marca = {"superseded_by": str(row["id"]), "supersede_kind": body.supersede_kind or "total",
-                     "marked_by": marker}
+            marca = {
+                "superseded_by": str(row["id"]),
+                "supersede_kind": body.supersede_kind or "total",
+                "marked_by": marker,
+            }
             if body.supersede_reason:
                 marca["supersede_reason"] = body.supersede_reason
             await conn.execute(
                 "UPDATE memories SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb "
                 "WHERE id = ANY($1::uuid[]) AND NOT (COALESCE(metadata, '{}'::jsonb) ? 'superseded_by')",
-                supersede_targets, json.dumps(marca))
+                supersede_targets,
+                json.dumps(marca),
+            )
 
         # FASE 3b — filas en memory_embeddings (multimodal).
         # Backward compat: memories.embedding sigue lleno con text embedding (arriba).
@@ -570,7 +617,8 @@ async def create_memory(
                 VALUES ($1, 'text', $2::vector, NULL)
                 ON CONFLICT (memory_id, modality) DO NOTHING
                 """,
-                row["id"], embedding_literal,
+                row["id"],
+                embedding_literal,
             )
             if image_embedding_literal is not None:
                 await conn.execute(
@@ -579,24 +627,32 @@ async def create_memory(
                     VALUES ($1, 'image', $2::vector, $3)
                     ON CONFLICT (memory_id, modality) DO NOTHING
                     """,
-                    row["id"], image_embedding_literal, body.media_path,
+                    row["id"],
+                    image_embedding_literal,
+                    body.media_path,
                 )
         except Exception as _me_exc:
             _logging.getLogger("ecodb.memory_embeddings").warning(
                 "FASE 3b memory_embeddings insert failed for memory=%s: %r",
-                str(row["id"]), _me_exc,
+                str(row["id"]),
+                _me_exc,
             )
 
         # SSE broadcast BEFORE GLiNER (memory already committed, no delay)
         from events import broadcast_event, resolve_org_id_from_project
+
         _broadcast_org = await resolve_org_id_from_project(conn, body.project_id)
         if _broadcast_org is None:
             _broadcast_org = actor.get("organization_id")
-        await broadcast_event("memory_created", {
-            "memory_id": str(row["id"]),
-            "type": body.type,
-            "agent_identifier": body.agent_identifier or "",
-        }, org_id=_broadcast_org)
+        await broadcast_event(
+            "memory_created",
+            {
+                "memory_id": str(row["id"]),
+                "type": body.type,
+                "agent_identifier": body.agent_identifier or "",
+            },
+            org_id=_broadcast_org,
+        )
 
         _t_insert = _time.time()
         _perf_log.info("create_memory phase=insert %.2fs", _t_insert - _t_embed)
@@ -615,6 +671,7 @@ async def create_memory(
     # Perf fix: GLiNER acquires own conn so first conn is freed before
     # CPU inference starts (prevents pool starvation under concurrency).
     from graph import link_entities_from_content
+
     _gliner_log = _logging.getLogger("ecodb.gliner_link")
     try:
         async with pool.acquire() as gliner_conn:
@@ -629,7 +686,8 @@ async def create_memory(
         # link_entities_from_content con su propio log BC2).
         _gliner_log.warning(
             "FASE 4 entity linking failed for memory=%s: %r",
-            str(row["id"]), _gliner_exc,
+            str(row["id"]),
+            _gliner_exc,
         )
 
     _t_gliner = _time.time()
@@ -638,6 +696,7 @@ async def create_memory(
     # FASE 4b — co-occurrence triples (best-effort)
     try:
         from graph import update_cooccurrence_triples
+
         async with pool.acquire() as cooc_conn:
             entity_ids = await cooc_conn.fetch(
                 "SELECT entity_node_id FROM memory_entity_links WHERE memory_id = $1",
@@ -651,7 +710,9 @@ async def create_memory(
                     )
     except Exception as _cooc_exc:
         _logging.getLogger("ecodb.cooccurrence").warning(
-            "Co-occurrence triples failed for memory=%s: %r", str(row["id"]), _cooc_exc,
+            "Co-occurrence triples failed for memory=%s: %r",
+            str(row["id"]),
+            _cooc_exc,
         )
 
     _t_cooc = _time.time()
@@ -675,21 +736,23 @@ async def create_memory(
                 all_tags = existing_tags + [t for t in auto_tags if t not in existing_tags]
                 await conn.execute("UPDATE memories SET tags = $1 WHERE id = $2", all_tags, row["id"])
         except Exception as _at_exc:
-            _logging.getLogger("ecodb.auto_tag").warning(
-                "Auto-tag failed for memory=%s: %r", str(row["id"]), _at_exc
-            )
+            _logging.getLogger("ecodb.auto_tag").warning("Auto-tag failed for memory=%s: %r", str(row["id"]), _at_exc)
 
         # Auto-tag case_candidate for tecnico/observacion with task_type+result in metadata
-        if body.type in ('tecnico', 'observacion') and body.metadata:
-            if 'task_type' in body.metadata and 'result' in body.metadata:
+        if body.type in ("tecnico", "observacion") and body.metadata:
+            if "task_type" in body.metadata and "result" in body.metadata:
                 try:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE memories SET tags = array_append(tags, 'case_candidate')
                         WHERE id = $1 AND NOT ('case_candidate' = ANY(tags))
-                    """, row["id"])
+                    """,
+                        row["id"],
+                    )
                 except Exception as _cc_exc:
                     _logging.getLogger("ecodb.case_candidate").warning(
-                        "case_candidate auto-tag failed for memory=%s: %r", str(row["id"]), _cc_exc)
+                        "case_candidate auto-tag failed for memory=%s: %r", str(row["id"]), _cc_exc
+                    )
 
         _t_autotag = _time.time()
         _perf_log.info("create_memory phase=auto_tag %.2fs", _t_autotag - _t_gliner)
@@ -699,12 +762,15 @@ async def create_memory(
         if ENABLE_POST_HOC_CLASSIFIER:
             try:
                 from classifier import classify_memory
+
                 _cl_result = classify_memory(body.content, body.type)
                 if _cl_result and _cl_result["confidence"] >= 0.5:
                     _classification_tag = f"classified:{_cl_result['template_type']}"
                     await conn.execute(
                         "UPDATE memories SET tags = array_append(tags, $1) WHERE id = $2 AND NOT ($1 = ANY(tags))",
-                        _classification_tag, row["id"])
+                        _classification_tag,
+                        row["id"],
+                    )
             except Exception as _cl_exc:
                 _logging.getLogger("ecodb.classifier").warning("Classification Pass1 failed: %r", _cl_exc)
 
@@ -717,19 +783,23 @@ async def create_memory(
                     VALUES ($1, $2)
                     ON CONFLICT DO NOTHING
                     """,
-                    row["id"], body.source_document_id,
+                    row["id"],
+                    body.source_document_id,
                 )
             except Exception as _mdl_exc:
                 _logging.getLogger("ecodb.memory_doc_link").warning(
                     "memory_document_links insert failed for memory=%s doc=%s: %r",
-                    str(row["id"]), str(body.source_document_id), _mdl_exc,
+                    str(row["id"]),
+                    str(body.source_document_id),
+                    _mdl_exc,
                 )
 
         # Task 5.7: Auto-link memoria↔documento
         if ENABLE_AUTO_LINK and row.get("embedding") is not None:
             _al_log = _logging.getLogger("ecodb.auto_link")
             try:
-                auto_links = await conn.fetch("""
+                auto_links = await conn.fetch(
+                    """
                     SELECT dc.document_id, d.status,
                            1 - (dc.embedding <=> $1::vector) AS cosine
                     FROM document_chunks dc
@@ -739,7 +809,10 @@ async def create_memory(
                       AND d.project_id = $2
                     ORDER BY dc.embedding <=> $1::vector
                     LIMIT 10
-                """, row["embedding"], row["project_id"])
+                """,
+                    row["embedding"],
+                    row["project_id"],
+                )
 
                 linked = 0
                 seen_docs = set()
@@ -753,12 +826,17 @@ async def create_memory(
                     if cosine < 0.78:
                         break
                     seen_docs.add(doc_id)
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO memory_document_links
                             (memory_id, document_id, link_type, confidence, validated)
                         VALUES ($1, $2, 'auto', $3, false)
                         ON CONFLICT (memory_id, document_id) DO NOTHING
-                    """, row["id"], doc_id, cosine)
+                    """,
+                        row["id"],
+                        doc_id,
+                        cosine,
+                    )
                     linked += 1
 
                 if linked > 0:
@@ -780,15 +858,32 @@ async def create_memory(
 @router.get("/recent", response_model=MemoryListResponse)
 async def list_recent(
     limit: int = Query(20, ge=1, le=100),
-    workspace_id: Optional[int] = Query(None, description="Filtrar a un workspace concreto. 403 si sin acceso (anti-IDOR)."),
-    project_id: Optional[int] = Query(None, description="Filtrar a un project concreto. 403 si sin acceso (anti-IDOR)."),
+    workspace_id: Optional[int] = Query(
+        None, description="Filtrar a un workspace concreto. 403 si sin acceso (anti-IDOR)."
+    ),
+    project_id: Optional[int] = Query(
+        None, description="Filtrar a un project concreto. 403 si sin acceso (anti-IDOR)."
+    ),
     user_id_filter: Optional[int] = Query(None, alias="user_id", description="Filtrar por creador."),
     agent_identifier: Optional[str] = Query(None, min_length=1, max_length=128, description="Filtrar por agente."),
-    fecha_desde: Optional[datetime] = Query(None, description="Memorias con created_at >= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00."),
-    fecha_hasta: Optional[datetime] = Query(None, description="Memorias con created_at <= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00 = INICIO de ese día: para cubrir el día D entero usa fecha_desde=D, fecha_hasta=DT23:59:59.999999. Ventanas vacías o de anchura cero avisan en `warnings`."),
-    tag: Optional[list[str]] = Query(None, description="Filtrar memorias que contengan TODOS estos tags (AND lógico). Ejemplo: ?tag=landing&tag=status:approved"),
-    memory_type: Optional[MemoryType] = Query(None, alias="type", description="Filtrar por tipo de memoria (momento, decision, tecnico, ...)."),
-    expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
+    fecha_desde: Optional[datetime] = Query(
+        None,
+        description="Memorias con created_at >= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00.",
+    ),
+    fecha_hasta: Optional[datetime] = Query(
+        None,
+        description="Memorias con created_at <= este INSTANTE (ISO 8601). Intervalo cerrado por ambos lados. Una fecha sin hora es 00:00:00 = INICIO de ese día: para cubrir el día D entero usa fecha_desde=D, fecha_hasta=DT23:59:59.999999. Ventanas vacías o de anchura cero avisan en `warnings`.",
+    ),
+    tag: Optional[list[str]] = Query(
+        None,
+        description="Filtrar memorias que contengan TODOS estos tags (AND lógico). Ejemplo: ?tag=landing&tag=status:approved",
+    ),
+    memory_type: Optional[MemoryType] = Query(
+        None, alias="type", description="Filtrar por tipo de memoria (momento, decision, tecnico, ...)."
+    ),
+    expand_scope: bool = Query(
+        False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."
+    ),
     actor: dict = Depends(get_current_user),
 ) -> MemoryListResponse:
     """Lista memorias recientes del actor con filtros y opt-in expand_scope.
@@ -812,9 +907,14 @@ async def list_recent(
     lead_ws = list(actor.get("lead_workspaces") or [])
 
     # Anti-fingerprinting: worker sin rol elevado no combina expand_scope con user_id ajeno.
-    if (expand_scope and user_id_filter is not None
-            and user_id_filter != user_id
-            and not is_super and not is_ceo and not lead_ws):
+    if (
+        expand_scope
+        and user_id_filter is not None
+        and user_id_filter != user_id
+        and not is_super
+        and not is_ceo
+        and not lead_ws
+    ):
         raise HTTPException(
             403,
             "worker without elevated role cannot use expand_scope with user_id filter on another user",
@@ -844,35 +944,40 @@ async def list_recent(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'recent_expanded', 'memories_batch', $2, $3::jsonb, $4)
                     """,
-                    user_id, str(uuid.uuid4()),
-                    json.dumps({
-                        "filters": {
-                            "workspace_id": workspace_id,
-                            "project_id": project_id,
-                            "user_id": user_id_filter,
-                            "agent_identifier": agent_identifier,
-                            "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
-                            "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
-                            "tag": tag,
-                            "type": memory_type,
-                        },
-                        "result_count": 0,
-                        "actor_is_super": is_super,
-                        "actor_is_ceo": is_ceo,
-                        "no_visible_projects": True,
-                    }), actor.get("organization_id"),
+                    user_id,
+                    str(uuid.uuid4()),
+                    json.dumps(
+                        {
+                            "filters": {
+                                "workspace_id": workspace_id,
+                                "project_id": project_id,
+                                "user_id": user_id_filter,
+                                "agent_identifier": agent_identifier,
+                                "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
+                                "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
+                                "tag": tag,
+                                "type": memory_type,
+                            },
+                            "result_count": 0,
+                            "actor_is_super": is_super,
+                            "actor_is_ceo": is_ceo,
+                            "no_visible_projects": True,
+                        }
+                    ),
+                    actor.get("organization_id"),
                 )
             return MemoryListResponse(
-                items=[], total=0, limit=limit, cursor_next=None,
+                items=[],
+                total=0,
+                limit=limit,
+                cursor_next=None,
                 warnings=_date_window_warnings(fecha_desde, fecha_hasta, result_empty=True),
             )
 
         # Resolver agent_identifier → agent_id si filtro presente.
         target_agent_id: Optional[int] = None
         if agent_identifier is not None:
-            target_agent_id = await conn.fetchval(
-                "SELECT id FROM agents WHERE identifier = $1", agent_identifier
-            )
+            target_agent_id = await conn.fetchval("SELECT id FROM agents WHERE identifier = $1", agent_identifier)
             if target_agent_id is None:
                 raise HTTPException(422, "agent_identifier not found")
 
@@ -954,27 +1059,34 @@ async def list_recent(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'recent_expanded', 'memories_batch', $2, $3::jsonb, $4)
                 """,
-                user_id, str(uuid.uuid4()),
-                json.dumps({
-                    "filters": {
-                        "workspace_id": workspace_id,
-                        "project_id": project_id,
-                        "user_id": user_id_filter,
-                        "agent_identifier": agent_identifier,
-                        "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
-                        "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
-                        "tag": tag,
-                        "type": memory_type,
-                    },
-                    "result_count": len(rows),
-                    "actor_is_super": is_super,
-                    "actor_is_ceo": is_ceo,
-                }), actor.get("organization_id"),
+                user_id,
+                str(uuid.uuid4()),
+                json.dumps(
+                    {
+                        "filters": {
+                            "workspace_id": workspace_id,
+                            "project_id": project_id,
+                            "user_id": user_id_filter,
+                            "agent_identifier": agent_identifier,
+                            "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
+                            "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
+                            "tag": tag,
+                            "type": memory_type,
+                        },
+                        "result_count": len(rows),
+                        "actor_is_super": is_super,
+                        "actor_is_ceo": is_ceo,
+                    }
+                ),
+                actor.get("organization_id"),
             )
 
     items = await tapar_sustitutas(actor, [_row_to_response(r) for r in rows])
     return MemoryListResponse(
-        items=items, total=total_row, limit=limit, cursor_next=None,
+        items=items,
+        total=total_row,
+        limit=limit,
+        cursor_next=None,
         warnings=_date_window_warnings(fecha_desde, fecha_hasta, result_empty=not items),
     )
 
@@ -982,7 +1094,9 @@ async def list_recent(
 @router.get("/{memory_id}", response_model=MemoryResponse)
 async def get_memory(
     memory_id: UUID,
-    expand_scope: bool = Query(False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."),
+    expand_scope: bool = Query(
+        False, description="Override de visibility por jerarquía estricta (opt-in). Audit log obligatorio."
+    ),
     actor: dict = Depends(get_current_user),
 ) -> MemoryResponse:
     """Lookup por UUID. Acepta expand_scope (opción B consenso, coherente con
@@ -1012,7 +1126,13 @@ async def get_memory(
                 $2, $3::bool, $4::bool, $5, $6::int[], $7::bool
               )
             """,
-            memory_id, user_id_actor, is_super, is_ceo, org_id, lead_ws, expand_scope,
+            memory_id,
+            user_id_actor,
+            is_super,
+            is_ceo,
+            org_id,
+            lead_ws,
+            expand_scope,
         )
         if row is None:
             # Anti-IDOR: 403 unificado para "no existe" y "sin acceso".
@@ -1029,13 +1149,17 @@ async def get_memory(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'memory_read_expanded', 'memory', $2, $3::jsonb, $4)
                 """,
-                user_id_actor, str(memory_id),
-                json.dumps({
-                    "memory_visibility": str(row["visibility"]),
-                    "memory_creator": row["user_id"],
-                    "actor_is_super": is_super,
-                    "actor_is_ceo": is_ceo,
-                }), actor.get("organization_id"),
+                user_id_actor,
+                str(memory_id),
+                json.dumps(
+                    {
+                        "memory_visibility": str(row["visibility"]),
+                        "memory_creator": row["user_id"],
+                        "actor_is_super": is_super,
+                        "actor_is_ceo": is_ceo,
+                    }
+                ),
+                actor.get("organization_id"),
             )
     row = dict(row)
     row["access_count"] = row["access_count"] + 1
@@ -1093,11 +1217,11 @@ async def update_memory(
         i = 2
         content_changed = body.content is not None and body.content != row["content"]
         if body.content is not None:
-            sets.append(f"content = ${i}"); params.append(body.content); i += 1
+            sets.append(f"content = ${i}")
+            params.append(body.content)
+            i += 1
         if body.type is not None:
-            wb = await conn.fetchval(
-                "SELECT base_weight FROM memory_type_config WHERE type=$1", body.type
-            )
+            wb = await conn.fetchval("SELECT base_weight FROM memory_type_config WHERE type=$1", body.type)
             if wb is None:
                 raise HTTPException(422, f"unknown memory type: {body.type}")
             # aclaracion: actualizamos weight_base pero NO weight.
@@ -1105,17 +1229,28 @@ async def update_memory(
             # weight_base es la asignacion base del tipo. Esa asimetria es
             # intencional — el cambio de tipo resetea la "base" pero preserva
             # la trayectoria de weight acumulada por uso.
-            sets.append(f"type = ${i}::memory_type"); params.append(body.type); i += 1
-            sets.append(f"weight_base = ${i}"); params.append(float(wb)); i += 1
+            sets.append(f"type = ${i}::memory_type")
+            params.append(body.type)
+            i += 1
+            sets.append(f"weight_base = ${i}")
+            params.append(float(wb))
+            i += 1
         if body.visibility is not None:
-            sets.append(f"visibility = ${i}::visibility"); params.append(body.visibility); i += 1
+            sets.append(f"visibility = ${i}::visibility")
+            params.append(body.visibility)
+            i += 1
         if body.tags is not None:
-            sets.append(f"tags = ${i}"); params.append(body.tags); i += 1
+            sets.append(f"tags = ${i}")
+            params.append(body.tags)
+            i += 1
         if body.media_path is not None:
-            sets.append(f"media_path = ${i}"); params.append(body.media_path); i += 1
+            sets.append(f"media_path = ${i}")
+            params.append(body.media_path)
+            i += 1
         if body.metadata is not None:
             sets.append(f"metadata = ${i}::jsonb")
-            params.append(json.dumps(_metadata_sin_tocar_marca(body.metadata, row["metadata"]))); i += 1
+            params.append(json.dumps(_metadata_sin_tocar_marca(body.metadata, row["metadata"])))
+            i += 1
         if not sets:
             raise HTTPException(400, "no fields to update")
         sets.append("updated_at = now()")
@@ -1129,11 +1264,15 @@ async def update_memory(
     # FASE 3 — UPDATE atomico (con embedding si aplica) en una sola query.
     async with pool.acquire() as conn:
         if content_changed:
-            sets.append(f"embedding = ${i}::vector"); params.append(embedding_literal); i += 1
-            sets.append(f"embedding_model = ${i}"); params.append(EMBEDDING_MODEL_TAG); i += 1
+            sets.append(f"embedding = ${i}::vector")
+            params.append(embedding_literal)
+            i += 1
+            sets.append(f"embedding_model = ${i}")
+            params.append(EMBEDDING_MODEL_TAG)
+            i += 1
         sql = f"""
             WITH updated AS (
-              UPDATE memories SET {', '.join(sets)} WHERE id = $1 RETURNING *
+              UPDATE memories SET {", ".join(sets)} WHERE id = $1 RETURNING *
             )
             SELECT u.*, a.identifier AS agent_identifier
             FROM updated u
@@ -1145,7 +1284,8 @@ async def update_memory(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_memory', 'memory', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(memory_id),
+            int(actor["sub"]),
+            str(memory_id),
             json.dumps({"fields_updated": list(body.model_fields_set)}),
             actor.get("organization_id"),
         )
@@ -1194,14 +1334,23 @@ async def delete_memory(
                 INSERT INTO trash (id, original_table, original_data, deleted_by)
                 VALUES ($1, 'memories', $2::jsonb, $3)
                 """,
-                row["id"], json_str, int(actor["sub"]),
+                row["id"],
+                json_str,
+                int(actor["sub"]),
             )
             await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'delete_memory', 'memory', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(memory_id),
-                json.dumps({"type": row.get("type"), "workspace_id": row.get("workspace_id"), "project_id": row.get("project_id")}),
+                int(actor["sub"]),
+                str(memory_id),
+                json.dumps(
+                    {
+                        "type": row.get("type"),
+                        "workspace_id": row.get("workspace_id"),
+                        "project_id": row.get("project_id"),
+                    }
+                ),
                 actor.get("organization_id"),
             )
 
@@ -1226,7 +1375,8 @@ async def validate_link(
             SET validated = true
             WHERE memory_id = $1 AND document_id = $2
             """,
-            memory_id, document_id,
+            memory_id,
+            document_id,
         )
         if result == "UPDATE 0":
             raise HTTPException(404, "Link not found")
@@ -1236,6 +1386,7 @@ async def validate_link(
 # ---------------------------------------------------------------------------
 # Task 5.20 — Unarchive memory
 # ---------------------------------------------------------------------------
+
 
 @router.put("/{memory_id}/unarchive")
 async def unarchive_memory(
@@ -1263,7 +1414,8 @@ async def unarchive_memory(
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'update_staleness', 'memory', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(memory_id),
+                int(actor["sub"]),
+                str(memory_id),
                 json.dumps({"staleness": "active"}),
                 actor.get("organization_id"),
             )
@@ -1273,6 +1425,7 @@ async def unarchive_memory(
 # ---------------------------------------------------------------------------
 # B5 — PUT /memories/{id}/staleness
 # ---------------------------------------------------------------------------
+
 
 class StalenessUpdate(BaseModel):
     staleness: Literal["active", "stale", "dormant", "archived"]
@@ -1295,12 +1448,14 @@ async def update_staleness(
         async with conn.transaction():
             await conn.execute(
                 "UPDATE memories SET staleness = $1, updated_at = now() WHERE id = $2",
-                body.staleness, memory_id,
+                body.staleness,
+                memory_id,
             )
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'update_staleness', 'memory', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(memory_id),
+                int(actor["sub"]),
+                str(memory_id),
                 json.dumps({"staleness": body.staleness}),
                 actor.get("organization_id"),
             )
@@ -1310,6 +1465,7 @@ async def update_staleness(
 # ---------------------------------------------------------------------------
 # B6 — Preview (GLiNER dry-run, no persist)
 # ---------------------------------------------------------------------------
+
 
 class PreviewRequest(BaseModel):
     content: str = Field(..., min_length=3, max_length=16000)
@@ -1328,6 +1484,7 @@ async def preview_memory(
     """Dry-run GLiNER entity extraction without persisting. For Templates screen."""
     import logging as _logging
     from gliner_service import extract_entities
+
     try:
         entities = await extract_entities(body.content)
     except Exception as exc:
@@ -1336,11 +1493,13 @@ async def preview_memory(
     unique = list({e["text"]: e for e in (entities or [])}.values())
     suggested_triples = []
     for e in unique:
-        suggested_triples.append({
-            "subject": e["text"],
-            "predicate": "is_a",
-            "object": e.get("label", "unknown"),
-        })
+        suggested_triples.append(
+            {
+                "subject": e["text"],
+                "predicate": "is_a",
+                "object": e.get("label", "unknown"),
+            }
+        )
     return {
         "entities": unique,
         "entity_count": len(unique),
@@ -1359,15 +1518,19 @@ _BACKGROUND_TASKS: set = set()
 async def _classify_after_save(pool, memory_id, content: str) -> None:
     try:
         import classifier
+
         result = await classifier.classify_with_llm(content)
         if result and result["confidence"] >= 0.5:
             tag = f"classified:{result['template_type']}"
             async with pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE memories SET tags = array_append(tags, $1) WHERE id = $2 AND NOT ($1 = ANY(tags))",
-                    tag, memory_id)
+                    tag,
+                    memory_id,
+                )
     except Exception as exc:  # noqa: BLE001 — a missing tag must never surface as a failed save
         import logging
+
         logging.getLogger("ecodb.classifier").warning("Classification Pass2 failed: %r", exc)
 
 
@@ -1377,12 +1540,15 @@ async def _fetch_for_replay(conn, memory_id: UUID, actor_id: int):
     row = await conn.fetchrow(
         """SELECT m.*, a.identifier AS agent_identifier
            FROM memories m LEFT JOIN agents a ON a.id = m.agent_id
-           WHERE m.id = $1""", memory_id)
+           WHERE m.id = $1""",
+        memory_id,
+    )
     if row is not None and int(row["user_id"]) != actor_id:
         raise HTTPException(409, "memory id already in use")
     # #836: a re-send from the MCP queue after the memory was deleted must not bring it back.
     if row is None and await conn.fetchval(
-            "SELECT 1 FROM trash WHERE id = $1 AND original_table = 'memories'", memory_id):
+        "SELECT 1 FROM trash WHERE id = $1 AND original_table = 'memories'", memory_id
+    ):
         raise HTTPException(409, "memory was deleted; not recreating it")
     return row
 
@@ -1402,7 +1568,9 @@ def _canon(valor) -> Optional[str]:
 
 
 async def tapar_sustitutas(actor: dict, items: list) -> list:
-    sups = {_canon((it.metadata or {}).get("superseded_by")) for it in items if (it.metadata or {}).get("superseded_by")}
+    sups = {
+        _canon((it.metadata or {}).get("superseded_by")) for it in items if (it.metadata or {}).get("superseded_by")
+    }
     if not sups:
         return items
     pool = await get_pool()
@@ -1445,5 +1613,7 @@ def _row_to_response(row, agent_identifier=None) -> MemoryResponse:
         staleness=row.get("staleness"),
         foresight_start=row.get("foresight_start"),
         foresight_end=row.get("foresight_end"),
-        metadata=json.loads(row["metadata"]) if isinstance(row.get("metadata"), str) else (dict(row["metadata"]) if row.get("metadata") else None),
+        metadata=json.loads(row["metadata"])
+        if isinstance(row.get("metadata"), str)
+        else (dict(row["metadata"]) if row.get("metadata") else None),
     )

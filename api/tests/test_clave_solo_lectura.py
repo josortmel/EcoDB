@@ -1,6 +1,7 @@
 """#1332 (pieza A de #1200): claves de SOLO LECTURA. Una clave con api_keys.read_only solo pasa por una lista
 explícita de rutas de lectura (GET y los POST que solo leen, como /search); lo demás da 403, venga la clave tal cual
 o cambiada por un JWT en /auth/token. Rotarla da otra de solo lectura. Las claves normales no cambian."""
+
 import asyncio
 import os
 import sys
@@ -12,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -38,6 +40,7 @@ def _sql(q, *args):
             return await conn.fetch(q, *args)
         finally:
             await conn.close()
+
     return asyncio.run(run())
 
 
@@ -56,8 +59,12 @@ def _embed(monkeypatch):
 
 def _clave(read_only: bool) -> tuple[str, int]:
     plain, h = generate_api_key()
-    kid = _sql("INSERT INTO api_keys (key_hash, name, user_id, active, read_only) VALUES ($1, $2, 1, true, $3)"
-               " RETURNING id", h, PREFIX + uuid.uuid4().hex[:6], read_only)[0]["id"]
+    kid = _sql(
+        "INSERT INTO api_keys (key_hash, name, user_id, active, read_only) VALUES ($1, $2, 1, true, $3) RETURNING id",
+        h,
+        PREFIX + uuid.uuid4().hex[:6],
+        read_only,
+    )[0]["id"]
     return plain, kid
 
 
@@ -76,8 +83,17 @@ def _h(tok):
 
 
 def _memoria(client, tok):
-    r = client.post("/memories", headers=_h(tok), json={"type": "observacion", "content": PREFIX + uuid.uuid4().hex,
-                                                        "workspace_id": 1, "project_id": 1, "visibility": "public"})
+    r = client.post(
+        "/memories",
+        headers=_h(tok),
+        json={
+            "type": "observacion",
+            "content": PREFIX + uuid.uuid4().hex,
+            "workspace_id": 1,
+            "project_id": 1,
+            "visibility": "public",
+        },
+    )
     return r
 
 
@@ -85,12 +101,17 @@ def _memoria(client, tok):
 def test_lee(client, claves, quien):
     mid = _memoria(client, claves["normal"]).json()["id"]
     assert client.get(f"/memories/{mid}", headers=_h(claves[quien])).status_code == 200
-    assert client.post("/search", headers=_h(claves[quien]), json={"query_text": "prueba de lectura"}).status_code == 200
+    assert (
+        client.post("/search", headers=_h(claves[quien]), json={"query_text": "prueba de lectura"}).status_code == 200
+    )
     assert client.get("/auth/me", headers=_h(claves[quien])).status_code == 200
     r = client.get("/api/v1/decisiones/vigentes", headers=_h(claves[quien]), params={"tema": "prueba de lectura"})
-    assert r.status_code == 200, r.text            # una ruta bajo /api/v1 (en vivo dio 403 el 18-nov)
+    assert r.status_code == 200, r.text  # una ruta bajo /api/v1 (en vivo dio 403 el 18-nov)
     # el agente no existe en la base de pruebas (404): lo que se mide es que la autorización no la corta
-    assert client.get("/api/v1/clusters", headers=_h(claves[quien]), params={"agent_identifier": "Hilo"}).status_code != 403
+    assert (
+        client.get("/api/v1/clusters", headers=_h(claves[quien]), params={"agent_identifier": "Hilo"}).status_code
+        != 403
+    )
 
 
 @pytest.mark.parametrize("quien", ["lectura", "jwt_lectura"])
@@ -100,10 +121,14 @@ def test_no_escribe(client, claves, quien):
     assert _memoria(client, tok).status_code == 403
     assert client.put(f"/memories/{mid}", headers=_h(tok), json={"content": PREFIX + "cambiada"}).status_code == 403
     assert client.delete(f"/memories/{mid}", headers=_h(tok)).status_code == 403
-    assert client.post("/graph/triples", headers=_h(tok),
-                       json={"subject": "a", "predicate": "related_to", "object": "b"}).status_code == 403
+    assert (
+        client.post(
+            "/graph/triples", headers=_h(tok), json={"subject": "a", "predicate": "related_to", "object": "b"}
+        ).status_code
+        == 403
+    )
     assert client.post("/auth/api-keys", headers=_h(tok), json={"user_id": 1, "name": PREFIX + "x"}).status_code == 403
-    assert client.get("/admin/graph-vocabulary", headers=_h(tok)).status_code == 403   # admin: fuera aunque sea GET
+    assert client.get("/admin/graph-vocabulary", headers=_h(tok)).status_code == 403  # admin: fuera aunque sea GET
     assert client.get(f"/memories/{mid}", headers=_h(claves["normal"])).json()["content"].startswith(PREFIX)
 
 
@@ -115,12 +140,19 @@ def test_la_clave_normal_no_cambia(client, claves):
 
 def test_rotar_una_de_lectura_da_otra_de_lectura(client, claves):
     """Se rota la clave de un usuario de usar y tirar (rotar desactiva la más antigua si hay más de 3)."""
-    uid = _sql("INSERT INTO users (name, is_super, is_ceo, active) VALUES ($1, false, false, true) RETURNING id",
-               PREFIX + uuid.uuid4().hex[:6])[0]["id"]
+    uid = _sql(
+        "INSERT INTO users (name, is_super, is_ceo, active) VALUES ($1, false, false, true) RETURNING id",
+        PREFIX + uuid.uuid4().hex[:6],
+    )[0]["id"]
     try:
         plain, h = generate_api_key()
-        kid = _sql("INSERT INTO api_keys (key_hash, name, user_id, active, read_only) VALUES ($1, $2, $3, true, true)"
-                   " RETURNING id", h, PREFIX + "rotar", uid)[0]["id"]
+        kid = _sql(
+            "INSERT INTO api_keys (key_hash, name, user_id, active, read_only) VALUES ($1, $2, $3, true, true)"
+            " RETURNING id",
+            h,
+            PREFIX + "rotar",
+            uid,
+        )[0]["id"]
         r = client.post(f"/auth/api-keys/{kid}/rotate", headers=_h(claves["normal"]), json={})
         assert r.status_code == 201, r.text
         assert _sql("SELECT read_only FROM api_keys WHERE id = $1", r.json()["new_key_id"])[0]["read_only"] is True

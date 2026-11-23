@@ -6,6 +6,7 @@ campo_que_no_existe=…) devolvía la memoria normal, y un filtro mal escrito en
 vez de «agent_identifier») corría la búsqueda SIN filtro sin que nadie se enterara.
 Offline: httpx con respx, sin API ni base.
 """
+
 import asyncio
 import importlib.util
 from pathlib import Path
@@ -42,10 +43,13 @@ def _calls(api):
     return [c.request.url.path for c in api.calls if not c.request.url.path.startswith("/auth")]
 
 
-@pytest.mark.parametrize("tool,args,bad", [
-    ("read_memory", {"memory_id": MEM, "campo_que_no_existe": "prueba #492"}, "campo_que_no_existe"),
-    ("search", {"query_text": "la pluma", "agent": "Hilo"}, "agent"),
-])
+@pytest.mark.parametrize(
+    "tool,args,bad",
+    [
+        ("read_memory", {"memory_id": MEM, "campo_que_no_existe": "prueba #492"}, "campo_que_no_existe"),
+        ("search", {"query_text": "la pluma", "agent": "Hilo"}, "agent"),
+    ],
+)
 def test_un_argumento_no_declarado_falla_y_lo_nombra(mod, api, tool, args, bad):
     with pytest.raises(Exception) as e:
         asyncio.run(mod.mcp.call_tool(tool, args))

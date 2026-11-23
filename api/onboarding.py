@@ -1,4 +1,5 @@
 """Endpoint de onboarding por proyecto."""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -30,42 +31,52 @@ async def get_onboarding(
                 raise HTTPException(403, "no access to specified project")
 
         # Info del proyecto
-        project = await conn.fetchrow(
-            "SELECT id, name FROM projects WHERE id = $1", project_id
-        )
+        project = await conn.fetchrow("SELECT id, name FROM projects WHERE id = $1", project_id)
         if project is None:
             raise HTTPException(404, f"project {project_id} not found")
 
         # Últimas 5 decisiones
-        decisions = await conn.fetch("""
+        decisions = await conn.fetch(
+            """
             SELECT id, content, created_at
             FROM memories
             WHERE project_id = $1 AND type = 'decision' AND visibility = 'public'
             ORDER BY created_at DESC
             LIMIT 5
-        """, project_id)
+        """,
+            project_id,
+        )
 
         # Agentes activos (last_seen en últimos 5 minutos)
-        active_agents = await conn.fetch("""
+        active_agents = await conn.fetch(
+            """
             SELECT DISTINCT a.identifier, a.last_seen
             FROM agents a
             JOIN memories m ON m.agent_id = a.id
             WHERE m.project_id = $1
               AND a.last_seen >= NOW() - INTERVAL '5 minutes'
             ORDER BY a.last_seen DESC
-        """, project_id)
+        """,
+            project_id,
+        )
 
         # Memorias obsoletas (weight < 0.3)
-        stale_count = await conn.fetchval("""
+        stale_count = await conn.fetchval(
+            """
             SELECT COUNT(*) FROM memories
             WHERE project_id = $1 AND weight < 0.3 AND visibility = 'public'
-        """, project_id)
+        """,
+            project_id,
+        )
 
         # Última actividad
-        last_activity = await conn.fetchval("""
+        last_activity = await conn.fetchval(
+            """
             SELECT MAX(created_at) FROM memories
             WHERE project_id = $1 AND visibility = 'public'
-        """, project_id)
+        """,
+            project_id,
+        )
 
     if format == "agent":
         decision_texts = [d["content"][:120] for d in decisions]

@@ -2,6 +2,7 @@
 
 Run ONLY against a throwaway DB: TEST_DB_PORT=5436 (never the live family DB on 5435).
 """
+
 import asyncio
 import json
 import os
@@ -33,7 +34,8 @@ async def _age_edges(conn, *sids):
 async def _vertices(conn, sid):
     return await conn.fetchval(
         "SELECT count(*) FROM cypher('ecodb_graph', $$ MATCH (n:Entity {sql_id: $sid}) RETURN id(n) $$, $1::agtype) AS (v agtype)",
-        json.dumps({"sid": sid}))
+        json.dumps({"sid": sid}),
+    )
 
 
 async def _scenario():
@@ -47,7 +49,10 @@ async def _scenario():
                 for s, o in ((b, c), (a, b)):
                     await conn.execute(
                         "INSERT INTO triples (subject_id, predicate, object_id, author) VALUES ($1,'rel',$2,$3)",
-                        s, o, TAG)
+                        s,
+                        o,
+                        TAG,
+                    )
                     await graph._create_age_edge(conn, s, "rel", o)
             res = {"initial": await _age_edges(conn, a, b, c)}
 
@@ -70,10 +75,12 @@ async def _scenario():
 
             # fail loud: an edge to a vertex that doesn't exist raises and rolls back
             ghost = await conn.fetchval(
-                "INSERT INTO nodes (name, status) VALUES ($1, 'active') RETURNING id", f"{TAG}-ghost")
+                "INSERT INTO nodes (name, status) VALUES ($1, 'active') RETURNING id", f"{TAG}-ghost"
+            )
             await conn.execute(
                 "SELECT * FROM cypher('ecodb_graph', $$ MATCH (n:Entity {sql_id: $sid}) DETACH DELETE n $$, $1::agtype) AS (d agtype)",
-                json.dumps({"sid": ghost}))
+                json.dumps({"sid": ghost}),
+            )
             try:
                 async with conn.transaction():
                     await graph._create_age_edge(conn, a, "rel", ghost)
@@ -83,7 +90,8 @@ async def _scenario():
 
             # an orphan: merged, but its target is gone (merged_into NULL) — 11 of these live on 25-sep.
             orphan = await conn.fetchval(
-                "INSERT INTO nodes (name, status) VALUES ($1, 'merged') RETURNING id", f"{TAG}-orphan")
+                "INSERT INTO nodes (name, status) VALUES ($1, 'merged') RETURNING id", f"{TAG}-orphan"
+            )
             async with conn.transaction():
                 res["orphan_ensure"] = await graph._ensure_node(conn, f"{TAG}-orphan")
                 await graph._create_age_edge(conn, a, "rel", orphan)  # must NOT raise: not in projection
@@ -91,9 +99,11 @@ async def _scenario():
             res["orphan"] = orphan
 
             # reconcile repairs the missing vertex and a manually deleted edge
-            await conn.execute("""SELECT * FROM cypher('ecodb_graph', $$
+            await conn.execute(
+                """SELECT * FROM cypher('ecodb_graph', $$
                 MATCH (x:Entity {sql_id: $s})-[r:RELATES_TO]->(y:Entity {sql_id: $o}) DELETE r $$, $1::agtype) AS (d agtype)""",
-                json.dumps({"s": b, "o": c}))
+                json.dumps({"s": b, "o": c}),
+            )
             async with conn.transaction():
                 res["dry"] = await graph.reconcile_age(conn, {a, b, c, ghost}, dry_run=True)
                 res["fix"] = await graph.reconcile_age(conn, {a, b, c, ghost})
@@ -106,8 +116,10 @@ async def _scenario():
             await conn.execute("DELETE FROM entity_merge_log WHERE reason = $1", TAG)
             await conn.execute("DELETE FROM triples WHERE author = $1", TAG)
             for sid in ids:
-                await conn.execute("SELECT * FROM cypher('ecodb_graph', $$ MATCH (n:Entity {sql_id: $sid}) DETACH DELETE n $$, $1::agtype) AS (d agtype)",
-                                   json.dumps({"sid": sid}))
+                await conn.execute(
+                    "SELECT * FROM cypher('ecodb_graph', $$ MATCH (n:Entity {sql_id: $sid}) DETACH DELETE n $$, $1::agtype) AS (d agtype)",
+                    json.dumps({"sid": sid}),
+                )
             await conn.execute("DELETE FROM nodes WHERE id = ANY($1::int[])", ids)
         return res
     finally:

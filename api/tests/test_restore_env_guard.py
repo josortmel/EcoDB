@@ -3,6 +3,7 @@
 Un ${NUEVO} sin clasificar sería un secreto que restore.sh no rehace, y se notaría el día del
 desastre. Por eso falla aquí y no entonces.
 """
+
 import re
 from pathlib import Path
 

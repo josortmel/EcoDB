@@ -21,6 +21,7 @@ Decisiones tecnicas:
 - Idempotente: re-correr el script no duplica nada (gracias a ON CONFLICT en el
   helper + el SKIP previo).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -82,16 +83,11 @@ async def migrate(dry_run: bool) -> None:
                 rate = i / elapsed if elapsed > 0 else 0
                 eta = (total - i) / rate if rate > 0 else 0
                 print(
-                    f"[3.0c] progreso {i}/{total} "
-                    f"linked={linked} failed={failed} "
-                    f"elapsed={elapsed:.1f}s eta={eta:.0f}s"
+                    f"[3.0c] progreso {i}/{total} linked={linked} failed={failed} elapsed={elapsed:.1f}s eta={eta:.0f}s"
                 )
 
         elapsed_total = time.time() - t_start
-        print(
-            f"\n[3.0c] CIERRE: total={total} linked={linked} failed={failed} "
-            f"elapsed={elapsed_total:.1f}s"
-        )
+        print(f"\n[3.0c] CIERRE: total={total} linked={linked} failed={failed} elapsed={elapsed_total:.1f}s")
     finally:
         await conn.close()
 

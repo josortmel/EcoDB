@@ -6,6 +6,7 @@ Modulo de CONFIG/REGLAS puro (separacion adv-code 2026-05-09):
 
 Funciones puras, unit-testeables sin dependencias ML.
 """
+
 from __future__ import annotations
 
 import unicodedata
@@ -35,20 +36,22 @@ EntityType = Literal[
     "metodologia",
 ]
 
-ALLOWED_ENTITY_TYPES: frozenset[str] = frozenset({
-    "persona",
-    "agente_ia",
-    "organizacion",
-    "lugar",
-    "producto",
-    "proyecto",
-    "tecnologia",
-    "concepto",
-    "evento",
-    "artefacto",
-    "modelo_ia",
-    "metodologia",
-})
+ALLOWED_ENTITY_TYPES: frozenset[str] = frozenset(
+    {
+        "persona",
+        "agente_ia",
+        "organizacion",
+        "lugar",
+        "producto",
+        "proyecto",
+        "tecnologia",
+        "concepto",
+        "evento",
+        "artefacto",
+        "modelo_ia",
+        "metodologia",
+    }
+)
 
 
 def normalize_name(name: str) -> str:

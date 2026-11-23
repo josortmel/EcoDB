@@ -5,6 +5,7 @@ out with cosine ~0.2 against the stored ones, and search returns garbage without
 (from-scratch experiment, 1-nov). Comparing one known vector catches that however peft
 stores its keys.
 """
+
 import json
 import math
 from pathlib import Path

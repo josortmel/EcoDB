@@ -1,4 +1,5 @@
 """Cell telemetry + manual triggers — metacognicion v2.0."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/cells", tags=["cells"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class CellRunSummary(BaseModel):
     run_id: UUID
@@ -52,6 +54,7 @@ class CellHealthResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/runs")
 async def list_cell_runs(
     cell_type: Optional[str] = Query(None),
@@ -80,11 +83,18 @@ async def list_cell_runs(
             LEFT JOIN agents a ON a.id = cr.agent_id WHERE {where}
         """
         total = await conn.fetchval(count_sql, *params)
-        items, next_cursor = await paginate(conn, f"""
+        items, next_cursor = await paginate(
+            conn,
+            f"""
             SELECT cr.*, a.identifier AS agent_identifier
             FROM cell_runs cr LEFT JOIN agents a ON a.id = cr.agent_id
             WHERE {where}
-        """, list(params), limit, cursor, cursor_column="cr.created_at")
+        """,
+            list(params),
+            limit,
+            cursor,
+            cursor_column="cr.created_at",
+        )
     return {"items": [dict(r) for r in items], "total": total, "cursor_next": next_cursor}
 
 
@@ -99,42 +109,59 @@ async def cell_health(actor: dict = Depends(get_current_user)) -> CellHealthResp
             params.append(int(actor["sub"]))
             agent_filter = f"AND cr.agent_id IN (SELECT id FROM agents WHERE user_id=${len(params)})"
 
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT cr.cell_type, MAX(cr.finished_at) AS last FROM cell_runs cr
             WHERE cr.status='completed' {agent_filter}
             GROUP BY cr.cell_type
-        """, *params)
+        """,
+            *params,
+        )
         # Keep the 3 built-in keys always present; overlay any custom types found.
-        last_by_type = {ct: None for ct in ('consolidation', 'foresight', 'skill_distillation')}
+        last_by_type = {ct: None for ct in ("consolidation", "foresight", "skill_distillation")}
         for r in rows:
             last_by_type[r["cell_type"]] = r["last"].isoformat() if r["last"] else None
 
-        errors_24h = await conn.fetchval(f"""
+        errors_24h = await conn.fetchval(
+            f"""
             SELECT COUNT(*) FROM cell_runs cr
             WHERE cr.status='failed' AND cr.started_at > NOW()-INTERVAL '24 hours' {agent_filter}
-        """, *params)
+        """,
+            *params,
+        )
 
-        cost_30d = await conn.fetchval(f"""
+        cost_30d = await conn.fetchval(
+            f"""
             SELECT SUM(cost_usd) FROM cell_runs cr
             WHERE cr.started_at > NOW()-INTERVAL '30 days' {agent_filter}
-        """, *params)
+        """,
+            *params,
+        )
 
         from cell_worker import consolidation_gaps
+
         gaps = await consolidation_gaps(conn)
         if not is_super:
-            own = {r["identifier"] for r in await conn.fetch(
-                "SELECT identifier FROM agents WHERE user_id = $1", int(actor["sub"]))}
+            own = {
+                r["identifier"]
+                for r in await conn.fetch("SELECT identifier FROM agents WHERE user_id = $1", int(actor["sub"]))
+            }
             gaps = [g for g in gaps if g["agent_identifier"] in own]
 
-    return {"last_run_by_type": last_by_type, "errors_24h": errors_24h,
-            "total_cost_30d": float(cost_30d) if cost_30d else None,
-            "consolidation_gaps": [{**g, "week_start": g["week_start"].isoformat(),
-                                    "week_end": g["week_end"].isoformat()} for g in gaps]}
+    return {
+        "last_run_by_type": last_by_type,
+        "errors_24h": errors_24h,
+        "total_cost_30d": float(cost_30d) if cost_30d else None,
+        "consolidation_gaps": [
+            {**g, "week_start": g["week_start"].isoformat(), "week_end": g["week_end"].isoformat()} for g in gaps
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
 # Manual trigger
 # ---------------------------------------------------------------------------
+
 
 class TriggerResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -185,17 +212,14 @@ def _default_period(level: str, today: date) -> tuple[date, date]:
     return start, end
 
 
-_BUILTIN_CELL_TYPES = frozenset(
-    {"consolidation", "foresight", "skill_distillation"})
+_BUILTIN_CELL_TYPES = frozenset({"consolidation", "foresight", "skill_distillation"})
 
 
 @router.post("/trigger/{cell_type}")
 async def trigger_cell(
-    cell_type: str = Path(
-        ..., min_length=1, max_length=64, pattern="^[a-z0-9_]+$"),
+    cell_type: str = Path(..., min_length=1, max_length=64, pattern="^[a-z0-9_]+$"),
     agent_identifier: str = Query(..., min_length=1, max_length=128),
-    level: Optional[str] = Query(
-        None, pattern="^(weekly|monthly|quarterly|yearly)$"),
+    level: Optional[str] = Query(None, pattern="^(weekly|monthly|quarterly|yearly)$"),
     period_start: Optional[date] = Query(None),
     period_end: Optional[date] = Query(None),
     actor: dict = Depends(get_current_user),
@@ -205,11 +229,9 @@ async def trigger_cell(
 
     if cell_type in ("foresight", "skill_distillation"):
         if level is not None:
-            raise HTTPException(
-                422, f"level parameter not applicable for {cell_type}")
+            raise HTTPException(422, f"level parameter not applicable for {cell_type}")
         if period_start is not None or period_end is not None:
-            raise HTTPException(
-                422, f"period parameters not applicable for {cell_type}")
+            raise HTTPException(422, f"period parameters not applicable for {cell_type}")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -220,13 +242,13 @@ async def trigger_cell(
     # requires an enabled cell_task_configs row with a prompt template.
     if cell_type not in _BUILTIN_CELL_TYPES:
         from cell_worker import _load_cell_config, _run_generic_cell, _resolve_run_context, _active_cell
+
         async with pool.acquire() as conn:
             cfg = await _load_cell_config(conn, agent_id, cell_type, None)
         if not cfg.get("cell_type"):
             raise HTTPException(422, f"no config found for cell_type {cell_type!r}")
         if not cfg.get("prompt_content"):
-            raise HTTPException(
-                422, f"no prompt template configured for cell_type {cell_type!r}")
+            raise HTTPException(422, f"no prompt template configured for cell_type {cell_type!r}")
 
         async def _run_generic():
             async with _get_trigger_sem():
@@ -235,16 +257,13 @@ async def trigger_cell(
                 try:
                     await _run_generic_cell(pool, cfg, agent_id)
                 except Exception:
-                    log.exception("trigger generic %s agent=%s failed",
-                                  cell_type, agent_identifier)
+                    log.exception("trigger generic %s agent=%s failed", cell_type, agent_identifier)
                 finally:
                     if tok is not None:
                         _active_cell.reset(tok)
 
         asyncio.create_task(_run_generic())
-        return TriggerResponse(
-            cell_type=cell_type, agent_identifier=agent_identifier,
-            level=None, status="started")
+        return TriggerResponse(cell_type=cell_type, agent_identifier=agent_identifier, level=None, status="started")
 
     today = date.today()
     effective_level = None
@@ -256,8 +275,7 @@ async def trigger_cell(
         has_start = period_start is not None
         has_end = period_end is not None
         if has_start != has_end:
-            raise HTTPException(
-                422, "period_start and period_end must both be provided or both omitted")
+            raise HTTPException(422, "period_start and period_end must both be provided or both omitted")
         if has_start:
             p_start, p_end = period_start, period_end
         else:
@@ -275,18 +293,12 @@ async def trigger_cell(
     )
 
     _dispatch = {
-        ("consolidation", "weekly"): lambda: run_consolidation(
-            pool, agent_id, p_start, p_end),
-        ("consolidation", "monthly"): lambda: run_monthly_consolidation(
-            pool, agent_id, p_start, p_end),
-        ("consolidation", "quarterly"): lambda: run_quarterly_consolidation(
-            pool, agent_id, p_start, p_end),
-        ("consolidation", "yearly"): lambda: run_yearly_consolidation(
-            pool, agent_id, p_start, p_end),
-        ("foresight", None): lambda: run_foresight_extraction(
-            pool, agent_id),
-        ("skill_distillation", None): lambda: run_skill_distillation(
-            pool, agent_id),
+        ("consolidation", "weekly"): lambda: run_consolidation(pool, agent_id, p_start, p_end),
+        ("consolidation", "monthly"): lambda: run_monthly_consolidation(pool, agent_id, p_start, p_end),
+        ("consolidation", "quarterly"): lambda: run_quarterly_consolidation(pool, agent_id, p_start, p_end),
+        ("consolidation", "yearly"): lambda: run_yearly_consolidation(pool, agent_id, p_start, p_end),
+        ("foresight", None): lambda: run_foresight_extraction(pool, agent_id),
+        ("skill_distillation", None): lambda: run_skill_distillation(pool, agent_id),
     }
 
     key = (cell_type, effective_level)
@@ -304,8 +316,7 @@ async def trigger_cell(
             try:
                 await fn()
             except Exception:
-                log.exception("trigger %s/%s agent=%s failed",
-                              cell_type, effective_level, agent_identifier)
+                log.exception("trigger %s/%s agent=%s failed", cell_type, effective_level, agent_identifier)
             finally:
                 if tok is not None:
                     _active_cell.reset(tok)

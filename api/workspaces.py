@@ -30,6 +30,7 @@ Deuda registrada para fork comercial multi-tenant (no bloquea single-tenant mode
   cliente (adv-seg). Sin esto, atacante con CEO comprometido vacía workspace
   silenciosamente con N DELETEs antes del DELETE final.
 """
+
 from __future__ import annotations
 
 import json
@@ -113,6 +114,7 @@ class WorkspaceListResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("", response_model=WorkspaceResponse, status_code=201)
 async def create_workspace(
     body: WorkspaceCreate,
@@ -151,7 +153,8 @@ async def create_workspace(
                     VALUES ($1, $2)
                     RETURNING id, organization_id, name, created_at
                     """,
-                    body.organization_id, body.name,
+                    body.organization_id,
+                    body.name,
                 )
                 # Project común 'general' asociado al workspace recién creado.
                 # is_common=true → visible para todos los workers que tengan
@@ -167,7 +170,8 @@ async def create_workspace(
                 await conn.execute(
                     """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'create_workspace', 'workspace', $2, $3::jsonb, $4)""",
-                    int(actor["sub"]), str(row["id"]),
+                    int(actor["sub"]),
+                    str(row["id"]),
                     json.dumps({"name": body.name, "organization_id": body.organization_id}),
                     actor.get("organization_id"),
                 )
@@ -202,9 +206,7 @@ async def list_workspaces(
     pool = await get_pool()
     async with pool.acquire() as conn:
         if is_super:
-            rows = await conn.fetch(
-                "SELECT id, organization_id, name, created_at FROM workspaces ORDER BY id"
-            )
+            rows = await conn.fetch("SELECT id, organization_id, name, created_at FROM workspaces ORDER BY id")
         elif is_ceo and org_id is not None:
             rows = await conn.fetch(
                 """
@@ -230,7 +232,8 @@ async def list_workspaces(
                    )
                 ORDER BY id
                 """,
-                lead_ws, user_id,
+                lead_ws,
+                user_id,
             )
 
     items = [WorkspaceResponse(**dict(r)) for r in rows]
@@ -276,7 +279,12 @@ async def get_workspace(
                    )
               )
             """,
-            workspace_id, is_super, is_ceo, org_id, lead_ws, user_id,
+            workspace_id,
+            is_super,
+            is_ceo,
+            org_id,
+            lead_ws,
+            user_id,
         )
     if row is None:
         # Indistinguible: workspace no existe O existe sin acceso. Misma query,
@@ -310,7 +318,8 @@ async def update_workspace(
                 WHERE id = $1
                 RETURNING id, organization_id, name, created_at
                 """,
-                workspace_id, body.name,
+                workspace_id,
+                body.name,
             )
         except UniqueViolationError:
             raise HTTPException(409, "workspace with this name already exists in the organization")
@@ -323,7 +332,8 @@ async def update_workspace(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_workspace', 'workspace', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(workspace_id),
+            int(actor["sub"]),
+            str(workspace_id),
             json.dumps({"name": body.name}),
             actor.get("organization_id"),
         )
@@ -371,11 +381,14 @@ async def delete_workspace(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'delete', 'workspace', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), str(workspace_id),
-                    json.dumps({
-                        "name": row["name"],
-                        "organization_id": row["organization_id"],
-                    }),
+                    int(actor["sub"]),
+                    str(workspace_id),
+                    json.dumps(
+                        {
+                            "name": row["name"],
+                            "organization_id": row["organization_id"],
+                        }
+                    ),
                     actor.get("organization_id"),
                 )
                 await conn.execute("DELETE FROM workspaces WHERE id = $1", workspace_id)
@@ -383,12 +396,8 @@ async def delete_workspace(
             # Workspace tiene memorias o documentos → bloqueo del schema. Contar
             # para que el cliente sepa qué vaciar. OBS-WS2 fix (verificador Loop 1):
             # omitir el componente con count=0 para no confundir ("vacía 0 documentos").
-            n_memories = await conn.fetchval(
-                "SELECT count(*) FROM memories WHERE workspace_id = $1", workspace_id
-            )
-            n_documents = await conn.fetchval(
-                "SELECT count(*) FROM documents WHERE workspace_id = $1", workspace_id
-            )
+            n_memories = await conn.fetchval("SELECT count(*) FROM memories WHERE workspace_id = $1", workspace_id)
+            n_documents = await conn.fetchval("SELECT count(*) FROM documents WHERE workspace_id = $1", workspace_id)
             parts = []
             if n_memories:
                 parts.append(f"{n_memories} memories")

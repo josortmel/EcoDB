@@ -1,4 +1,5 @@
 """Document management endpoints — Task 4.11."""
+
 from __future__ import annotations
 
 import json
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
+
 
 class DocumentCreate(BaseModel):
     uri: str = Field(..., min_length=1, max_length=2048)
@@ -124,6 +126,7 @@ async def _check_read_access(conn, doc_row, actor: dict) -> None:
 # POST /documents — register + queue
 # ---------------------------------------------------------------------------
 
+
 @router.post("", response_model=DocumentResponse, status_code=201)
 async def create_document(
     body: DocumentCreate,
@@ -133,9 +136,7 @@ async def create_document(
     async with pool.acquire() as conn:
         workspace_id = body.workspace_id
         if workspace_id is None:
-            ws_id = await conn.fetchval(
-                "SELECT workspace_id FROM projects WHERE id = $1", body.project_id
-            )
+            ws_id = await conn.fetchval("SELECT workspace_id FROM projects WHERE id = $1", body.project_id)
             if ws_id is None:
                 raise HTTPException(404, "project not found")
             workspace_id = ws_id
@@ -154,14 +155,19 @@ async def create_document(
                       processing_started_at, last_indexed, processing_metrics,
                       base_weight, created_at
             """,
-            body.uri, body.filename, body.doc_type,
-            workspace_id, body.project_id, body.visibility,
+            body.uri,
+            body.filename,
+            body.doc_type,
+            workspace_id,
+            body.project_id,
+            body.visibility,
         )
         await conn.execute("SELECT pg_notify('ecodb_ingest', $1)", str(row["id"]))
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'register_document', 'document', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"uri": body.uri, "filename": body.filename, "project_id": body.project_id}),
             actor.get("organization_id"),
         )
@@ -175,13 +181,24 @@ async def create_document(
 _MEDIA_STORE = os.environ.get("MEDIA_STORE_DIR", "/app/media")
 
 _DOC_TYPE_MAP = {
-    ".pdf": "pdf", ".docx": "docx", ".doc": "docx",
-    ".pptx": "pptx", ".ppt": "pptx",
-    ".md": "markdown", ".txt": "text",
-    ".html": "html", ".htm": "html",
-    ".csv": "csv", ".json": "json",
-    ".mp3": "audio", ".wav": "audio", ".ogg": "audio",
-    ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".doc": "docx",
+    ".pptx": "pptx",
+    ".ppt": "pptx",
+    ".md": "markdown",
+    ".txt": "text",
+    ".html": "html",
+    ".htm": "html",
+    ".csv": "csv",
+    ".json": "json",
+    ".mp3": "audio",
+    ".wav": "audio",
+    ".ogg": "audio",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
 }
 # C16: types a caller may force on upload — the inferred ones plus the parser's
 # fast-path names (parsers.py: "txt"/"md" skip docling) that the MCP sends.
@@ -189,10 +206,28 @@ _UPLOAD_DOC_TYPES = frozenset(_DOC_TYPE_MAP.values()) | {"md", "txt"}
 # C16b: upload is the only gate for agent documents — cap, denylist and a sane
 # extension shape are enforced before anything is written. Same size env as the parser.
 _MAX_UPLOAD_BYTES = int(os.environ.get("MAX_DOC_SIZE_BYTES", str(50 * 1024 * 1024)))
-_DENIED_UPLOAD_EXTENSIONS = frozenset({
-    ".env", ".key", ".pem", ".pfx", ".p12", ".p8", ".ppk", ".der", ".yaml", ".toml", ".ini",
-    ".config", ".exe", ".dll", ".bat", ".ps1", ".sh", ".cmd",
-})
+_DENIED_UPLOAD_EXTENSIONS = frozenset(
+    {
+        ".env",
+        ".key",
+        ".pem",
+        ".pfx",
+        ".p12",
+        ".p8",
+        ".ppk",
+        ".der",
+        ".yaml",
+        ".toml",
+        ".ini",
+        ".config",
+        ".exe",
+        ".dll",
+        ".bat",
+        ".ps1",
+        ".sh",
+        ".cmd",
+    }
+)
 _EXT_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
 
 
@@ -202,7 +237,8 @@ async def upload_document(
     project_id: int = Query(..., gt=0),
     visibility: Literal["public", "private"] = "public",
     doc_type: Optional[str] = Query(
-        None, description="Override del tipo inferido por extension. md/txt usan el parser de texto rapido."),
+        None, description="Override del tipo inferido por extension. md/txt usan el parser de texto rapido."
+    ),
     actor: dict = Depends(get_current_user),
 ) -> DocumentResponse:
     """Upload a document file via multipart. Dashboard and MCP use this — no host path needed."""
@@ -231,9 +267,7 @@ async def upload_document(
             if project_id not in visible:
                 raise HTTPException(403, "no access to target project")
 
-        workspace_id = await conn.fetchval(
-            "SELECT workspace_id FROM projects WHERE id = $1", project_id
-        )
+        workspace_id = await conn.fetchval("SELECT workspace_id FROM projects WHERE id = $1", project_id)
         if workspace_id is None:
             raise HTTPException(404, "project not found")
 
@@ -252,8 +286,12 @@ async def upload_document(
                           processing_started_at, last_indexed, processing_metrics,
                           base_weight, created_at
                 """,
-                stored_path, file.filename, doc_type,
-                workspace_id, project_id, visibility,
+                stored_path,
+                file.filename,
+                doc_type,
+                workspace_id,
+                project_id,
+                visibility,
             )
         except Exception:
             os.unlink(stored_path)  # no orphan file when the row could not be created
@@ -262,12 +300,16 @@ async def upload_document(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'upload_document', 'document', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"filename": file.filename, "project_id": project_id, "size": len(content)}),
             actor.get("organization_id"),
         )
         return _row_to_response(row)
+
+
 # ---------------------------------------------------------------------------
+
 
 @router.get("", response_model=list[DocumentListItem])
 async def list_documents(
@@ -314,9 +356,13 @@ async def list_documents(
         )
         return [
             DocumentListItem(
-                id=r["id"], uri=r["uri"], filename=r["filename"],
-                doc_type=r["doc_type"], workspace_id=r["workspace_id"],
-                project_id=r["project_id"], status=r["status"],
+                id=r["id"],
+                uri=r["uri"],
+                filename=r["filename"],
+                doc_type=r["doc_type"],
+                workspace_id=r["workspace_id"],
+                project_id=r["project_id"],
+                status=r["status"],
                 created_at=r["created_at"],
             )
             for r in rows
@@ -326,6 +372,7 @@ async def list_documents(
 # ---------------------------------------------------------------------------
 # GET /documents/{document_id}
 # ---------------------------------------------------------------------------
+
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
@@ -348,6 +395,7 @@ async def get_document(
 # GET /documents/{document_id}/chunks
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{document_id}/chunks", response_model=ChunksResponse)
 async def get_document_chunks(
     document_id: UUID,
@@ -365,16 +413,19 @@ async def get_document_chunks(
             raise HTTPException(404, "document not found")
         await _check_read_access(conn, doc, actor)
 
-        total = await conn.fetchval(
-            "SELECT COUNT(*) FROM document_chunks WHERE document_id = $1", document_id
-        )
-        rows = await conn.fetch("""
+        total = await conn.fetchval("SELECT COUNT(*) FROM document_chunks WHERE document_id = $1", document_id)
+        rows = await conn.fetch(
+            """
             SELECT chunk_index, content, section_path
             FROM document_chunks
             WHERE document_id = $1
             ORDER BY chunk_index
             LIMIT $2 OFFSET $3
-        """, document_id, limit, start)
+        """,
+            document_id,
+            limit,
+            start,
+        )
 
     return ChunksResponse(
         document_id=document_id,
@@ -396,6 +447,7 @@ async def get_document_chunks(
 # PUT /documents/{document_id}/reindex
 # ---------------------------------------------------------------------------
 
+
 @router.put("/{document_id}/reindex")
 async def reindex_document(
     document_id: UUID,
@@ -413,17 +465,21 @@ async def reindex_document(
         if doc is None:
             raise HTTPException(404, "not found")
 
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE documents
             SET status = 'queued', retry_count = 0,
                 processing_started_at = NULL, last_indexed = NULL
             WHERE id = $1
-        """, document_id)
+        """,
+            document_id,
+        )
         await conn.execute("SELECT pg_notify('ecodb_ingest', $1)", str(document_id))
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'reindex_document', 'document', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(document_id),
+            int(actor["sub"]),
+            str(document_id),
             json.dumps({}),
             actor.get("organization_id"),
         )
@@ -435,6 +491,7 @@ async def reindex_document(
 # DELETE /documents/{document_id} — soft delete
 # ---------------------------------------------------------------------------
 
+
 @router.delete("/{document_id}", status_code=204)
 async def delete_document(
     document_id: UUID,
@@ -445,19 +502,16 @@ async def delete_document(
         if not actor.get("is_super"):
             raise HTTPException(404, "not found")
 
-        doc = await conn.fetchrow(
-            "SELECT id, project_id, status FROM documents WHERE id = $1", document_id
-        )
+        doc = await conn.fetchrow("SELECT id, project_id, status FROM documents WHERE id = $1", document_id)
         if doc is None or doc["status"] == "deleted":
             raise HTTPException(404, "not found")
 
-        await conn.execute(
-            "UPDATE documents SET status = 'deleted' WHERE id = $1", document_id
-        )
+        await conn.execute("UPDATE documents SET status = 'deleted' WHERE id = $1", document_id)
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'delete_document', 'document', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(document_id),
+            int(actor["sub"]),
+            str(document_id),
             json.dumps({"project_id": doc["project_id"]}),
             actor.get("organization_id"),
         )

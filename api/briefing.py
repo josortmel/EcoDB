@@ -1,4 +1,5 @@
 """Briefing endpoint — metacognicion v2.0 §7.4."""
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/briefing", tags=["briefing"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class ForesightItem(BaseModel):
     memory_id: UUID
@@ -84,6 +86,7 @@ class DismissBody(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _briefing_score(item, now):
     delta_days = max((item["foresight_start"] - now).total_seconds() / 86400, 1.0)
     urgency = 1.0 / delta_days
@@ -104,6 +107,7 @@ def _briefing_score(item, now):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 async def get_briefing(
     agent_identifier: str = Query(..., min_length=1),
@@ -116,14 +120,17 @@ async def get_briefing(
         now = datetime.now(timezone.utc)
 
         # 1. Active foresights
-        foresight_rows = await conn.fetch("""
+        foresight_rows = await conn.fetch(
+            """
             SELECT * FROM memories WHERE agent_id = $1
               AND foresight_start IS NOT NULL AND foresight_end > NOW()
               AND (metadata->>'foresight_dismissed' IS NULL
                    OR metadata->>'foresight_dismissed' != 'true')
               AND staleness != 'archived'
             ORDER BY foresight_start ASC LIMIT 50
-        """, aid)
+        """,
+            aid,
+        )
         vis = await precompute_read_visibility(conn, actor)
         foresights = []
         for r in foresight_rows:
@@ -136,18 +143,21 @@ async def get_briefing(
         foresights = foresights[:10]
 
         # 2. Open tensions
-        tension_rows = await conn.fetch("""
+        tension_rows = await conn.fetch(
+            """
             SELECT * FROM memories WHERE agent_id = $1
               AND 'identity_tension' = ANY(tags)
               AND (metadata->>'tension_status' IS NULL
                    OR metadata->>'tension_status' = 'open')
             ORDER BY created_at DESC LIMIT 10
-        """, aid)
-        tensions = [dict(r) for r in tension_rows
-                    if check_read_memory(vis, r)][:5]
+        """,
+            aid,
+        )
+        tensions = [dict(r) for r in tension_rows if check_read_memory(vis, r)][:5]
 
         # 3. Pending clusters (CANDIDATE — separate section, NEVER in telescopic)
-        pending = await conn.fetch("""
+        pending = await conn.fetch(
+            """
             SELECT id, agent_id, level, label, detail,
                    array_length(member_ids,1) AS member_count,
                    coalesce(array_length(source_ids,1),0) AS source_count,
@@ -155,14 +165,16 @@ async def get_briefing(
             FROM memory_clusters
             WHERE agent_id=$1 AND status='candidate' AND narrative IS NULL
             ORDER BY created_at DESC LIMIT 5
-        """, aid)
+        """,
+            aid,
+        )
 
         # 4. Telescopic (ONLY status='active')
-        _level_key = {"weekly": "weeklies", "monthly": "monthlies",
-                      "quarterly": "quarterlies", "yearly": "yearlies"}
+        _level_key = {"weekly": "weeklies", "monthly": "monthlies", "quarterly": "quarterlies", "yearly": "yearlies"}
         telescopic = {}
-        for lvl, lim in [('weekly', 4), ('monthly', 3), ('quarterly', 4), ('yearly', 100)]:
-            rows = await conn.fetch("""
+        for lvl, lim in [("weekly", 4), ("monthly", 3), ("quarterly", 4), ("yearly", 100)]:
+            rows = await conn.fetch(
+                """
                 SELECT id, agent_id, level, label, detail, narrative,
                        array_length(member_ids,1) AS member_count,
                        coalesce(array_length(source_ids,1),0) AS source_count,
@@ -171,7 +183,11 @@ async def get_briefing(
                 FROM memory_clusters
                 WHERE agent_id=$1 AND level=$2 AND status='active'
                 ORDER BY period_end DESC LIMIT $3
-            """, aid, lvl, lim)
+            """,
+                aid,
+                lvl,
+                lim,
+            )
             telescopic[_level_key[lvl]] = [
                 ClusterSummary(**{**dict(r), "pattern_flags": _parse_jsonb(r.get("pattern_flags"))}) for r in rows
             ]
@@ -184,23 +200,28 @@ async def get_briefing(
                 foresight_end=f["foresight_end"],
                 urgency_score=f["urgency_score"],
                 evidence=f.get("evidence", ""),
-            ) for f in foresights
+            )
+            for f in foresights
         ]
 
         tension_items = []
         for t in tensions:
             meta = _parse_jsonb(t.get("metadata"))
-            tension_items.append(TensionItem(
-                id=t["id"],
-                observed_trait=meta.get("observed_trait", ""),
-                declared_trait=meta.get("declared_trait", ""),
-                tension_type=meta.get("tension_type", ""),
-                evidence_memory_ids=_safe_uuid_list(meta.get("evidence_memory_ids", [])),
-                created_at=t["created_at"],
-                status=meta.get("tension_status", "open"),
-            ))
+            tension_items.append(
+                TensionItem(
+                    id=t["id"],
+                    observed_trait=meta.get("observed_trait", ""),
+                    declared_trait=meta.get("declared_trait", ""),
+                    tension_type=meta.get("tension_type", ""),
+                    evidence_memory_ids=_safe_uuid_list(meta.get("evidence_memory_ids", [])),
+                    created_at=t["created_at"],
+                    status=meta.get("tension_status", "open"),
+                )
+            )
 
-        pending_items = [ClusterSummary(**{**dict(r), "pattern_flags": _parse_jsonb(r.get("pattern_flags"))}) for r in pending]
+        pending_items = [
+            ClusterSummary(**{**dict(r), "pattern_flags": _parse_jsonb(r.get("pattern_flags"))}) for r in pending
+        ]
 
     return BriefingResponse(
         agent_identifier=agent_identifier,
@@ -213,7 +234,8 @@ async def get_briefing(
 
 @router.put("/foresights/{memory_id}/dismiss")
 async def dismiss_foresight(
-    memory_id: UUID, body: DismissBody,
+    memory_id: UUID,
+    body: DismissBody,
     actor: dict = Depends(get_current_user),
 ) -> dict:
     pool = await get_pool()
@@ -229,35 +251,43 @@ async def dismiss_foresight(
             "foresight_dismiss_reason": body.reason,
             "nuisance_penalty": current_penalty + 0.1,
         }
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE memories SET metadata = coalesce(metadata,'{}'::jsonb) || $2::jsonb,
               updated_at = NOW()
             WHERE id = $1
-        """, memory_id, json.dumps(update_obj))
+        """,
+            memory_id,
+            json.dumps(update_obj),
+        )
     return {"ok": True}
 
 
 @router.put("/tensions/{memory_id}/dismiss")
 async def dismiss_tension(
-    memory_id: UUID, body: TensionAction,
+    memory_id: UUID,
+    body: TensionAction,
     actor: dict = Depends(get_current_user),
 ) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         mem = await conn.fetchrow("SELECT * FROM memories WHERE id=$1", memory_id)
-        if mem is None or 'identity_tension' not in (mem["tags"] or []):
+        if mem is None or "identity_tension" not in (mem["tags"] or []):
             raise HTTPException(404)
         if not await can_write_memory(conn, actor, mem):
             raise HTTPException(403)
         status_map = {"resolve": "resolved", "dismiss": "dismissed"}
         update = {"tension_status": status_map[body.action]}
         if body.action == "dismiss":
-            update["tension_cooldown_until"] = (
-                datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+            update["tension_cooldown_until"] = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         if body.note:
             update["tension_note"] = body.note
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE memories SET metadata = coalesce(metadata,'{}'::jsonb) || $1::jsonb,
               updated_at = NOW() WHERE id = $2
-        """, json.dumps(update), memory_id)
+        """,
+            json.dumps(update),
+            memory_id,
+        )
     return {"ok": True}

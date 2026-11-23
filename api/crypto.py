@@ -10,6 +10,7 @@ encrypt/decrypt then raise at call time, and validate_production_secrets() block
 startup in production. This keeps dev/test (which import the app without the key)
 working while still failing fast on a misconfigured key.
 """
+
 from __future__ import annotations
 
 import os
@@ -18,8 +19,8 @@ from cryptography.fernet import Fernet
 
 _INVALID_MSG = (
     "ENCRYPTION_KEY is not a valid Fernet key (32-byte url-safe base64). "
-    "Generate with: python -c \"from cryptography.fernet import Fernet; "
-    "print(Fernet.generate_key().decode())\""
+    'Generate with: python -c "from cryptography.fernet import Fernet; '
+    'print(Fernet.generate_key().decode())"'
 )
 _MISSING_MSG = "ENCRYPTION_KEY not set — required to encrypt LLM provider keys"
 

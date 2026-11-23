@@ -16,6 +16,7 @@ Audit trail: 1 audit_log row batch por operación con resource_id=UUID + filter 
 target + count + sample memory_ids. Granularidad apropiada single-tenant; en
 multi-tenant fork con liability legal, 1 audit por memoria movida.
 """
+
 from __future__ import annotations
 
 import json
@@ -110,10 +111,14 @@ class RedistributeResponse(BaseModel):
 # Attention Inbox (B2+B3 — dashboard backend)
 # ---------------------------------------------------------------------------
 
-_INBOX_CLASSES = frozenset({"stale_memories", "unconfirmed_relations", "pending_alias_candidates", "low_trust_documents"})
+_INBOX_CLASSES = frozenset(
+    {"stale_memories", "unconfirmed_relations", "pending_alias_candidates", "low_trust_documents"}
+)
 
 
-async def _inbox_query(conn, decision_class: str, actor: dict, limit: int = 0, offset: int = 0, count_only: bool = False):
+async def _inbox_query(
+    conn, decision_class: str, actor: dict, limit: int = 0, offset: int = 0, count_only: bool = False
+):
     """Org-scoped inbox queries. Super sees all; CEO sees own org only."""
     is_super = actor.get("is_super")
     actor_org = actor.get("organization_id")
@@ -168,8 +173,8 @@ async def _inbox_query(conn, decision_class: str, actor: dict, limit: int = 0, o
                 JOIN documents ds ON ds.id = rd.source_id
                 JOIN documents dt ON dt.id = rd.target_id
                 WHERE rd.confirmed_by IS NULL
-                AND ds.project_id IN {_org_sub % '$3' if not is_super else '(SELECT id FROM projects)'}
-                AND dt.project_id IN {_org_sub % '$3' if not is_super else '(SELECT id FROM projects)'}
+                AND ds.project_id IN {_org_sub % "$3" if not is_super else "(SELECT id FROM projects)"}
+                AND dt.project_id IN {_org_sub % "$3" if not is_super else "(SELECT id FROM projects)"}
                 ORDER BY rd.similarity DESC LIMIT $1 OFFSET $2""",
         },
         "pending_alias_candidates": {
@@ -222,7 +227,9 @@ async def attention_inbox_summary(
 
 @router.get("/attention-inbox/details")
 async def attention_inbox_details(
-    decision_class: str = Query(..., description="One of: stale_memories, unconfirmed_relations, pending_alias_candidates, low_trust_documents"),
+    decision_class: str = Query(
+        ..., description="One of: stale_memories, unconfirmed_relations, pending_alias_candidates, low_trust_documents"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     actor: dict = Depends(require_super_or_ceo),
@@ -236,7 +243,7 @@ async def attention_inbox_details(
     items = [dict(r) for r in rows]
     for item in items:
         for k, v in item.items():
-            if hasattr(v, 'isoformat'):
+            if hasattr(v, "isoformat"):
                 item[k] = v.isoformat()
             elif isinstance(v, uuid.UUID):
                 item[k] = str(v)
@@ -246,6 +253,7 @@ async def attention_inbox_details(
 # ---------------------------------------------------------------------------
 # Endpoint — redistribute
 # ---------------------------------------------------------------------------
+
 
 @router.post("/redistribute/memories", response_model=RedistributeResponse)
 async def redistribute_memories(
@@ -263,16 +271,13 @@ async def redistribute_memories(
     No valida que filter.workspace_id/project_id existan: si no existen, simplemente
     matched_count=0 — comportamiento natural del SELECT.
     """
-    if (body.filter.workspace_id == body.target.workspace_id
-            and body.filter.project_id == body.target.project_id):
+    if body.filter.workspace_id == body.target.workspace_id and body.filter.project_id == body.target.project_id:
         raise HTTPException(422, "filter and target are identical — nothing to redistribute")
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Validar target.
-        target_ws = await conn.fetchval(
-            "SELECT id FROM workspaces WHERE id = $1", body.target.workspace_id
-        )
+        target_ws = await conn.fetchval("SELECT id FROM workspaces WHERE id = $1", body.target.workspace_id)
         if target_ws is None:
             raise HTTPException(422, "target.workspace_id does not exist")
         target_proj = await conn.fetchrow(
@@ -345,14 +350,18 @@ async def redistribute_memories(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'redistribute', 'memories_batch', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), audit_uuid,
-                    json.dumps({
-                        "filter": body.filter.model_dump(),
-                        "target": body.target.model_dump(),
-                        "matched_count": 0,
-                        "moved_count": 0,
-                        "sample_memory_ids": [],
-                    }), actor.get("organization_id"),
+                    int(actor["sub"]),
+                    audit_uuid,
+                    json.dumps(
+                        {
+                            "filter": body.filter.model_dump(),
+                            "target": body.target.model_dump(),
+                            "matched_count": 0,
+                            "moved_count": 0,
+                            "sample_memory_ids": [],
+                        }
+                    ),
+                    actor.get("organization_id"),
                 )
             return RedistributeResponse(
                 dry_run=False,
@@ -369,8 +378,10 @@ async def redistribute_memories(
         audit_uuid = str(uuid.uuid4())
         update_where_parts = ["workspace_id = $3", "project_id = $4"]
         update_params: list = [
-            body.target.workspace_id, body.target.project_id,
-            body.filter.workspace_id, body.filter.project_id,
+            body.target.workspace_id,
+            body.target.project_id,
+            body.filter.workspace_id,
+            body.filter.project_id,
         ]
         upd_idx = 5
         if body.filter.agent_identifier is not None:
@@ -401,14 +412,18 @@ async def redistribute_memories(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'redistribute', 'memories_batch', $2, $3::jsonb, $4)
                 """,
-                int(actor["sub"]), audit_uuid,
-                json.dumps({
-                    "filter": body.filter.model_dump(),
-                    "target": body.target.model_dump(),
-                    "matched_count": matched_count,
-                    "moved_count": moved_count_real,
-                    "sample_memory_ids": sample_ids,
-                }), actor.get("organization_id"),
+                int(actor["sub"]),
+                audit_uuid,
+                json.dumps(
+                    {
+                        "filter": body.filter.model_dump(),
+                        "target": body.target.model_dump(),
+                        "matched_count": matched_count,
+                        "moved_count": moved_count_real,
+                        "sample_memory_ids": sample_ids,
+                    }
+                ),
+                actor.get("organization_id"),
             )
 
     return RedistributeResponse(
@@ -424,6 +439,7 @@ async def redistribute_memories(
 # — POST /admin/extract_entities (verificacion manual GLiNER)
 # ---------------------------------------------------------------------------
 
+
 class ExtractEntitiesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -432,7 +448,9 @@ class ExtractEntitiesRequest(BaseModel):
         None,
         description=f"Etiquetas a extraer. Default: {DEFAULT_LABELS}",
     )
-    threshold: float = Field(0.7, ge=0.0, le=1.0, description="Score minimo GLiNER (0-1). Default 0.7 (= gliner_service.DEFAULT_THRESHOLD).")
+    threshold: float = Field(
+        0.7, ge=0.0, le=1.0, description="Score minimo GLiNER (0-1). Default 0.7 (= gliner_service.DEFAULT_THRESHOLD)."
+    )
 
 
 class ExtractedEntity(BaseModel):
@@ -442,7 +460,8 @@ class ExtractedEntity(BaseModel):
     end: int
     score: float
     source: Literal["dictionary", "gliner"] = Field(
-        ..., description="Provenance: 'dictionary' si vino del entity_dictionary override, 'gliner' si lo detecto el modelo."
+        ...,
+        description="Provenance: 'dictionary' si vino del entity_dictionary override, 'gliner' si lo detecto el modelo.",
     )
 
 
@@ -482,8 +501,10 @@ async def admin_extract_entities(
 # — entity_dictionary CRUD + reload (super-only)
 # ---------------------------------------------------------------------------
 
+
 class EntityDictionaryEntry(BaseModel):
     """Entrada del entity_dictionary devuelta por GET endpoints."""
+
     id: int
     name: str
     name_normalized: str
@@ -497,10 +518,20 @@ class EntityDictionaryEntry(BaseModel):
 class EntityDictionaryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(..., min_length=1, max_length=200, pattern=r"^[\w\sáéíóúüÁÉÍÓÚÜñÑ.\-]+$",
-                      description="Nombre original. Permite letras (acentuadas/ñ), digitos, espacios, guiones, puntos. NO comillas/punto-coma/barras.")
-    entity_type: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z_]+$",
-                             description="Tipo. Lowercase + underscore. Validado contra allowlist EntityType.")
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[\w\sáéíóúüÁÉÍÓÚÜñÑ.\-]+$",
+        description="Nombre original. Permite letras (acentuadas/ñ), digitos, espacios, guiones, puntos. NO comillas/punto-coma/barras.",
+    )
+    entity_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        pattern=r"^[a-z_]+$",
+        description="Tipo. Lowercase + underscore. Validado contra allowlist EntityType.",
+    )
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -541,10 +572,8 @@ async def create_dictionary_entry(
     """
     if not is_valid_entity_type(body.entity_type):
         from entity_normalization import ALLOWED_ENTITY_TYPES
-        raise HTTPException(
-            422,
-            f"entity_type '{body.entity_type}' not in allowlist: {sorted(ALLOWED_ENTITY_TYPES)}"
-        )
+
+        raise HTTPException(422, f"entity_type '{body.entity_type}' not in allowlist: {sorted(ALLOWED_ENTITY_TYPES)}")
 
     name_normalized = normalize_name(body.name)
     pool = await get_pool()
@@ -556,14 +585,19 @@ async def create_dictionary_entry(
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING *
                 """,
-                body.name, name_normalized, body.entity_type, body.notes, int(actor["sub"]),
+                body.name,
+                name_normalized,
+                body.entity_type,
+                body.notes,
+                int(actor["sub"]),
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"name_normalized '{name_normalized}' already exists")
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_entity_dict', 'entity_dictionary', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"name": body.name, "entity_type": body.entity_type}),
             actor.get("organization_id"),
         )
@@ -600,10 +634,8 @@ async def update_dictionary_entry(
         raise HTTPException(400, "no fields to update")
     if body.entity_type is not None and not is_valid_entity_type(body.entity_type):
         from entity_normalization import ALLOWED_ENTITY_TYPES
-        raise HTTPException(
-            422,
-            f"entity_type '{body.entity_type}' not in allowlist: {sorted(ALLOWED_ENTITY_TYPES)}"
-        )
+
+        raise HTTPException(422, f"entity_type '{body.entity_type}' not in allowlist: {sorted(ALLOWED_ENTITY_TYPES)}")
 
     sets: list[str] = []
     params: list = []
@@ -641,7 +673,8 @@ async def update_dictionary_entry(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_entity_dict', 'entity_dictionary', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(entry_id),
+            int(actor["sub"]),
+            str(entry_id),
             json.dumps({"fields_updated": [s.split(" = ")[0] for s in sets]}),
             actor.get("organization_id"),
         )
@@ -660,13 +693,16 @@ async def delete_dictionary_entry(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'delete_entity_dict', 'entity_dictionary', $2, NULL, $3)""",
-            int(actor["sub"]), str(entry_id), actor.get("organization_id"),
+            int(actor["sub"]),
+            str(entry_id),
+            actor.get("organization_id"),
         )
 
 
 # ---------------------------------------------------------------------------
 # Task 4.5 — Stop entities CRUD (super-only, L2-4)
 # ---------------------------------------------------------------------------
+
 
 class StopEntityCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -711,14 +747,18 @@ async def create_stop_entity(
                 VALUES ($1, $2, $3, $4)
                 RETURNING *
                 """,
-                body.name, name_normalized, body.reason, int(actor["sub"]),
+                body.name,
+                name_normalized,
+                body.reason,
+                int(actor["sub"]),
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"stop entity '{name_normalized}' already exists")
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_stop_entity', 'stop_entities', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"name": body.name, "reason": body.reason}),
             actor.get("organization_id"),
         )
@@ -748,7 +788,9 @@ async def delete_stop_entity(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'delete_stop_entity', 'stop_entities', $2, NULL, $3)""",
-            int(actor["sub"]), str(stop_id), actor.get("organization_id"),
+            int(actor["sub"]),
+            str(stop_id),
+            actor.get("organization_id"),
         )
 
 
@@ -771,6 +813,7 @@ async def check_stop_entity(
 # ---------------------------------------------------------------------------
 # Task 5.9 — Alias candidates review (super-only)
 # ---------------------------------------------------------------------------
+
 
 class AliasCandidateRow(BaseModel):
     id: int
@@ -819,7 +862,8 @@ async def list_alias_candidates(
                 ORDER BY eac.occurrences DESC, eac.confidence DESC
                 LIMIT $2
                 """,
-                status, limit,
+                status,
+                limit,
             )
         else:
             actor_org = actor.get("organization_id")
@@ -838,7 +882,9 @@ async def list_alias_candidates(
                 ORDER BY eac.occurrences DESC, eac.confidence DESC
                 LIMIT $3
                 """,
-                status, actor_org, limit,
+                status,
+                actor_org,
+                limit,
             )
     return [
         AliasCandidateRow(
@@ -862,7 +908,9 @@ class AliasScanRequest(BaseModel):
 
     threshold: float = Field(0.65, ge=0.0, le=1.0, description="pg_trgm similarity threshold")
     max_per_name: int = Field(3, ge=1, le=10, description="Max candidates per source name")
-    name_filter: str | None = Field(None, min_length=1, max_length=256, description="Optional ILIKE filter on node names")
+    name_filter: str | None = Field(
+        None, min_length=1, max_length=256, description="Optional ILIKE filter on node names"
+    )
     dry_run: bool = Field(False, description="If true, preview without inserting")
 
 
@@ -884,6 +932,7 @@ async def scan_alias_candidates(
     async with pool.acquire() as conn:
         await _check_admin_op(conn, actor, "alias_candidates")
     from gliner_service import scan_all_alias_candidates
+
     result = await scan_all_alias_candidates(
         pool,
         threshold=body.threshold,
@@ -923,7 +972,9 @@ async def review_alias_candidate(
             """UPDATE entity_alias_candidates
                SET status = $1, reviewed_by = $2, last_seen = now()
                WHERE id = $3""",
-            body.status, int(actor["sub"]), candidate_id,
+            body.status,
+            int(actor["sub"]),
+            candidate_id,
         )
 
         if body.status == "approved" and body.merge:
@@ -934,23 +985,28 @@ async def review_alias_candidate(
             if source_node is None:
                 raise HTTPException(422, f"source node '{row['source_name']}' not found as active node — merge skipped")
 
-            target_name = await conn.fetchval(
-                "SELECT name FROM nodes WHERE id = $1", row["target_node_id"]
-            )
+            target_name = await conn.fetchval("SELECT name FROM nodes WHERE id = $1", row["target_node_id"])
             if target_name:
                 await _check_admin_op(conn, actor, "merge_entities", target_name)
 
             from graph import merge_entities as _merge_entities
+
             try:
                 if body.reverse:
                     await _merge_entities(
-                        row["target_node_id"], source_node["id"],
-                        int(actor["sub"]), body.reason, pool,
+                        row["target_node_id"],
+                        source_node["id"],
+                        int(actor["sub"]),
+                        body.reason,
+                        pool,
                     )
                 else:
                     await _merge_entities(
-                        source_node["id"], row["target_node_id"],
-                        int(actor["sub"]), body.reason, pool,
+                        source_node["id"],
+                        row["target_node_id"],
+                        int(actor["sub"]),
+                        body.reason,
+                        pool,
                     )
             except ValueError as exc:
                 raise HTTPException(422, str(exc))
@@ -961,8 +1017,16 @@ async def review_alias_candidate(
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'merge_via_alias_review', 'entity', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(candidate_id),
-                json.dumps({"source": audit_source, "target": audit_target, "candidate_id": candidate_id, "reverse": body.reverse}),
+                int(actor["sub"]),
+                str(candidate_id),
+                json.dumps(
+                    {
+                        "source": audit_source,
+                        "target": audit_target,
+                        "candidate_id": candidate_id,
+                        "reverse": body.reverse,
+                    }
+                ),
                 actor.get("organization_id"),
             )
 
@@ -993,6 +1057,7 @@ async def review_alias_candidate(
 # Task 5.10 — Merge entities (super-only)
 # ---------------------------------------------------------------------------
 
+
 class MergeEntitiesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1015,6 +1080,7 @@ async def merge_entities_endpoint(
     if body.source_node_id == body.target_node_id:
         raise HTTPException(422, "source and target must be different")
     from graph import merge_entities as _merge_entities
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         src_name = await conn.fetchval("SELECT name FROM nodes WHERE id = $1", body.source_node_id)
@@ -1025,8 +1091,11 @@ async def merge_entities_endpoint(
         await _check_admin_op(conn, actor, "merge_entities", tgt_name)
     try:
         result = await _merge_entities(
-            body.source_node_id, body.target_node_id,
-            int(actor["sub"]), body.reason, pool,
+            body.source_node_id,
+            body.target_node_id,
+            int(actor["sub"]),
+            body.reason,
+            pool,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -1034,17 +1103,24 @@ async def merge_entities_endpoint(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'merge_entities', 'node', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(result["merge_log_id"]),
-            json.dumps({"source_node_id": body.source_node_id, "target_node_id": body.target_node_id, "reason": body.reason}),
+            int(actor["sub"]),
+            str(result["merge_log_id"]),
+            json.dumps(
+                {"source_node_id": body.source_node_id, "target_node_id": body.target_node_id, "reason": body.reason}
+            ),
             actor.get("organization_id"),
         )
         if body.keep_as_alias:
             try:
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO entity_alias_candidates (source_name, target_node_id, confidence, occurrences, status)
                     VALUES ($1, $2, 1.0, 1, 'approved')
                     ON CONFLICT DO NOTHING
-                """, src_name, body.target_node_id)
+                """,
+                    src_name,
+                    body.target_node_id,
+                )
                 result["alias_created"] = True
             except Exception:
                 result["alias_created"] = False
@@ -1054,6 +1130,7 @@ async def merge_entities_endpoint(
 # ---------------------------------------------------------------------------
 # Task 5.11 — Undo merge (super-only)
 # ---------------------------------------------------------------------------
+
 
 class UndoMergeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1071,6 +1148,7 @@ async def undo_merge_endpoint(
     Restores source node to status='active'. One-time only — already-undone merges return 409.
     """
     from graph import undo_merge as _undo_merge
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         await _check_admin_op(conn, actor, "undo_merge")
@@ -1089,7 +1167,8 @@ async def undo_merge_endpoint(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'undo_merge', 'node', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(result["merge_log_id"]),
+            int(actor["sub"]),
+            str(result["merge_log_id"]),
             json.dumps({"source_node_id": body.source_node_id}),
             actor.get("organization_id"),
         )
@@ -1099,6 +1178,7 @@ async def undo_merge_endpoint(
 # ---------------------------------------------------------------------------
 # Task 5.14 — Trust tier management (super-only)
 # ---------------------------------------------------------------------------
+
 
 class TrustTierUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1128,14 +1208,16 @@ async def set_document_trust_tier(
                 raise HTTPException(404, "document not found")
         result = await conn.execute(
             "UPDATE documents SET trust_tier = $1 WHERE id = $2 AND status != 'deleted'",
-            body.trust_tier, document_id,
+            body.trust_tier,
+            document_id,
         )
         if result == "UPDATE 0":
             raise HTTPException(404, "document not found")
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'set_trust_tier', 'document', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), document_id,
+            int(actor["sub"]),
+            document_id,
             json.dumps({"trust_tier": body.trust_tier}),
             actor.get("organization_id"),
         )
@@ -1145,6 +1227,7 @@ async def set_document_trust_tier(
 # ---------------------------------------------------------------------------
 # Task 5.15 — Related documents confirm (super-only)
 # ---------------------------------------------------------------------------
+
 
 class ConfirmRelationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1176,14 +1259,17 @@ async def confirm_related_document(
                     raise HTTPException(404, f"{doc_label} document not found")
         result = await conn.execute(
             "UPDATE related_documents SET confirmed_by = $1 WHERE source_id = $2 AND target_id = $3",
-            int(actor["sub"]), body.source_id, body.target_id,
+            int(actor["sub"]),
+            body.source_id,
+            body.target_id,
         )
         if result == "UPDATE 0":
             raise HTTPException(404, "relation not found")
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'confirm_related_docs', 'related_documents', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), body.source_id,
+            int(actor["sub"]),
+            body.source_id,
             json.dumps({"source_id": body.source_id, "target_id": body.target_id}),
             actor.get("organization_id"),
         )
@@ -1201,15 +1287,16 @@ async def get_graph_vocabulary(
     pool = await get_pool()
     async with pool.acquire() as conn:
         await _check_admin_op(conn, actor, "graph_vocabulary")
-        entities = await conn.fetch(
-            "SELECT name, entity_type FROM entity_dictionary ORDER BY entity_type, name"
-        )
+        entities = await conn.fetch("SELECT name, entity_type FROM entity_dictionary ORDER BY entity_type, name")
         predicates = await conn.fetch(
             "SELECT name, COALESCE(description, '') AS description, state, cluster FROM predicates_canonical WHERE state = 'approved' ORDER BY cluster, name"
         )
     return {
         "entities": [{"name": r["name"], "type": r["entity_type"]} for r in entities],
-        "predicates": [{"name": r["name"], "description": r["description"], "state": r["state"], "cluster": r["cluster"]} for r in predicates],
+        "predicates": [
+            {"name": r["name"], "description": r["description"], "state": r["state"], "cluster": r["cluster"]}
+            for r in predicates
+        ],
         "entity_count": len(entities),
         "predicate_count": len(predicates),
     }
@@ -1218,6 +1305,7 @@ async def get_graph_vocabulary(
 # ---------------------------------------------------------------------------
 # Predicates CRUD (dashboard #44)
 # ---------------------------------------------------------------------------
+
 
 class PredicateCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
@@ -1252,17 +1340,24 @@ async def create_predicate(
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 INSERT INTO predicates_canonical (name, description, cluster, state, ontology_layer)
                 VALUES ($1, $2, $3, $4, 'domain')
                 RETURNING name, description, cluster, state, domain, "symmetric", "transitive", created_at
-            """, body.name, body.description, body.cluster, body.state)
+            """,
+                body.name,
+                body.description,
+                body.cluster,
+                body.state,
+            )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"predicate '{body.name}' already exists")
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_predicate', 'predicates_canonical', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), body.name,
+            int(actor["sub"]),
+            body.name,
             json.dumps({"description": body.description, "cluster": body.cluster, "state": body.state}),
             actor.get("organization_id"),
         )
@@ -1280,11 +1375,17 @@ async def update_predicate(
     params: list = [name]
     i = 2
     if body.description is not None:
-        sets.append(f"description = ${i}"); params.append(body.description); i += 1
+        sets.append(f"description = ${i}")
+        params.append(body.description)
+        i += 1
     if body.cluster is not None:
-        sets.append(f"cluster = ${i}"); params.append(body.cluster); i += 1
+        sets.append(f"cluster = ${i}")
+        params.append(body.cluster)
+        i += 1
     if body.state is not None:
-        sets.append(f"state = ${i}"); params.append(body.state); i += 1
+        sets.append(f"state = ${i}")
+        params.append(body.state)
+        i += 1
         if body.state in ("deprecated", "archived", "forbidden"):
             sets.append("deprecated_since = now()")
     if not sets:
@@ -1294,7 +1395,7 @@ async def update_predicate(
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            f"""UPDATE predicates_canonical SET {', '.join(sets)}
+            f"""UPDATE predicates_canonical SET {", ".join(sets)}
             WHERE name = $1
             RETURNING name, description, cluster, state, domain, "symmetric", "transitive", created_at""",
             *params,
@@ -1304,7 +1405,8 @@ async def update_predicate(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_predicate', 'predicates_canonical', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), name,
+            int(actor["sub"]),
+            name,
             json.dumps({"fields_updated": [s.split(" = ")[0] for s in sets if " = " in s]}),
             actor.get("organization_id"),
         )
@@ -1323,7 +1425,9 @@ async def delete_predicate(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'delete_predicate', 'predicates_canonical', $2, NULL, $3)""",
-            int(actor["sub"]), name, actor.get("organization_id"),
+            int(actor["sub"]),
+            name,
+            actor.get("organization_id"),
         )
 
 

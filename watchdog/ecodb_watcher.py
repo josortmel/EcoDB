@@ -6,6 +6,7 @@ Runs on host via Task Scheduler or manual start.
 State format: {filepath: {hash: str, document_id: str | null}}
 Storing document_id in state avoids URI-lookup on delete.
 """
+
 import hashlib
 import json
 import logging
@@ -31,17 +32,31 @@ PROJECT_ID = int(os.environ.get("ECODB_DEFAULT_PROJECT_ID", "1"))
 STATE_FILE = os.environ.get("ECODB_WATCHER_STATE", "watcher_state.json")
 
 EXCLUDE_PATTERNS = {
-    "node_modules", ".git", "__pycache__", ".env",
-    ".tmp", ".lock", ".obsidian",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".env",
+    ".tmp",
+    ".lock",
+    ".obsidian",
 }
 
 _EXT_TO_DOCTYPE = {
-    ".pdf": "pdf", ".docx": "docx", ".doc": "docx",
-    ".html": "html", ".htm": "html",
-    ".md": "md", ".markdown": "markdown",
-    ".txt": "txt", ".text": "txt",
-    ".mp3": "audio", ".wav": "audio", ".m4a": "audio",
-    ".ogg": "audio", ".flac": "audio", ".mp4": "audio",
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".doc": "docx",
+    ".html": "html",
+    ".htm": "html",
+    ".md": "md",
+    ".markdown": "markdown",
+    ".txt": "txt",
+    ".text": "txt",
+    ".mp3": "audio",
+    ".wav": "audio",
+    ".m4a": "audio",
+    ".ogg": "audio",
+    ".flac": "audio",
+    ".mp4": "audio",
 }
 
 _token: str | None = None

@@ -1,4 +1,5 @@
 """Tests integración — GET/PUT /users/me/preferences."""
+
 import asyncio
 import os
 import sys
@@ -9,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -58,9 +60,13 @@ def super_jwt(client):
         try:
             # Borrar prefs de pytest users (user_id=1 testea sus prefs).
             await conn.execute("DELETE FROM user_preferences WHERE user_id = 1")
-            await conn.execute("DELETE FROM user_preferences WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-users-%')")
+            await conn.execute(
+                "DELETE FROM user_preferences WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-users-%')"
+            )
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-users-%'")
-            await conn.execute("DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-users-%')")
+            await conn.execute(
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-users-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-users-%'")
         finally:
             await conn.close()
@@ -74,12 +80,11 @@ def super_jwt(client):
 @pytest.fixture(scope="module")
 def other_user_setup(client):
     """User secundario para verificar isolation entre users."""
+
     async def _create():
         conn = await _aconn()
         try:
-            u = await conn.fetchrow(
-                "INSERT INTO users (name, active) VALUES ('pytest-users-other', true) RETURNING id"
-            )
+            u = await conn.fetchrow("INSERT INTO users (name, active) VALUES ('pytest-users-other', true) RETURNING id")
             await conn.execute(
                 "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, 'pytest-users-other@local', true)",
                 u["id"],
@@ -87,7 +92,8 @@ def other_user_setup(client):
             key_plain, key_hash = generate_api_key()
             await conn.execute(
                 "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-users-other-key', $2, true)",
-                key_hash, u["id"],
+                key_hash,
+                u["id"],
             )
             return u["id"], key_plain
         finally:
@@ -106,8 +112,10 @@ def auth(jwt):
 # GET /users/me/preferences
 # ===========================================================================
 
+
 def test_get_preferences_no_row_returns_empty(client, super_jwt):
     """Si no hay row, devuelve prefs={} sin crear row (lazy)."""
+
     # Asegurar que NO hay row.
     async def _wipe():
         conn = await _aconn()
@@ -115,6 +123,7 @@ def test_get_preferences_no_row_returns_empty(client, super_jwt):
             await conn.execute("DELETE FROM user_preferences WHERE user_id = 1")
         finally:
             await conn.close()
+
     _run(_wipe())
 
     r = client.get("/users/me/preferences", headers=auth(super_jwt))
@@ -131,6 +140,7 @@ def test_get_preferences_no_row_returns_empty(client, super_jwt):
             return await conn.fetchval("SELECT count(*) FROM user_preferences WHERE user_id = 1")
         finally:
             await conn.close()
+
     assert _run(_count()) == 0
 
 
@@ -138,8 +148,10 @@ def test_get_preferences_no_row_returns_empty(client, super_jwt):
 # PUT /users/me/preferences
 # ===========================================================================
 
+
 def test_put_preferences_creates_row_first_time(client, super_jwt):
     """PUT inicial crea la row (upsert). GET posterior la devuelve."""
+
     # Wipe.
     async def _wipe():
         conn = await _aconn()
@@ -147,6 +159,7 @@ def test_put_preferences_creates_row_first_time(client, super_jwt):
             await conn.execute("DELETE FROM user_preferences WHERE user_id = 1")
         finally:
             await conn.close()
+
     _run(_wipe())
 
     payload = {"prefs": {"theme": "dark", "lang": "es"}}
@@ -164,7 +177,9 @@ def test_put_preferences_creates_row_first_time(client, super_jwt):
 
 def test_put_preferences_replaces_completely(client, super_jwt):
     """PUT NO es PATCH parcial. Replace completo del JSONB."""
-    client.put("/users/me/preferences", headers=auth(super_jwt), json={"prefs": {"theme": "light", "lang": "en", "extra": 1}})
+    client.put(
+        "/users/me/preferences", headers=auth(super_jwt), json={"prefs": {"theme": "light", "lang": "en", "extra": 1}}
+    )
     r = client.put("/users/me/preferences", headers=auth(super_jwt), json={"prefs": {"theme": "dark"}})
     assert r.status_code == 200
     assert r.json()["prefs"] == {"theme": "dark"}
@@ -199,6 +214,7 @@ def test_put_preferences_arbitrary_keys_accepted(client, super_jwt):
 # Isolation entre users
 # ===========================================================================
 
+
 def test_users_have_isolated_preferences(client, super_jwt, other_user_setup):
     """User A guarda prefs, User B GET las suyas → no ve las de A."""
     # User A (super) saves.
@@ -214,6 +230,7 @@ def test_users_have_isolated_preferences(client, super_jwt, other_user_setup):
 # ===========================================================================
 # Auth required
 # ===========================================================================
+
 
 def test_get_preferences_without_auth_returns_401(client):
     r = client.get("/users/me/preferences")

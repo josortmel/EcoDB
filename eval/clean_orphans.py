@@ -1,7 +1,8 @@
 import asyncio, asyncpg, os
 
+
 async def clean():
-    pool = await asyncpg.create_pool(os.environ['DATABASE_URL'])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     async with pool.acquire() as conn:
         before = await conn.fetchval("SELECT count(*) FROM memory_entity_links")
 
@@ -24,5 +25,6 @@ async def clean():
         print(f"Orphans deleted: {orphans}")
         print(f"AFTER: {after}")
     await pool.close()
+
 
 asyncio.run(clean())

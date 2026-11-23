@@ -41,6 +41,7 @@ Deuda registrada para fork comercial:
   estaba en que team) -- no aplicable single-tenant mode.
 - Permisos team management para CEO de la org en multi-tenant fork.
 """
+
 from __future__ import annotations
 
 import json
@@ -64,6 +65,7 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class TeamCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -100,6 +102,7 @@ class TeamResourceAdd(BaseModel):
 class TeamMemberLink(BaseModel):
     """Respuesta de POST/DELETE /teams/{id}/members. response_model
     tipado en lugar de dict (consistencia con resto del API)."""
+
     team_id: int
     user_id: int
 
@@ -132,6 +135,7 @@ class TeamListResponse(BaseModel):
 # Endpoints -- gestion de teams (super only)
 # ---------------------------------------------------------------------------
 
+
 @router.post("", response_model=TeamResponse, status_code=201)
 async def create_team(
     body: TeamCreate,
@@ -153,7 +157,8 @@ async def create_team(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_team', 'team', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"name": body.name}),
             actor.get("organization_id"),
         )
@@ -172,9 +177,7 @@ async def list_teams(actor: dict = Depends(get_current_user)) -> TeamListRespons
 
     async with pool.acquire() as conn:
         if actor.get("is_super"):
-            rows = await conn.fetch(
-                "SELECT id, name, created_at FROM teams ORDER BY id"
-            )
+            rows = await conn.fetch("SELECT id, name, created_at FROM teams ORDER BY id")
         else:
             rows = await conn.fetch(
                 """
@@ -215,7 +218,9 @@ async def get_team(
                    )
               )
             """,
-            team_id, is_super, user_id,
+            team_id,
+            is_super,
+            user_id,
         )
         if row is None:
             raise HTTPException(403, "no access to this team")
@@ -254,7 +259,8 @@ async def update_team(
                 WHERE id = $1
                 RETURNING id, name, created_at
                 """,
-                team_id, body.name,
+                team_id,
+                body.name,
             )
         except UniqueViolationError:
             raise HTTPException(409, "team with this name already exists")
@@ -263,7 +269,8 @@ async def update_team(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_team', 'team', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(team_id),
+            int(actor["sub"]),
+            str(team_id),
             json.dumps({"name": body.name}),
             actor.get("organization_id"),
         )
@@ -282,9 +289,7 @@ async def delete_team(
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, name, created_at FROM teams WHERE id = $1", team_id
-        )
+        row = await conn.fetchrow("SELECT id, name, created_at FROM teams WHERE id = $1", team_id)
         if row is None:
             raise HTTPException(403, "no access to this team")
 
@@ -294,8 +299,10 @@ async def delete_team(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'delete', 'team', $2, $3::jsonb, $4)
                 """,
-                int(actor["sub"]), str(team_id),
-                json.dumps({"name": row["name"]}), actor.get("organization_id"),
+                int(actor["sub"]),
+                str(team_id),
+                json.dumps({"name": row["name"]}),
+                actor.get("organization_id"),
             )
             await conn.execute("DELETE FROM teams WHERE id = $1", team_id)
 
@@ -303,6 +310,7 @@ async def delete_team(
 # ---------------------------------------------------------------------------
 # Endpoints -- gestion de team_members (super only)
 # ---------------------------------------------------------------------------
+
 
 @router.post("/{team_id}/members", response_model=TeamMemberLink, status_code=201)
 async def add_team_member(
@@ -332,15 +340,18 @@ async def add_team_member(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'add_member', 'team', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), str(team_id),
-                    json.dumps({"user_id": body.user_id}), actor.get("organization_id"),
+                    int(actor["sub"]),
+                    str(team_id),
+                    json.dumps({"user_id": body.user_id}),
+                    actor.get("organization_id"),
                 )
                 await conn.execute(
                     """
                     INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)
                     ON CONFLICT (team_id, user_id) DO NOTHING
                     """,
-                    team_id, body.user_id,
+                    team_id,
+                    body.user_id,
                 )
         except ForeignKeyViolationError:
             raise HTTPException(422, "user does not exist")
@@ -369,18 +380,22 @@ async def remove_team_member(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'remove_member', 'team', $2, $3::jsonb, $4)
                 """,
-                int(actor["sub"]), str(team_id),
-                json.dumps({"user_id": user_id}), actor.get("organization_id"),
+                int(actor["sub"]),
+                str(team_id),
+                json.dumps({"user_id": user_id}),
+                actor.get("organization_id"),
             )
             await conn.execute(
                 "DELETE FROM team_members WHERE team_id = $1 AND user_id = $2",
-                team_id, user_id,
+                team_id,
+                user_id,
             )
 
 
 # ---------------------------------------------------------------------------
 # Endpoints -- gestion de team_resources (super only)
 # ---------------------------------------------------------------------------
+
 
 @router.post("/{team_id}/resources", response_model=TeamResourceLink, status_code=201)
 async def add_team_resource(
@@ -408,15 +423,18 @@ async def add_team_resource(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'add_resource', 'team', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), str(team_id),
-                    json.dumps({"project_id": body.project_id}), actor.get("organization_id"),
+                    int(actor["sub"]),
+                    str(team_id),
+                    json.dumps({"project_id": body.project_id}),
+                    actor.get("organization_id"),
                 )
                 await conn.execute(
                     """
                     INSERT INTO team_resources (team_id, project_id) VALUES ($1, $2)
                     ON CONFLICT (team_id, project_id) DO NOTHING
                     """,
-                    team_id, body.project_id,
+                    team_id,
+                    body.project_id,
                 )
         except ForeignKeyViolationError:
             raise HTTPException(422, "project does not exist")
@@ -444,10 +462,13 @@ async def remove_team_resource(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'remove_resource', 'team', $2, $3::jsonb, $4)
                 """,
-                int(actor["sub"]), str(team_id),
-                json.dumps({"project_id": project_id}), actor.get("organization_id"),
+                int(actor["sub"]),
+                str(team_id),
+                json.dumps({"project_id": project_id}),
+                actor.get("organization_id"),
             )
             await conn.execute(
                 "DELETE FROM team_resources WHERE team_id = $1 AND project_id = $2",
-                team_id, project_id,
+                team_id,
+                project_id,
             )

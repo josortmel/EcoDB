@@ -3,6 +3,7 @@
 Cubre el endpoint de redistribución: validaciones de target, dry_run, atomic
 UPDATE+audit, filtros (agent_identifier, type), 422 cuando filter==target.
 """
+
 import asyncio
 import json
 import os
@@ -14,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -73,11 +75,15 @@ def super_jwt(client):
                 "DELETE FROM memories WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'pytest-admin-%')"
             )
             await conn.execute("DELETE FROM memories WHERE content LIKE 'pytest-admin-%'")
-            await conn.execute("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-admin-%')")
+            await conn.execute(
+                "DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-admin-%')"
+            )
             await conn.execute("DELETE FROM projects WHERE name LIKE 'pytest-admin-%'")
             await conn.execute("DELETE FROM workspaces WHERE name LIKE 'pytest-admin-%'")
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-admin-%'")
-            await conn.execute("DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-admin-%')")
+            await conn.execute(
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-admin-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-admin-%'")
         finally:
             await conn.close()
@@ -95,7 +101,8 @@ def world(client, super_jwt):
     Devuelve dict con IDs y count para tests de redistribución."""
     # Crear ws_origen.
     r1 = client.post(
-        "/workspaces", headers={"Authorization": f"Bearer {super_jwt}"},
+        "/workspaces",
+        headers={"Authorization": f"Bearer {super_jwt}"},
         json={"name": "pytest-admin-ws-origen"},
     )
     ws_origen = r1.json()["id"]
@@ -109,7 +116,8 @@ def world(client, super_jwt):
 
     # Crear ws_destino + project no-común.
     r3 = client.post(
-        "/workspaces", headers={"Authorization": f"Bearer {super_jwt}"},
+        "/workspaces",
+        headers={"Authorization": f"Bearer {super_jwt}"},
         json={"name": "pytest-admin-ws-destino"},
     )
     ws_destino = r3.json()["id"]
@@ -124,7 +132,8 @@ def world(client, super_jwt):
     headers = {"Authorization": f"Bearer {super_jwt}"}
     for i, mtype in enumerate(["tecnico", "tecnico", "decision"]):
         r = client.post(
-            "/memories", headers=headers,
+            "/memories",
+            headers=headers,
             json={
                 "type": mtype,
                 "content": f"pytest-admin-content-{i}-{mtype}",
@@ -136,8 +145,10 @@ def world(client, super_jwt):
         assert r.status_code == 201
 
     return {
-        "ws_origen": ws_origen, "proj_origen": proj_origen,
-        "ws_destino": ws_destino, "proj_destino": proj_destino,
+        "ws_origen": ws_origen,
+        "proj_origen": proj_origen,
+        "ws_destino": ws_destino,
+        "proj_destino": proj_destino,
     }
 
 
@@ -148,6 +159,7 @@ def auth(jwt):
 # ===========================================================================
 # Validaciones de body
 # ===========================================================================
+
 
 def test_redistribute_extra_field_returns_422(client, super_jwt, world):
     r = client.post(
@@ -207,7 +219,8 @@ def test_redistribute_filter_unknown_agent_returns_422(client, super_jwt, world)
         headers=auth(super_jwt),
         json={
             "filter": {
-                "workspace_id": world["ws_origen"], "project_id": world["proj_origen"],
+                "workspace_id": world["ws_origen"],
+                "project_id": world["proj_origen"],
                 "agent_identifier": "NoExisto",
             },
             "target": {"workspace_id": world["ws_destino"], "project_id": world["proj_destino"]},
@@ -220,8 +233,10 @@ def test_redistribute_filter_unknown_agent_returns_422(client, super_jwt, world)
 # Permisos
 # ===========================================================================
 
+
 def test_redistribute_non_super_returns_403(client, world):
     """Crear user simple non-super → POST → 403."""
+
     async def _make_user():
         conn = await _aconn()
         try:
@@ -235,7 +250,8 @@ def test_redistribute_non_super_returns_403(client, world):
             key_plain, key_hash = generate_api_key()
             await conn.execute(
                 "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-admin-non-super-key', $2, true)",
-                key_hash, u["id"],
+                key_hash,
+                u["id"],
             )
             return key_plain
         finally:
@@ -257,6 +273,7 @@ def test_redistribute_non_super_returns_403(client, world):
 # ===========================================================================
 # Funcionalidad
 # ===========================================================================
+
 
 def test_redistribute_dry_run_does_not_change_db(client, super_jwt, world):
     """dry_run=true: matched_count + sample, moved_count=0, audit_id=null,
@@ -284,7 +301,8 @@ def test_redistribute_dry_run_does_not_change_db(client, super_jwt, world):
         try:
             return await conn.fetchval(
                 "SELECT count(*) FROM memories WHERE workspace_id = $1 AND project_id = $2",
-                world["ws_origen"], world["proj_origen"],
+                world["ws_origen"],
+                world["proj_origen"],
             )
         finally:
             await conn.close()
@@ -300,7 +318,8 @@ def test_redistribute_with_type_filter_moves_only_matching(client, super_jwt, wo
         headers=auth(super_jwt),
         json={
             "filter": {
-                "workspace_id": world["ws_origen"], "project_id": world["proj_origen"],
+                "workspace_id": world["ws_origen"],
+                "project_id": world["proj_origen"],
                 "type": "decision",
             },
             "target": {"workspace_id": world["ws_destino"], "project_id": world["proj_destino"]},
@@ -318,11 +337,13 @@ def test_redistribute_with_type_filter_moves_only_matching(client, super_jwt, wo
         try:
             decision_target = await conn.fetchval(
                 "SELECT count(*) FROM memories WHERE workspace_id = $1 AND project_id = $2 AND type = 'decision'",
-                world["ws_destino"], world["proj_destino"],
+                world["ws_destino"],
+                world["proj_destino"],
             )
             tecnico_source = await conn.fetchval(
                 "SELECT count(*) FROM memories WHERE workspace_id = $1 AND project_id = $2 AND type = 'tecnico'",
-                world["ws_origen"], world["proj_origen"],
+                world["ws_origen"],
+                world["proj_origen"],
             )
             return decision_target, tecnico_source
         finally:
@@ -337,7 +358,8 @@ def test_redistribute_writes_audit_log(client, super_jwt, world):
     """Verificar audit_log batch row con resource_id=UUID + filter + target + count."""
     # Crear memoria nueva en source para tener algo concreto que mover.
     r0 = client.post(
-        "/memories", headers=auth(super_jwt),
+        "/memories",
+        headers=auth(super_jwt),
         json={
             "type": "observacion",
             "content": "pytest-admin-audit-marker",
@@ -353,7 +375,8 @@ def test_redistribute_writes_audit_log(client, super_jwt, world):
         headers=auth(super_jwt),
         json={
             "filter": {
-                "workspace_id": world["ws_origen"], "project_id": world["proj_origen"],
+                "workspace_id": world["ws_origen"],
+                "project_id": world["proj_origen"],
                 "type": "observacion",
             },
             "target": {"workspace_id": world["ws_destino"], "project_id": world["proj_destino"]},
@@ -391,7 +414,8 @@ def test_redistribute_with_agent_identifier_filter(client, super_jwt, world):
     """Filter by agent_identifier: moves only memories of the specified agent."""
     # Crear 1 memoria con agent_identifier='SIN_AUTOR' en source.
     r0 = client.post(
-        "/memories", headers=auth(super_jwt),
+        "/memories",
+        headers=auth(super_jwt),
         json={
             "type": "tecnico",
             "content": "pytest-admin-sinautor-agent-content",
@@ -408,7 +432,8 @@ def test_redistribute_with_agent_identifier_filter(client, super_jwt, world):
         headers=auth(super_jwt),
         json={
             "filter": {
-                "workspace_id": world["ws_origen"], "project_id": world["proj_origen"],
+                "workspace_id": world["ws_origen"],
+                "project_id": world["proj_origen"],
                 "agent_identifier": "SIN_AUTOR",
             },
             "target": {"workspace_id": world["ws_destino"], "project_id": world["proj_destino"]},
@@ -425,7 +450,8 @@ def test_redistribute_with_combined_filter_agent_and_type(client, super_jwt, wor
     """SOFT gap adv-code: combined filter agent+type."""
     # Memoria 'tecnico' de SIN_AUTOR.
     r0 = client.post(
-        "/memories", headers=auth(super_jwt),
+        "/memories",
+        headers=auth(super_jwt),
         json={
             "type": "tecnico",
             "content": "pytest-admin-combo-sin-autor",
@@ -438,7 +464,8 @@ def test_redistribute_with_combined_filter_agent_and_type(client, super_jwt, wor
     assert r0.status_code == 201
     # Memoria 'decision' de SIN_AUTOR (no debería moverse).
     r1 = client.post(
-        "/memories", headers=auth(super_jwt),
+        "/memories",
+        headers=auth(super_jwt),
         json={
             "type": "decision",
             "content": "pytest-admin-combo-sin-autor-decision",
@@ -455,7 +482,8 @@ def test_redistribute_with_combined_filter_agent_and_type(client, super_jwt, wor
         headers=auth(super_jwt),
         json={
             "filter": {
-                "workspace_id": world["ws_origen"], "project_id": world["proj_origen"],
+                "workspace_id": world["ws_origen"],
+                "project_id": world["proj_origen"],
                 "agent_identifier": "SIN_AUTOR",
                 "type": "tecnico",
             },
@@ -465,6 +493,7 @@ def test_redistribute_with_combined_filter_agent_and_type(client, super_jwt, wor
     assert r.status_code == 200
     body = r.json()
     assert body["matched_count"] >= 1
+
     # La 'decision' de SIN_AUTOR sigue en source.
     async def _check_decision_in_source():
         conn = await _aconn()
@@ -476,7 +505,8 @@ def test_redistribute_with_combined_filter_agent_and_type(client, super_jwt, wor
                 WHERE m.workspace_id = $1 AND m.project_id = $2
                   AND a.identifier = 'SIN_AUTOR' AND m.type = 'decision'
                 """,
-                world["ws_origen"], world["proj_origen"],
+                world["ws_origen"],
+                world["proj_origen"],
             )
         finally:
             await conn.close()
@@ -491,7 +521,8 @@ def test_redistribute_no_match_audit_logs_zero(client, super_jwt, world):
         headers=auth(super_jwt),
         json={
             "filter": {
-                "workspace_id": 999999, "project_id": 999999,  # no existe
+                "workspace_id": 999999,
+                "project_id": 999999,  # no existe
             },
             "target": {"workspace_id": world["ws_destino"], "project_id": world["proj_destino"]},
         },
