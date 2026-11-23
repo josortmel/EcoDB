@@ -92,7 +92,7 @@ jobs:
           TEST_DB_PORT: "5436"
           TEST_API_URL: http://127.0.0.1:1
           # What runs today; if tests are removed on purpose, lower it in the same PR.
-          MIN_TESTS: "705"
+          MIN_TESTS: "708"
           OUT: test-results
         run: bash scripts/ci/tests_api.sh
 

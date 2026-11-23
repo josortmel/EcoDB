@@ -136,7 +136,10 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       RATE_LIMIT_SEARCH: "200"
       RATE_LIMIT_DEFAULT: "400"
-      EXPAND_GRAPH: ${EXPAND_GRAPH:-1}             # #1144: 0 apaga el grafo entero en la búsqueda
+      # #1160: el grafo va APAGADO por defecto en la búsqueda: medido en nuestra vara v5 (51 consultas, nuestras
+      # memorias), sin pérdida de calidad y con la mitad de tiempo (mediana 6.677 → 3.024 ms). Es un interruptor, no
+      # un borrado: EXPAND_GRAPH=1 lo enciende. Lo vigila api/tests/test_grafo_por_defecto.py.
+      EXPAND_GRAPH: ${EXPAND_GRAPH:-0}             # #1144: 0 apaga el grafo entero en la búsqueda
       EXPAND_GRAPH_HOP2: ${EXPAND_GRAPH_HOP2:-1}   # #1144: 0 apaga el salto 2 del grafo
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
       RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
