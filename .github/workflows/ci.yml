@@ -43,6 +43,10 @@ jobs:
         if: ${{ !cancelled() && steps.lint_tools.outcome == 'success' }}
         run: ruff format --check .
 
+      - name: ruff check
+        if: ${{ !cancelled() && steps.lint_tools.outcome == 'success' }}
+        run: ruff check .
+
       # The compose file asks for these two with ${...:?}; the test database only needs them to exist. Random per
       # run, never written in the repo (the privacy pre-push refuses any password-looking value in clear).
       - name: Start the throwaway test database
