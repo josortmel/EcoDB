@@ -19,11 +19,11 @@ import asyncpg
 import httpx
 import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 from background import run_governance_cycle
+from settings import CB_COOLDOWN, CB_THRESHOLD, CB_WINDOW, EMBEDDINGS_URL
 
 log = logging.getLogger("ecodb.worker")
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-from settings import EMBEDDINGS_URL
 
 API_URL = os.environ.get("ECODB_API_INTERNAL_URL", "http://ecodb-api:8080")
 MEDIA_STORE_DIR = os.environ.get("MEDIA_STORE_DIR", "/app/media")
@@ -54,8 +54,7 @@ EMBED_TIMEOUT = int(os.environ.get("EMBED_TIMEOUT", "120"))
 GLINER_TIMEOUT = int(os.environ.get("GLINER_TIMEOUT", "60"))
 WHISPER_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "1800"))
 
-# Circuit breaker for embeddings
-from settings import CB_COOLDOWN, CB_THRESHOLD, CB_WINDOW
+# Circuit breaker for embeddings: CB_COOLDOWN, CB_THRESHOLD and CB_WINDOW come from settings (imported above).
 
 _cb_failures: list[float] = []
 _cb_open_until: float = 0.0

@@ -45,10 +45,10 @@ from typing import Any, Optional
 from urllib.parse import quote, urlparse
 
 import httpx
+from mcp.server.fastmcp import FastMCP, Image
 
 _URL_SCHEME_RE = _re.compile(r"^(https?|ftp|file|rtsp|rtmp)://", _re.IGNORECASE)
 _UUID_RE = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", _re.I)
-from mcp.server.fastmcp import FastMCP, Image
 
 # #492 (Prima, 13-oct; el mismo fallo que el #339 de FarOS): FastMCP valida los argumentos de cada
 # tool con un modelo pydantic que IGNORA lo que sobra: read_memory(memory_id=…, campo_inventado=…)

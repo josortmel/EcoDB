@@ -25,7 +25,8 @@ async def clean():
 
         after = await conn.fetchval("SELECT count(*) FROM memory_entity_links")
         print(f"BEFORE: {before}")
-        print(f"Orphans deleted: {orphans}")
+        # #1362 (F841): what the DELETE really removed ("DELETE n"), not the count taken before it.
+        print(f"Orphans deleted: {int(result.split()[-1])} (counted before: {orphans})")
         print(f"AFTER: {after}")
     await pool.close()
 

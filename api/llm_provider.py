@@ -25,7 +25,7 @@ class LLMProvider(ABC):
     @abstractmethod
     async def available(self) -> bool: ...
 
-    async def aclose(self) -> None:
+    async def aclose(self) -> None:  # noqa: B027 — default no-op on purpose: providers without a client keep it
         pass
 
 

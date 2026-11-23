@@ -55,7 +55,7 @@ def load_conversation_sessions(client: httpx.Client, conv: dict, ws_id: int, pro
     )
 
     mapping = {}
-    for i, sk in enumerate(session_keys):
+    for sk in session_keys:
         turns = c[sk]
         text = "\n".join(f"{t['speaker']}: {t['text']}" for t in turns)
         date = c.get(f"{sk}_date_time", "")
