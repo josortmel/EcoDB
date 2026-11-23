@@ -5,6 +5,7 @@ Los tests de cascada full ya están en test_workspaces.py + test_projects.py +
 test_memories.py — aquí enfocamos en helpers individuales para que un fallo
 puntual se localice rápido sin tener que correr la matriz entera.
 """
+
 import asyncio
 import os
 import sys
@@ -14,6 +15,7 @@ import asyncpg
 import pytest
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -39,6 +41,7 @@ def _run(coro):
 # ===========================================================================
 # Validation helpers (síncronos, sin DB)
 # ===========================================================================
+
 
 def test_no_null_bytes_passes_clean_string():
     assert no_null_bytes("foo bar", "name") == "foo bar"
@@ -76,6 +79,7 @@ def test_validate_name_strip_blank_field_name_in_error():
 # ===========================================================================
 # Workspace permissions (síncronos)
 # ===========================================================================
+
 
 def test_super_can_create_any_workspace():
     actor = {"is_super": True, "is_ceo": False, "organization_id": None, "lead_workspaces": [], "sub": "1"}
@@ -161,6 +165,7 @@ def test_ceo_can_delete_own_org_workspace():
 # Project permissions (síncronos)
 # ===========================================================================
 
+
 def test_super_can_modify_any_project():
     actor = {"is_super": True, "lead_workspaces": []}
     proj = {"id": 1, "workspace_id": 10, "ws_organization_id": 5}
@@ -210,6 +215,7 @@ def test_worker_cannot_delete_project():
 # Async helpers — DB integration
 # ===========================================================================
 
+
 @pytest.fixture
 def super_actor():
     return {"is_super": True, "is_ceo": False, "organization_id": None, "lead_workspaces": [], "sub": "1"}
@@ -244,8 +250,11 @@ def test_visible_project_ids_super_returns_all(super_actor):
 def test_visible_workspace_ids_unknown_user_empty():
     """User que no es super, ni CEO, ni lead, sin project_members → set vacío."""
     actor = {
-        "is_super": False, "is_ceo": False, "organization_id": None,
-        "lead_workspaces": [], "sub": "999999",
+        "is_super": False,
+        "is_ceo": False,
+        "organization_id": None,
+        "lead_workspaces": [],
+        "sub": "999999",
     }
 
     async def run():
@@ -260,8 +269,11 @@ def test_visible_workspace_ids_unknown_user_empty():
 
 def test_visible_project_ids_unknown_user_empty():
     actor = {
-        "is_super": False, "is_ceo": False, "organization_id": None,
-        "lead_workspaces": [], "sub": "999999",
+        "is_super": False,
+        "is_ceo": False,
+        "organization_id": None,
+        "lead_workspaces": [],
+        "sub": "999999",
     }
 
     async def run():
@@ -276,6 +288,7 @@ def test_visible_project_ids_unknown_user_empty():
 
 def test_user_can_create_project_in_ws_super_in_known_workspace(super_actor):
     """Super en workspace_id=1 (default) → True."""
+
     async def run():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
         try:
@@ -288,6 +301,7 @@ def test_user_can_create_project_in_ws_super_in_known_workspace(super_actor):
 
 def test_user_can_create_project_in_ws_super_in_unknown_workspace(super_actor):
     """Super en workspace inexistente: True (super es authoritative; FK fallará al INSERT)."""
+
     async def run():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
         try:
@@ -300,8 +314,11 @@ def test_user_can_create_project_in_ws_super_in_unknown_workspace(super_actor):
 
 def test_user_can_create_project_in_ws_worker_no_access():
     actor = {
-        "is_super": False, "is_ceo": False, "organization_id": None,
-        "lead_workspaces": [], "sub": "999999",
+        "is_super": False,
+        "is_ceo": False,
+        "organization_id": None,
+        "lead_workspaces": [],
+        "sub": "999999",
     }
 
     async def run():

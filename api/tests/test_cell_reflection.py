@@ -1,6 +1,7 @@
 """#393 (2): el cluster semanal «Arcos y puntos ciegos» tomaba como miembros las 2 memorias de más peso de TODA
 la vida del agente (ORDER BY weight DESC LIMIT 2 sin ventana), así que cada semana colgaban de él las mismas
 memorias de abril. Los miembros tienen que ser memorias de la propia semana."""
+
 import os
 import sys
 from datetime import datetime, timezone

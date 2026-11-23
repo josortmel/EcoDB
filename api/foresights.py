@@ -1,4 +1,5 @@
 """Foresights endpoint — metacognicion v2.0 §7.5."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -41,9 +42,11 @@ async def list_foresights(
     async with pool.acquire() as conn:
         agent = await resolve_agent_for_actor(conn, actor, agent_identifier)
         if status == "active":
-            where_extra = ("AND foresight_end > NOW() "
-                          "AND (metadata->>'foresight_dismissed' IS NULL "
-                          "OR metadata->>'foresight_dismissed' != 'true')")
+            where_extra = (
+                "AND foresight_end > NOW() "
+                "AND (metadata->>'foresight_dismissed' IS NULL "
+                "OR metadata->>'foresight_dismissed' != 'true')"
+            )
         elif status == "expired":
             where_extra = "AND foresight_end <= NOW()"
         else:  # dismissed
@@ -55,7 +58,8 @@ async def list_foresights(
         params: list = [agent["id"]]
         total = await conn.fetchval(
             f"SELECT COUNT(*) FROM memories WHERE agent_id = $1 AND foresight_start IS NOT NULL {where_extra}",
-            agent["id"])
+            agent["id"],
+        )
         items, next_cursor = await paginate(conn, base_sql, params, limit, cursor)
         vis = await precompute_read_visibility(conn, actor)
         visible = [_to_foresight_item(r, now) for r in items if check_read_memory(vis, r)]

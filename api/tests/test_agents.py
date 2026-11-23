@@ -9,6 +9,7 @@ Covers:
 SAFETY: Tests never touch real agents. Fixtures create and clean up a dedicated
 ephemeral test agent (`pytest-agent-3-0e` linked to user_id=1).
 """
+
 import asyncio
 import os
 import sys
@@ -19,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -36,6 +38,7 @@ TEST_AGENT_IDENTIFIER = "pytest-agent-3-0e"
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def app():
@@ -62,6 +65,7 @@ def test_agent_id():
 
     SAFETY: this is the only agent tests can touch; only ephemeral pytest-* agents should be created and cleaned up by tests.
     """
+
     async def _create():
         conn = await _aconn()
         try:
@@ -88,7 +92,8 @@ def test_agent_id():
             )
             await conn.execute(
                 "DELETE FROM agents WHERE id = $1 AND identifier = $2",
-                agent_id, TEST_AGENT_IDENTIFIER,
+                agent_id,
+                TEST_AGENT_IDENTIFIER,
             )
         finally:
             await conn.close()
@@ -121,12 +126,10 @@ def super_jwt(client):
         try:
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-agents-%'")
             await conn.execute(
-                "DELETE FROM audit_log WHERE user_id IN "
-                "(SELECT id FROM users WHERE name LIKE 'pytest-agents-%')"
+                "DELETE FROM audit_log WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-agents-%')"
             )
             await conn.execute(
-                "DELETE FROM user_emails WHERE user_id IN "
-                "(SELECT id FROM users WHERE name LIKE 'pytest-agents-%')"
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-agents-%')"
             )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-agents-%'")
         finally:
@@ -157,20 +160,20 @@ def owner_setup(client):
             )
             user_id = user_row["id"]
             await conn.execute(
-                "INSERT INTO user_emails (user_id, email, is_primary) "
-                "VALUES ($1, 'pytest-agents-owner@test', true)",
+                "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, 'pytest-agents-owner@test', true)",
                 user_id,
             )
             await conn.execute(
-                "INSERT INTO api_keys (key_hash, name, user_id, active) "
-                "VALUES ($1, 'pytest-agents-owner', $2, true)",
-                owner_key_hash, user_id,
+                "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-agents-owner', $2, true)",
+                owner_key_hash,
+                user_id,
             )
             agent_row = await conn.fetchrow(
                 "INSERT INTO agents (identifier, user_id, active) "
                 "VALUES ($1, $2, true) "
                 "ON CONFLICT (identifier) DO UPDATE SET user_id=$2, active=true RETURNING id",
-                owner_agent_id, user_id,
+                owner_agent_id,
+                user_id,
             )
             return user_id, agent_row["id"]
         finally:
@@ -207,14 +210,13 @@ def other_user_jwt(client):
             )
             user_id = user_row["id"]
             await conn.execute(
-                "INSERT INTO user_emails (user_id, email, is_primary) "
-                "VALUES ($1, 'pytest-agents-other@test', true)",
+                "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, 'pytest-agents-other@test', true)",
                 user_id,
             )
             await conn.execute(
-                "INSERT INTO api_keys (key_hash, name, user_id, active) "
-                "VALUES ($1, 'pytest-agents-other', $2, true)",
-                key_hash, user_id,
+                "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-agents-other', $2, true)",
+                key_hash,
+                user_id,
             )
             return user_id
         finally:
@@ -237,6 +239,7 @@ def _path() -> str:
 # ---------------------------------------------------------------------------
 # GET — sin fragmentos / version máxima default / ?version=N
 # ---------------------------------------------------------------------------
+
 
 def test_get_identity_empty_returns_version_0(client, super_jwt, test_agent_id):
     """Agent existe pero sin fragmentos → version=0, fragments=[]."""
@@ -301,6 +304,7 @@ def test_get_inexistent_version_returns_404(client, super_jwt):
 # Permisos — super, propio, anti-discovery
 # ---------------------------------------------------------------------------
 
+
 def test_get_inexistent_agent_returns_404(client, super_jwt):
     r = client.get("/agents/NoExisteEsteAgente/identity", headers=_h(super_jwt))
     assert r.status_code == 404
@@ -350,6 +354,7 @@ def test_other_user_post_returns_404(client, other_user_jwt, test_agent_id):
 # ---------------------------------------------------------------------------
 # Validaciones — size, null bytes, extra fields, empty
 # ---------------------------------------------------------------------------
+
 
 def test_post_fragment_too_large_422(client, super_jwt, test_agent_id):
     """Fragmento > MAX_FRAGMENT_SIZE → 422."""
@@ -404,6 +409,7 @@ def test_post_too_many_fragments_422(client, super_jwt, test_agent_id):
 # Auth — sin token
 # ---------------------------------------------------------------------------
 
+
 def test_get_without_auth_401(client):
     r = client.get(_path())
     assert r.status_code == 401
@@ -412,4 +418,3 @@ def test_get_without_auth_401(client):
 def test_post_without_auth_401(client):
     r = client.post(_path(), json={"fragments": ["test"]})
     assert r.status_code == 401
-

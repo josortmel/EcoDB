@@ -10,6 +10,7 @@ Safe: only creates 'related_to' edges, does not modify existing triples.
 Run inside ecodb-api container:
     python /app/scripts/generate_cooccurrence_triples.py [--threshold 2] [--dry-run]
 """
+
 import argparse
 import asyncio
 import json
@@ -22,8 +23,10 @@ import asyncpg
 # #488: sin valor por defecto. localhost:5432 es el Postgres NATIVO de Windows, no EcoDB,
 # y un valor por defecto que apunta a otra base es como se cuelan los accidentes.
 DATABASE_URL = os.environ.get("DATABASE_URL")
-NO_DATABASE_URL = ("DATABASE_URL no esta puesta. Desde el host: postgresql://ecodb:<clave>@127.0.0.1:5435/ecodb ; "
-                   "dentro de Docker: postgresql://ecodb:<clave>@postgres:5432/ecodb")
+NO_DATABASE_URL = (
+    "DATABASE_URL no esta puesta. Desde el host: postgresql://ecodb:<clave>@127.0.0.1:5435/ecodb ; "
+    "dentro de Docker: postgresql://ecodb:<clave>@postgres:5432/ecodb"
+)
 GRAPH_NAME = "ecodb_graph"
 PREDICATE = "related_to"
 AUTHOR = "system:cooccurrence"
@@ -35,12 +38,11 @@ async def main(threshold: int = 2, dry_run: bool = False):
     conn = await asyncpg.connect(DATABASE_URL)
 
     triples_before = await conn.fetchval("SELECT count(*) FROM triples")
-    cooc_before = await conn.fetchval(
-        "SELECT count(*) FROM triples WHERE predicate = $1", PREDICATE
-    )
+    cooc_before = await conn.fetchval("SELECT count(*) FROM triples WHERE predicate = $1", PREDICATE)
     print(f"BEFORE: {triples_before} triples total, {cooc_before} related_to")
 
-    pairs = await conn.fetch("""
+    pairs = await conn.fetch(
+        """
         SELECT mel1.entity_node_id AS entity_a,
                mel2.entity_node_id AS entity_b,
                count(*) AS co_count
@@ -53,7 +55,9 @@ async def main(threshold: int = 2, dry_run: bool = False):
         GROUP BY mel1.entity_node_id, mel2.entity_node_id
         HAVING count(*) >= $1
         ORDER BY co_count DESC
-    """, threshold)
+    """,
+        threshold,
+    )
 
     print(f"Co-occurring pairs (>={threshold} memories): {len(pairs)}")
 
@@ -83,18 +87,23 @@ async def main(threshold: int = 2, dry_run: bool = False):
                 ON CONFLICT (subject_id, predicate, object_id) DO NOTHING
                 RETURNING id
                 """,
-                p["entity_a"], PREDICATE, p["entity_b"], AUTHOR,
+                p["entity_a"],
+                PREDICATE,
+                p["entity_b"],
+                AUTHOR,
             )
             if row is None:
                 await tr.rollback()
                 skipped += 1
                 continue
 
-            params = json.dumps({
-                "sid": p["entity_a"],
-                "oid": p["entity_b"],
-                "pred": PREDICATE,
-            })
+            params = json.dumps(
+                {
+                    "sid": p["entity_a"],
+                    "oid": p["entity_b"],
+                    "pred": PREDICATE,
+                }
+            )
             await conn.execute(
                 f"""
                 SELECT * FROM cypher('{GRAPH_NAME}', $$
@@ -118,9 +127,7 @@ async def main(threshold: int = 2, dry_run: bool = False):
     elapsed = time.time() - start
 
     triples_after = await conn.fetchval("SELECT count(*) FROM triples")
-    cooc_after = await conn.fetchval(
-        "SELECT count(*) FROM triples WHERE predicate = $1", PREDICATE
-    )
+    cooc_after = await conn.fetchval("SELECT count(*) FROM triples WHERE predicate = $1", PREDICATE)
 
     print(f"\nDone in {elapsed:.1f}s")
     print(f"Created: {created}, Skipped (existing): {skipped}, AGE errors: {age_errors}")

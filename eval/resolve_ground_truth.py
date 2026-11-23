@@ -4,6 +4,7 @@
 Produces /tmp/queries_all_resolved.yaml with deterministic expected_ids
 frozen at current DB state. Run inside ecodb-api container.
 """
+
 import asyncio
 import sys
 import yaml

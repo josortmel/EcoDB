@@ -4,6 +4,7 @@ Embeddings sustituidos (todas las memorias con el mismo vector) y un agente prop
 que las candidatas sean solo las de cada test. Comprueba la cadena, las caducadas, las superadas, que
 una clave sin rol elevado solo ve lo que ya veía (y no escribe nada), y que los topes avisan sin 500.
 """
+
 import asyncio
 import os
 import sys
@@ -15,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -43,13 +45,18 @@ def _sql(q, *args):
             return await conn.fetch(q, *args)
         finally:
             await conn.close()
+
     return asyncio.run(run())
 
 
 def _token(client, user_id, nombre):
     key_plain, key_hash = generate_api_key()
-    key_id = _sql("INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true) RETURNING id",
-                  key_hash, nombre, user_id)[0]["id"]
+    key_id = _sql(
+        "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true) RETURNING id",
+        key_hash,
+        nombre,
+        user_id,
+    )[0]["id"]
     return client.post("/auth/token", json={"api_key": key_plain}).json()["access_token"], key_id
 
 
@@ -63,8 +70,10 @@ def client():
 def entorno(client):
     """Super (user 1) y un trabajador sin rol elevado, miembro del proyecto 1."""
     sufijo = uuid.uuid4().hex[:8]
-    worker = _sql("INSERT INTO users (name, is_super, is_ceo, active) VALUES ($1, false, false, true) RETURNING id",
-                  PREFIX + sufijo)[0]["id"]
+    worker = _sql(
+        "INSERT INTO users (name, is_super, is_ceo, active) VALUES ($1, false, false, true) RETURNING id",
+        PREFIX + sufijo,
+    )[0]["id"]
     _sql("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)", worker, f"{PREFIX}{sufijo}@test")
     _sql("INSERT INTO project_members (project_id, user_id) VALUES (1, $1)", worker)
     jwt_super, k1 = _token(client, 1, "pytest-decvig-super")
@@ -82,7 +91,7 @@ def entorno(client):
 def _embed(monkeypatch):
     monkeypatch.setattr(memories, "embed_text", _fake_embed)
     monkeypatch.setattr(search, "embed_text", _fake_embed)
-    monkeypatch.setattr(decisiones, "embed_text", _fake_embed)   # #1098: camino propio de candidatas
+    monkeypatch.setattr(decisiones, "embed_text", _fake_embed)  # #1098: camino propio de candidatas
 
 
 @pytest.fixture
@@ -93,16 +102,26 @@ def agente():
 
 
 def _guardar(client, jwt, agente, tipo="decision", **extra):
-    body = {"type": tipo, "content": PREFIX + uuid.uuid4().hex, "workspace_id": 1, "project_id": 1,
-            "agent_identifier": agente, "visibility": "public", **extra}
+    body = {
+        "type": tipo,
+        "content": PREFIX + uuid.uuid4().hex,
+        "workspace_id": 1,
+        "project_id": 1,
+        "agent_identifier": agente,
+        "visibility": "public",
+        **extra,
+    }
     r = client.post("/memories", headers={"Authorization": f"Bearer {jwt}"}, json=body)
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
 
 def _vigentes(client, jwt, agente, **params):
-    r = client.get(URL, headers={"Authorization": f"Bearer {jwt}"},
-                   params={"tema": "decisión de prueba", "agente": agente, **params})
+    r = client.get(
+        URL,
+        headers={"Authorization": f"Bearer {jwt}"},
+        params={"tema": "decisión de prueba", "agente": agente, **params},
+    )
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -177,6 +196,7 @@ def test_cadena_mas_larga_que_el_tope_de_saltos_avisa(client, entorno, agente, m
 
 # ---- #919, Prima 10-nov: el id de la sustituta solo sale si quien llama puede leerla, en las cuatro salidas ----
 
+
 def _par_publica_privada(client, entorno, agente):
     publica = _guardar(client, entorno["super"], agente)
     privada = _guardar(client, entorno["super"], agente, visibility="private", supersedes=[publica])
@@ -185,8 +205,11 @@ def _par_publica_privada(client, entorno, agente):
 
 def test_endpoint_no_dice_el_id_de_la_privada_ni_con_superadas(client, entorno, agente):
     publica, privada = _par_publica_privada(client, entorno, agente)
-    r = client.get(URL, headers={"Authorization": f"Bearer {entorno['worker']}"},
-                   params={"tema": "decisión de prueba", "agente": agente, "incluir_superadas": "true"})
+    r = client.get(
+        URL,
+        headers={"Authorization": f"Bearer {entorno['worker']}"},
+        params={"tema": "decisión de prueba", "agente": agente, "incluir_superadas": "true"},
+    )
     assert r.status_code == 200 and privada not in r.text
     assert r.json()["superadas"] == []
 
@@ -208,8 +231,13 @@ def test_get_memories_tapa_la_sustituta_que_no_se_puede_leer(client, entorno, ag
 
 def test_search_avisa_sin_el_id(client, entorno, agente):
     publica, privada = _par_publica_privada(client, entorno, agente)
-    body = {"query_text": "decisión de prueba", "agent_identifier": agente, "limit": 10,
-            "rerank_mode": "off", "include_documents": False}
+    body = {
+        "query_text": "decisión de prueba",
+        "agent_identifier": agente,
+        "limit": 10,
+        "rerank_mode": "off",
+        "include_documents": False,
+    }
     r = client.post("/search", headers={"Authorization": f"Bearer {entorno['worker']}"}, json=body)
     assert r.status_code == 200 and privada not in r.text
     fila = {x["id"]: x for x in r.json()["results"]}[publica]
@@ -220,17 +248,22 @@ def test_search_avisa_sin_el_id(client, entorno, agente):
 
 def test_un_put_de_metadata_no_pone_ni_quita_la_marca(client, entorno, agente):
     publica, privada = _par_publica_privada(client, entorno, agente)
-    r = client.put(f"/memories/{publica}", headers={"Authorization": f"Bearer {entorno['super']}"},
-                   json={"metadata": {"nota": "x", "superseded_by": None, "sustituta_no_legible": True}})
+    r = client.put(
+        f"/memories/{publica}",
+        headers={"Authorization": f"Bearer {entorno['super']}"},
+        json={"metadata": {"nota": "x", "superseded_by": None, "sustituta_no_legible": True}},
+    )
     assert r.status_code == 200, r.text
     guardada = _sql("SELECT metadata FROM memories WHERE id = $1", uuid.UUID(publica))[0]["metadata"]
     import json as _json
+
     guardada = _json.loads(guardada) if isinstance(guardada, str) else guardada
     assert guardada["superseded_by"] == privada and guardada["nota"] == "x"
     assert "sustituta_no_legible" not in guardada
 
 
 # #1118 (caso de Eco, c8269119 → 9fb038e2): una observación superada por una decisión.
+
 
 def test_1118_observacion_superada_por_decision_sale_en_sustituye_a_y_en_superadas(client, entorno, agente):
     obs = _guardar(client, entorno["super"], agente, tipo="observacion")
@@ -252,8 +285,11 @@ def test_1118_la_cadena_hacia_atras_pasa_por_una_decision_ya_vista(client, entor
 def test_1118_el_trabajador_no_ve_el_id_de_la_observacion_privada(client, entorno, agente):
     obs = _guardar(client, entorno["super"], agente, tipo="observacion", visibility="private")
     dec = _guardar(client, entorno["super"], agente, supersedes=[obs])
-    r = client.get(URL, headers={"Authorization": f"Bearer {entorno['worker']}"},
-                   params={"tema": "decisión de prueba", "agente": agente, "incluir_superadas": "true"})
+    r = client.get(
+        URL,
+        headers={"Authorization": f"Bearer {entorno['worker']}"},
+        params={"tema": "decisión de prueba", "agente": agente, "incluir_superadas": "true"},
+    )
     assert r.status_code == 200 and obs not in r.text
     assert [f["id"] for f in r.json()["vigentes"]] == [dec] and "sustituye_a" not in r.json()["vigentes"][0]
     assert r.json()["superadas"] == []
@@ -269,9 +305,15 @@ def test_1144_search_sin_grafo_no_pasa_por_el_grafo(client, entorno, agente, mon
     async def espia(*a, **k):
         llamadas.append(1)
         return await real(*a, **k)
+
     monkeypatch.setattr(search, "expand_by_graph", espia)
-    body = {"query_text": "decisión de prueba", "agent_identifier": agente, "limit": 10,
-            "rerank_mode": "off", "include_documents": False}
+    body = {
+        "query_text": "decisión de prueba",
+        "agent_identifier": agente,
+        "limit": 10,
+        "rerank_mode": "off",
+        "include_documents": False,
+    }
     h = {"Authorization": f"Bearer {entorno['super']}"}
     sin = client.post("/search", headers=h, json={**body, "graph": False})
     assert sin.status_code == 200 and sin.json()["results"] and llamadas == []

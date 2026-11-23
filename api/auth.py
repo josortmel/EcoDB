@@ -21,6 +21,7 @@ API key format: `ecodb_<32-bytes-base64url>` (~44 chars).
 - Pepper en env var → resistencia adicional a DB dumps.
 - API keys son secrets aleatorios largos → preimage attack ~imposible.
 """
+
 from __future__ import annotations
 
 import base64
@@ -40,6 +41,7 @@ from db import get_pool
 # ---------------------------------------------------------------------------
 # API key generation + hashing
 # ---------------------------------------------------------------------------
+
 
 def generate_api_key() -> tuple[str, str]:
     """Genera una API key nueva. Devuelve (key_plain, key_hash).
@@ -64,6 +66,7 @@ def hash_api_key(key: str) -> str:
 # ---------------------------------------------------------------------------
 # JWT
 # ---------------------------------------------------------------------------
+
 
 async def build_jwt_payload(user_id: int, email: str) -> dict:
     """Construye el payload del JWT consultando la DB para roles + scopes."""
@@ -119,6 +122,7 @@ def decode_jwt(token: str) -> dict:
 # Dependency: resolver user actual desde Authorization header
 # ---------------------------------------------------------------------------
 
+
 async def resolve_user_from_api_key(key: str) -> dict:
     """Valida una API key contra la DB y devuelve el JWT-shaped payload.
 
@@ -154,42 +158,45 @@ async def resolve_user_from_api_key(key: str) -> dict:
     primary_email = row["primary_email"] or f"user-{row['user_id']}@unknown"
     payload = await build_jwt_payload(row["user_id"], primary_email)
     if row["read_only"]:
-        payload["read_only"] = True   # #1332: viaja también en el JWT de /auth/token
+        payload["read_only"] = True  # #1332: viaja también en el JWT de /auth/token
     return payload
 
 
 # #1332 (pieza A de #1200): lo ÚNICO por donde pasa una clave de solo lectura. Lista explícita de (método,
 # plantilla de ruta), no «todo lo que sea GET»: hay lecturas por POST (/search) y hay GET de administración.
-RUTAS_DE_LECTURA: frozenset[tuple[str, str]] = frozenset({
-    ("GET", "/health"),
-    ("GET", "/auth/me"),
-    ("POST", "/auth/token"),
-    ("POST", "/search"),
-    ("POST", "/search/document/{document_id}"),
-    ("GET", "/memories/recent"),
-    ("GET", "/memories/{memory_id}"),
-    ("GET", "/api/v1/decisiones/vigentes"),
-    ("GET", "/api/v1/clusters"),
-    ("GET", "/api/v1/clusters/{cluster_id}"),
-    ("GET", "/api/v1/clusters/{cluster_id}/members"),
-    ("GET", "/api/v1/clusters/{cluster_id}/sources"),
-    ("GET", "/api/v1/clusters/telescopic"),
-    ("GET", "/api/v1/clusters/telescopic/progressive"),
-    ("POST", "/api/v1/clusters/search"),
-    ("POST", "/api/v1/clusters/zoom"),
-    ("GET", "/graph/neighbors/{node_name}"),
-    ("GET", "/graph/path"),
-    ("GET", "/graph/search"),
-    ("GET", "/graph/subgraph"),
-    ("GET", "/agents/{agent_identifier}/identity"),
-    ("GET", "/documents"),
-    ("GET", "/documents/{document_id}"),
-    ("GET", "/documents/{document_id}/chunks"),
-})
+RUTAS_DE_LECTURA: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/health"),
+        ("GET", "/auth/me"),
+        ("POST", "/auth/token"),
+        ("POST", "/search"),
+        ("POST", "/search/document/{document_id}"),
+        ("GET", "/memories/recent"),
+        ("GET", "/memories/{memory_id}"),
+        ("GET", "/api/v1/decisiones/vigentes"),
+        ("GET", "/api/v1/clusters"),
+        ("GET", "/api/v1/clusters/{cluster_id}"),
+        ("GET", "/api/v1/clusters/{cluster_id}/members"),
+        ("GET", "/api/v1/clusters/{cluster_id}/sources"),
+        ("GET", "/api/v1/clusters/telescopic"),
+        ("GET", "/api/v1/clusters/telescopic/progressive"),
+        ("POST", "/api/v1/clusters/search"),
+        ("POST", "/api/v1/clusters/zoom"),
+        ("GET", "/graph/neighbors/{node_name}"),
+        ("GET", "/graph/path"),
+        ("GET", "/graph/search"),
+        ("GET", "/graph/subgraph"),
+        ("GET", "/agents/{agent_identifier}/identity"),
+        ("GET", "/documents"),
+        ("GET", "/documents/{document_id}"),
+        ("GET", "/documents/{document_id}/chunks"),
+    }
+)
 
 
 def _patron(plantilla: str):
     import re
+
     return re.compile("^" + re.sub(r"\\{[^/]+?\\}", "[^/]+", re.escape(plantilla)) + "$")
 
 
@@ -316,9 +323,7 @@ async def auth_me(user: dict = Depends(get_current_user)) -> MeResponse:
     # VS4: name se resuelve desde DB en lugar de venir del JWT payload.
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT name FROM users WHERE id = $1", int(user["sub"])
-        )
+        row = await conn.fetchrow("SELECT name FROM users WHERE id = $1", int(user["sub"]))
     name = row["name"] if row else f"user-{user['sub']}"
     return MeResponse(
         user_id=int(user["sub"]),
@@ -352,9 +357,7 @@ async def auth_create_api_key(
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        target = await conn.fetchrow(
-            "SELECT id, name, active, is_super FROM users WHERE id = $1", body.user_id
-        )
+        target = await conn.fetchrow("SELECT id, name, active, is_super FROM users WHERE id = $1", body.user_id)
         if target is None:
             raise HTTPException(status_code=404, detail="target user not found")
         if not target["active"]:
@@ -372,9 +375,7 @@ async def auth_create_api_key(
             actor_org = actor.get("organization_id")
             if actor_org is None:
                 raise HTTPException(403, "CEO organization not resolved")
-            target_org = await conn.fetchval(
-                "SELECT organization_id FROM users WHERE id = $1", body.user_id
-            )
+            target_org = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", body.user_id)
             if target_org != actor_org:
                 raise HTTPException(403, "CEO can only create API keys for users in their organization")
 
@@ -385,13 +386,18 @@ async def auth_create_api_key(
             VALUES ($1, $2, $3, $4, true, $5)
             RETURNING id, expires_at
             """,
-            key_hash, body.name, body.user_id, body.expires_at, body.read_only,
+            key_hash,
+            body.name,
+            body.user_id,
+            body.expires_at,
+            body.read_only,
         )
 
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_api_key', 'api_key', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"target_user_id": body.user_id, "name": body.name}),
             actor.get("organization_id"),
         )
@@ -408,6 +414,7 @@ async def auth_create_api_key(
 # ---------------------------------------------------------------------------
 # API key rotation (v0.9 multi-tenant)
 # ---------------------------------------------------------------------------
+
 
 class RotateRequest(BaseModel):
     grace_hours: float = Field(24.0, description="Hours both keys stay valid. Clamped to [1, 720].")
@@ -435,9 +442,7 @@ async def auth_rotate_api_key(
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        old_key = await conn.fetchrow(
-            "SELECT id, user_id, active, name, read_only FROM api_keys WHERE id = $1", key_id
-        )
+        old_key = await conn.fetchrow("SELECT id, user_id, active, name, read_only FROM api_keys WHERE id = $1", key_id)
         if old_key is None or not old_key["active"]:
             raise HTTPException(404, "api key not found or inactive")
 
@@ -446,9 +451,7 @@ async def auth_rotate_api_key(
 
         if actor_id != key_owner_id and not actor.get("is_super"):
             if actor.get("is_ceo"):
-                owner_org = await conn.fetchval(
-                    "SELECT organization_id FROM users WHERE id = $1", key_owner_id
-                )
+                owner_org = await conn.fetchval("SELECT organization_id FROM users WHERE id = $1", key_owner_id)
                 if owner_org != actor.get("organization_id"):
                     raise HTTPException(403, "CEO can only rotate keys for users in their org")
             else:
@@ -471,12 +474,17 @@ async def auth_rotate_api_key(
                 VALUES ($1, $2, $3, true, $4)
                 RETURNING id
                 """,
-                new_hash, f"{old_key['name']} (rotated)", key_owner_id, old_key["read_only"],   # #1332: hereda
+                new_hash,
+                f"{old_key['name']} (rotated)",
+                key_owner_id,
+                old_key["read_only"],  # #1332: hereda
             )
 
             await conn.execute(
                 "UPDATE api_keys SET replaced_by_key_id = $1, grace_until = $2 WHERE id = $3",
-                new_row["id"], grace_until, key_id,
+                new_row["id"],
+                grace_until,
+                key_id,
             )
 
             active_keys = await conn.fetch(
@@ -485,20 +493,20 @@ async def auth_rotate_api_key(
                 AND (grace_until IS NULL OR grace_until > now())
                 AND id != $2
                 ORDER BY id ASC""",
-                key_owner_id, key_id,
+                key_owner_id,
+                key_id,
             )
             deactivated_id = None
             if len(active_keys) > 3:
                 oldest_id = active_keys[0]["id"]
-                await conn.execute(
-                    "UPDATE api_keys SET active = false WHERE id = $1", oldest_id
-                )
+                await conn.execute("UPDATE api_keys SET active = false WHERE id = $1", oldest_id)
                 deactivated_id = oldest_id
 
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'rotate_api_key', 'api_key', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(new_row["id"]),
+                int(actor["sub"]),
+                str(new_row["id"]),
                 json.dumps({"old_key_id": key_id, "deactivated_key_id": deactivated_id}),
                 actor.get("organization_id"),
             )
@@ -515,6 +523,7 @@ async def auth_rotate_api_key(
 # ---------------------------------------------------------------------------
 # GET /auth/api-keys — org-scoped list (v0.9 multi-tenant)
 # ---------------------------------------------------------------------------
+
 
 class ApiKeyListItem(BaseModel):
     id: int

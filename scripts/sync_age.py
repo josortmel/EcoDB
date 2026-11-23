@@ -1,4 +1,5 @@
 """Sync AGE graph with SQL tables post-purge."""
+
 import asyncio
 import asyncpg
 import json
@@ -8,8 +9,11 @@ import sys
 # #488: sin valor por defecto. localhost:5432 es el Postgres NATIVO de Windows, no EcoDB,
 # y un valor por defecto que apunta a otra base es como se cuelan los accidentes.
 DATABASE_URL = os.environ.get("DATABASE_URL")
-NO_DATABASE_URL = ("DATABASE_URL no esta puesta. Desde el host: postgresql://ecodb:<clave>@127.0.0.1:5435/ecodb ; "
-                   "dentro de Docker: postgresql://ecodb:<clave>@postgres:5432/ecodb")
+NO_DATABASE_URL = (
+    "DATABASE_URL no esta puesta. Desde el host: postgresql://ecodb:<clave>@127.0.0.1:5435/ecodb ; "
+    "dentro de Docker: postgresql://ecodb:<clave>@postgres:5432/ecodb"
+)
+
 
 async def main():
     if not DATABASE_URL:
@@ -18,7 +22,9 @@ async def main():
 
     # Stats before
     age_nodes = await conn.fetchval("SELECT * FROM cypher('ecodb_graph', $$MATCH (n) RETURN count(n)$$) AS (c agtype)")
-    age_edges = await conn.fetchval("SELECT * FROM cypher('ecodb_graph', $$MATCH ()-[r]->() RETURN count(r)$$) AS (c agtype)")
+    age_edges = await conn.fetchval(
+        "SELECT * FROM cypher('ecodb_graph', $$MATCH ()-[r]->() RETURN count(r)$$) AS (c agtype)"
+    )
     sql_nodes = await conn.fetchval("SELECT count(*) FROM nodes")
     sql_triples = await conn.fetchval("SELECT count(*) FROM triples")
     print(f"ANTES: AGE {age_nodes} nodos / {age_edges} edges, SQL {sql_nodes} nodos / {sql_triples} triples")
@@ -64,8 +70,12 @@ async def main():
                 print(f"  SKIP: {t['sname']}->{t['oname']}: {e}")
 
     # Stats after
-    age_nodes_after = await conn.fetchval("SELECT * FROM cypher('ecodb_graph', $$MATCH (n) RETURN count(n)$$) AS (c agtype)")
-    age_edges_after = await conn.fetchval("SELECT * FROM cypher('ecodb_graph', $$MATCH ()-[r]->() RETURN count(r)$$) AS (c agtype)")
+    age_nodes_after = await conn.fetchval(
+        "SELECT * FROM cypher('ecodb_graph', $$MATCH (n) RETURN count(n)$$) AS (c agtype)"
+    )
+    age_edges_after = await conn.fetchval(
+        "SELECT * FROM cypher('ecodb_graph', $$MATCH ()-[r]->() RETURN count(r)$$) AS (c agtype)"
+    )
 
     print(f"\nDESPUES:")
     print(f"  AGE: {age_nodes_after} nodos / {age_edges_after} edges")
@@ -74,6 +84,7 @@ async def main():
     print(f"  Sync: {'OK' if age_nodes_after == sql_nodes else 'MISMATCH'}")
 
     await conn.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

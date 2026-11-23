@@ -1,4 +1,5 @@
 """Tests integración — CRUD memorias contra postgres real."""
+
 import asyncio
 import os
 import sys
@@ -9,6 +10,7 @@ import asyncpg
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -66,8 +68,9 @@ def auth(jwt):
 
 
 # ---------------------------------------------------------------------------
-# 
+#
 # ---------------------------------------------------------------------------
+
 
 def test_recent_with_workspace_id_filter(client, super_jwt):
     r = client.get(
@@ -110,6 +113,7 @@ def test_recent_no_params_regression(client, super_jwt):
 # ---------------------------------------------------------------------------
 # POST /memories
 # ---------------------------------------------------------------------------
+
 
 def test_create_memory_decision_has_weight_09(client, super_jwt):
     r = client.post(
@@ -214,6 +218,7 @@ def test_create_memory_without_auth_returns_401(client):
 # GET /memories/recent
 # ---------------------------------------------------------------------------
 
+
 def test_recent_returns_pytest_memories(client, super_jwt):
     r = client.get("/memories/recent?limit=20", headers=auth(super_jwt))
     assert r.status_code == 200
@@ -231,8 +236,7 @@ def test_recent_respects_limit(client, super_jwt):
 
 def test_recent_zero_width_window_warns(client, super_jwt):
     """#340: "del 16 al 16" es anchura cero — el cero debe avisar."""
-    r = client.get("/memories/recent?fecha_desde=2026-09-16&fecha_hasta=2026-09-16",
-                   headers=auth(super_jwt))
+    r = client.get("/memories/recent?fecha_desde=2026-09-16&fecha_hasta=2026-09-16", headers=auth(super_jwt))
     assert r.status_code == 200
     body = r.json()
     assert any("zero-width" in w for w in body["warnings"])
@@ -248,6 +252,7 @@ def test_recent_normal_call_has_no_warnings(client, super_jwt):
 # ---------------------------------------------------------------------------
 # GET /memories/{id}
 # ---------------------------------------------------------------------------
+
 
 def test_get_existing_memory_returns_200(client, super_jwt):
     created = client.post(
@@ -285,6 +290,7 @@ def test_get_increments_access_count(client, super_jwt):
 # ---------------------------------------------------------------------------
 # PUT /memories/{id}
 # ---------------------------------------------------------------------------
+
 
 def test_update_content_persists(client, super_jwt):
     created = client.post(
@@ -331,6 +337,7 @@ def test_update_with_no_fields_returns_400(client, super_jwt):
 # DELETE /memories/{id} — soft delete a trash
 # ---------------------------------------------------------------------------
 
+
 def test_delete_moves_to_trash_and_returns_204(client, super_jwt):
     created = client.post(
         "/memories",
@@ -355,11 +362,18 @@ def test_delete_inexistent_returns_403(client, super_jwt):
 # Visibility (private vs public)
 # ---------------------------------------------------------------------------
 
+
 def test_create_private_memory_visible_to_creator(client, super_jwt):
     created = client.post(
         "/memories",
         headers=auth(super_jwt),
-        json={"type": "momento", "content": "pytest-mem-private-1", "workspace_id": 1, "project_id": 1, "visibility": "private"},
+        json={
+            "type": "momento",
+            "content": "pytest-mem-private-1",
+            "workspace_id": 1,
+            "project_id": 1,
+            "visibility": "private",
+        },
     ).json()
     assert created["visibility"] == "private"
     # Superuser (creator + super) can see it
@@ -388,6 +402,7 @@ def test_super_can_change_own_memory_visibility(client, super_jwt):
 # — GLiNER hook en POST /memories → memory_entity_links
 # ---------------------------------------------------------------------------
 
+
 def _count_entity_links(memory_id: str) -> int:
     async def _q():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
@@ -398,6 +413,7 @@ def _count_entity_links(memory_id: str) -> int:
             )
         finally:
             await conn.close()
+
     return asyncio.run(_q())
 
 
@@ -416,6 +432,7 @@ def _entity_names_for_memory(memory_id: str) -> set[str]:
             return {r["name"] for r in rows}
         finally:
             await conn.close()
+
     return asyncio.run(_q())
 
 
@@ -425,6 +442,7 @@ def _entity_names_for_memory(memory_id: str) -> set[str]:
 # host por diseño — solo en la imagen Docker. Tests unitarios verifican el flujo
 # de linking con entidades pre-fabricadas. La integración GLiNER real se prueba
 # via endpoint /admin/extract_entities + POST manual smoke runtime.
+
 
 async def _mock_entities_alice_acme(*args, **kwargs):
     return [
@@ -455,6 +473,7 @@ async def _mock_entities_raise(*args, **kwargs):
 def test_create_memory_with_named_entities_creates_links(client, super_jwt, monkeypatch):
     """Memoria con entidades mockeadas → memory_entity_links populated."""
     import gliner_service
+
     monkeypatch.setattr(gliner_service, "extract_entities", _mock_entities_alice_acme)
 
     r = client.post(
@@ -478,6 +497,7 @@ def test_create_memory_with_named_entities_creates_links(client, super_jwt, monk
 def test_create_memory_without_obvious_entities_creates_zero_links(client, super_jwt, monkeypatch):
     """Mock devuelve 0 entidades → memoria SE crea, 0 links."""
     import gliner_service
+
     monkeypatch.setattr(gliner_service, "extract_entities", _mock_entities_empty)
 
     r = client.post(
@@ -498,6 +518,7 @@ def test_create_memory_without_obvious_entities_creates_zero_links(client, super
 def test_create_memory_idempotent_entity_dedup(client, super_jwt, monkeypatch):
     """Mock devuelve 'Alice' 3 veces → 1 sola fila en memory_entity_links."""
     import gliner_service
+
     monkeypatch.setattr(gliner_service, "extract_entities", _mock_entities_dedup)
 
     r = client.post(
@@ -521,6 +542,7 @@ def test_create_memory_idempotent_entity_dedup(client, super_jwt, monkeypatch):
 def test_create_memory_gliner_failure_does_not_block_creation(client, super_jwt, monkeypatch):
     """Mock raises → memoria SE crea con 0 links (skip + log graceful)."""
     import gliner_service
+
     monkeypatch.setattr(gliner_service, "extract_entities", _mock_entities_raise)
 
     r = client.post(

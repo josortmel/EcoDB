@@ -1,4 +1,5 @@
 """#910: the embedder refuses a model whose vectors don't match the stored ones."""
+
 import importlib.util
 import json
 import math

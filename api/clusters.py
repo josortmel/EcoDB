@@ -1,4 +1,5 @@
 """Clusters endpoint — metacognicion v2.0 §7.3 + Memory Agent v1.3 search+telescopic."""
+
 from __future__ import annotations
 
 import logging
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/clusters", tags=["clusters"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class ClusterSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -149,7 +151,9 @@ class TelescopicViewResponse(BaseModel):
     quarterly: list[ClusterNarrativeSummary] = Field(default_factory=list)
     monthly: list[ClusterNarrativeSummary] = Field(default_factory=list)
     weekly: list[ClusterNarrativeSummary] = Field(default_factory=list)
-    recent_days: list[dict] = Field(default_factory=list, description="Raw memories from the last 3 complete days, oldest-first")
+    recent_days: list[dict] = Field(
+        default_factory=list, description="Raw memories from the last 3 complete days, oldest-first"
+    )
     # #236: closed weeks with memories and no weekly cluster — a hole this view would skip silently.
     warnings: list[str] = Field(default_factory=list)
 
@@ -198,11 +202,13 @@ class FractalZoomResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_jsonb(val):
     if val is None:
         return {}
     if isinstance(val, str):
         import json
+
         return json.loads(val)
     return val
 
@@ -211,8 +217,14 @@ def _parse_jsonb(val):
 # unos metadatos que haya que buscar, pero nunca lo recibáis sin buscarlo explícitamente». Las respuestas de clusters
 # (vista progresiva, telescópica, zoom, búsqueda, listado y detalle) NO llevan modelo ni agente de la célula; se
 # piden aparte en GET /clusters/{id}/modelo. Antes (#221, 7-ago) iban en cada cluster.
-_CLAVES_MODELO = ("cell_model", "cell_agent", "cell_model_before_owner", "cell_generated",
-                  "cell_generated_before_owner", "narrated_by")
+_CLAVES_MODELO = (
+    "cell_model",
+    "cell_agent",
+    "cell_model_before_owner",
+    "cell_generated",
+    "cell_generated_before_owner",
+    "narrated_by",
+)
 
 
 def _sin_modelo(meta: dict) -> dict:
@@ -247,12 +259,14 @@ def _cluster_detail(row) -> ClusterDetail:
 # Endpoints — search + telescopic (Memory Agent v1.3)
 # ---------------------------------------------------------------------------
 
+
 @router.post("/search")
 async def search_clusters(
     body: ClusterSearchBody,
     actor: dict = Depends(get_current_user),
 ) -> ClusterSearchResponse:
     import time
+
     t0 = time.time()
     pool = await get_pool()
 
@@ -270,8 +284,7 @@ async def search_clusters(
         if body.agent_identifier:
             agent = await resolve_agent_for_actor(conn, actor, body.agent_identifier)
             params.append(agent["identifier"])
-            conditions.append(
-                f"(a.identifier = ${len(params)} OR a.identifier = 'SIN_AUTOR')")
+            conditions.append(f"(a.identifier = ${len(params)} OR a.identifier = 'SIN_AUTOR')")
         elif not actor.get("is_super"):
             conditions.append("a.identifier = 'SIN_AUTOR'")
 
@@ -283,7 +296,8 @@ async def search_clusters(
         where = " AND ".join(conditions)
         _label_tsv = _bm25_tsvector("mc.label")  # #243: also index dotted/slashed identifier parts
 
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT mc.id, mc.level, mc.label, mc.narrative,
                    a.identifier AS agent_identifier,
                    mc.period_start, mc.period_end,
@@ -300,23 +314,27 @@ async def search_clusters(
                               plainto_tsquery('spanish', $2)) > 0.05)
             ORDER BY (1 - (mc.centroid <=> $1::vector)) DESC
             LIMIT ${len(params)}
-        """, *params)
+        """,
+            *params,
+        )
 
     results = []
     for r in rows:
         narrative = r["narrative"]
-        results.append(ClusterSearchResult(
-            id=r["id"],
-            level=r["level"],
-            label=r["label"],
-            narrative_preview=narrative[:200] if narrative else None,
-            agent_identifier=r["agent_identifier"],
-            period_start=r["period_start"],
-            period_end=r["period_end"],
-            member_count=r["member_count"],
-            vector_score=float(r["vector_score"]),
-            bm25_score=float(r["bm25_score"]),
-        ))
+        results.append(
+            ClusterSearchResult(
+                id=r["id"],
+                level=r["level"],
+                label=r["label"],
+                narrative_preview=narrative[:200] if narrative else None,
+                agent_identifier=r["agent_identifier"],
+                period_start=r["period_start"],
+                period_end=r["period_end"],
+                member_count=r["member_count"],
+                vector_score=float(r["vector_score"]),
+                bm25_score=float(r["bm25_score"]),
+            )
+        )
 
     duration = (time.time() - t0) * 1000
     return ClusterSearchResponse(results=results, count=len(results), duration_ms=round(duration, 1))
@@ -346,7 +364,8 @@ async def get_telescopic_view(
             lim = limits.get(lv, 4)
             # Take the N most-recent clusters, then return them OLDEST-FIRST so the
             # boot reads chronologically (yearly→quarterly→monthly→weekly = old→recent).
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT id, label, narrative, period_start, period_end,
                        member_count, source_count FROM (
                     SELECT mc.id, mc.label, mc.narrative,
@@ -359,25 +378,45 @@ async def get_telescopic_view(
                     LIMIT $3
                 ) sub
                 ORDER BY period_end ASC
-            """, aid, lv, lim)
-            result[lv] = [ClusterNarrativeSummary(
-                id=r["id"], label=r["label"], narrative=r["narrative"],
-                period_start=r["period_start"], period_end=r["period_end"],
-                member_count=r["member_count"], source_count=r["source_count"],
-            ) for r in rows]
+            """,
+                aid,
+                lv,
+                lim,
+            )
+            result[lv] = [
+                ClusterNarrativeSummary(
+                    id=r["id"],
+                    label=r["label"],
+                    narrative=r["narrative"],
+                    period_start=r["period_start"],
+                    period_end=r["period_end"],
+                    member_count=r["member_count"],
+                    source_count=r["source_count"],
+                )
+                for r in rows
+            ]
 
         # Last 3 complete days of raw memories (finest, most-recent layer of the boot).
-        recent_rows = await conn.fetch("""
+        recent_rows = await conn.fetch(
+            """
             SELECT id, type, content, weight, tags, created_at
             FROM memories
             WHERE agent_id = $1 AND created_at >= (CURRENT_DATE - INTERVAL '3 days')
             ORDER BY created_at ASC
-        """, aid)
-        recent_days = [{
-            "id": str(r["id"]), "type": r["type"],
-            "content": r["content"], "weight": float(r["weight"]),
-            "tags": list(r["tags"]), "created_at": r["created_at"].isoformat(),
-        } for r in recent_rows]
+        """,
+            aid,
+        )
+        recent_days = [
+            {
+                "id": str(r["id"]),
+                "type": r["type"],
+                "content": r["content"],
+                "weight": float(r["weight"]),
+                "tags": list(r["tags"]),
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in recent_rows
+        ]
 
     return TelescopicViewResponse(
         agent_identifier=agent_identifier,
@@ -445,12 +484,12 @@ async def get_progressive_view(
         agent = await resolve_agent_for_actor(conn, actor, agent_identifier)
         aid = agent["id"]
 
-        result: dict[str, list] = {lv: [] for lv in
-                                   ("yearly", "quarterly", "monthly", "weekly")}
+        result: dict[str, list] = {lv: [] for lv in ("yearly", "quarterly", "monthly", "weekly")}
         for lv in ("yearly", "quarterly", "monthly", "weekly"):
             if lv not in wanted:
                 continue
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 WITH unabsorbed AS (
                     SELECT mc.id, mc.label, mc.narrative,
                            mc.period_start, mc.period_end,
@@ -478,12 +517,24 @@ async def get_progressive_view(
                     SELECT DISTINCT period_end FROM unabsorbed
                     ORDER BY period_end DESC LIMIT $4)
                 ORDER BY period_end ASC, period_start ASC, id ASC
-            """, aid, lv, _HIGHER_LEVELS[lv], _PROGRESSIVE_CAPS[lv])
-            result[lv] = [ClusterNarrativeSummary(
-                id=r["id"], label=r["label"], narrative=r["narrative"],
-                period_start=r["period_start"], period_end=r["period_end"],
-                member_count=r["member_count"], source_count=r["source_count"],
-            ) for r in rows]
+            """,
+                aid,
+                lv,
+                _HIGHER_LEVELS[lv],
+                _PROGRESSIVE_CAPS[lv],
+            )
+            result[lv] = [
+                ClusterNarrativeSummary(
+                    id=r["id"],
+                    label=r["label"],
+                    narrative=r["narrative"],
+                    period_start=r["period_start"],
+                    period_end=r["period_end"],
+                    member_count=r["member_count"],
+                    source_count=r["source_count"],
+                )
+                for r in rows
+            ]
 
         # Loose days = ONLY the open edge. A memory is hidden if its week is
         # already closed (its date falls inside ANY active weekly period) OR
@@ -493,7 +544,8 @@ async def get_progressive_view(
         # flood the boot context.
         recent_rows = []
         if "recent_days" in wanted:
-            recent_rows = await conn.fetch("""
+            recent_rows = await conn.fetch(
+                """
                 SELECT m.id, m.type, m.content, m.weight, m.tags, m.created_at
                 FROM memories m
                 WHERE m.agent_id = $1
@@ -506,19 +558,31 @@ async def get_progressive_view(
                                  BETWEEN mc.period_start AND mc.period_end
                              OR m.id = ANY(mc.member_ids)))
                 ORDER BY m.created_at ASC
-            """, aid, max_recent_days)
-        recent_days = [{
-            "id": str(r["id"]), "type": r["type"],
-            "content": r["content"], "weight": float(r["weight"]),
-            "tags": list(r["tags"]), "created_at": r["created_at"].isoformat(),
-        } for r in recent_rows]
+            """,
+                aid,
+                max_recent_days,
+            )
+        recent_days = [
+            {
+                "id": str(r["id"]),
+                "type": r["type"],
+                "content": r["content"],
+                "weight": float(r["weight"]),
+                "tags": list(r["tags"]),
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in recent_rows
+        ]
 
         # #236: tell the booting agent about weeks this view skips because nothing consolidated them.
         from cell_worker import consolidation_gaps
+
         warnings = [
             f"consolidation gap: week {g['week_start']}..{g['week_end']} has {g['memories']} memories "
             f"and no weekly cluster — it is missing from this view"
-            for g in await consolidation_gaps(conn) if g["agent_identifier"] == agent_identifier]
+            for g in await consolidation_gaps(conn)
+            if g["agent_identifier"] == agent_identifier
+        ]
 
     return TelescopicViewResponse(
         agent_identifier=agent_identifier,
@@ -566,12 +630,15 @@ async def fractal_zoom(
         if body.cluster_id is None:
             entry_level = body.level
             if entry_level is None:
-                entry_level = await conn.fetchval(f"""
+                entry_level = await conn.fetchval(
+                    f"""
                     SELECT level FROM memory_clusters
                     WHERE agent_id = $1 AND status = 'active'
                     ORDER BY {_LEVEL_RANK}
                     LIMIT 1
-                """, aid)
+                """,
+                    aid,
+                )
             if entry_level is not None:
                 # Entry hides lineage-absorbed clusters (thematic weeklies
                 # under a rollup) — you reach them by zooming the rollup.
@@ -581,7 +648,10 @@ async def fractal_zoom(
                     " AND NOT EXISTS (SELECT 1 FROM memory_clusters r"
                     " WHERE r.agent_id = $1 AND r.status = 'active'"
                     " AND mc.id = ANY(r.source_ids))",
-                    [aid, entry_level], q_emb, body.limit)
+                    [aid, entry_level],
+                    q_emb,
+                    body.limit,
+                )
         else:
             cluster = await resolve_cluster_for_actor(conn, actor, body.cluster_id)
             if cluster["agent_id"] != aid:
@@ -592,12 +662,15 @@ async def fractal_zoom(
             if cluster["source_ids"]:
                 # C25: a superseded twin stays in source_ids; its content lives in the kept twin.
                 cluster_children = await _zoom_clusters(
-                    conn, "mc.id = ANY($1::uuid[]) AND mc.agent_id = $2 AND mc.status = 'active'",
-                    [cluster["source_ids"], aid], q_emb, body.limit)
+                    conn,
+                    "mc.id = ANY($1::uuid[]) AND mc.agent_id = $2 AND mc.status = 'active'",
+                    [cluster["source_ids"], aid],
+                    q_emb,
+                    body.limit,
+                )
             else:
                 child_type = "memories"
-                memory_children = await _zoom_memories(
-                    conn, actor, cluster["member_ids"], q_emb, body.limit)
+                memory_children = await _zoom_memories(conn, actor, cluster["member_ids"], q_emb, body.limit)
 
     return FractalZoomResponse(
         agent_identifier=body.agent_identifier,
@@ -609,8 +682,7 @@ async def fractal_zoom(
     )
 
 
-async def _zoom_clusters(conn, where: str, params: list,
-                         q_emb, limit: int) -> list[FractalZoomCluster]:
+async def _zoom_clusters(conn, where: str, params: list, q_emb, limit: int) -> list[FractalZoomCluster]:
     if q_emb is not None:
         params = [*params, q_emb, limit]
         score_sql = f"1 - (mc.centroid <=> ${len(params) - 1}::vector)"
@@ -619,7 +691,8 @@ async def _zoom_clusters(conn, where: str, params: list,
         params = [*params, limit]
         score_sql = "NULL::float"
         order_sql = "mc.period_end ASC"
-    rows = await conn.fetch(f"""
+    rows = await conn.fetch(
+        f"""
         SELECT mc.id, mc.level, mc.label, mc.narrative,
                mc.period_start, mc.period_end,
                coalesce(array_length(mc.member_ids, 1), 0) AS member_count,
@@ -629,40 +702,61 @@ async def _zoom_clusters(conn, where: str, params: list,
         WHERE {where}
         ORDER BY {order_sql}
         LIMIT ${len(params)}
-    """, *params)
-    return [FractalZoomCluster(
-        id=r["id"], level=r["level"], label=r["label"], narrative=r["narrative"],
-        period_start=r["period_start"], period_end=r["period_end"],
-        member_count=r["member_count"], source_count=r["source_count"],
-        score=float(r["score"]) if r["score"] is not None else None,
-    ) for r in rows]
+    """,
+        *params,
+    )
+    return [
+        FractalZoomCluster(
+            id=r["id"],
+            level=r["level"],
+            label=r["label"],
+            narrative=r["narrative"],
+            period_start=r["period_start"],
+            period_end=r["period_end"],
+            member_count=r["member_count"],
+            source_count=r["source_count"],
+            score=float(r["score"]) if r["score"] is not None else None,
+        )
+        for r in rows
+    ]
 
 
-async def _zoom_memories(conn, actor: dict, member_ids: list,
-                         q_emb, limit: int) -> list[FractalZoomMemory]:
+async def _zoom_memories(conn, actor: dict, member_ids: list, q_emb, limit: int) -> list[FractalZoomMemory]:
     if q_emb is not None:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(
+            """
             SELECT *, 1 - (embedding <=> $2::vector) AS score
             FROM memories WHERE id = ANY($1::uuid[])
             ORDER BY (embedding IS NULL), embedding <=> $2::vector
-        """, member_ids, q_emb)
+        """,
+            member_ids,
+            q_emb,
+        )
     else:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(
+            """
             SELECT *, NULL::float AS score
             FROM memories WHERE id = ANY($1::uuid[])
             ORDER BY created_at ASC
-        """, member_ids)
+        """,
+            member_ids,
+        )
     vis = await precompute_read_visibility(conn, actor)
     out: list[FractalZoomMemory] = []
     for mem in rows:
         if not check_read_memory(vis, mem):
             continue
-        out.append(FractalZoomMemory(
-            memory_id=mem["id"], type=mem["type"], content=mem["content"],
-            weight=float(mem["weight"]), tags=list(mem["tags"]),
-            created_at=mem["created_at"],
-            score=float(mem["score"]) if mem["score"] is not None else None,
-        ))
+        out.append(
+            FractalZoomMemory(
+                memory_id=mem["id"],
+                type=mem["type"],
+                content=mem["content"],
+                weight=float(mem["weight"]),
+                tags=list(mem["tags"]),
+                created_at=mem["created_at"],
+                score=float(mem["score"]) if mem["score"] is not None else None,
+            )
+        )
         if len(out) >= limit:
             break
     return out
@@ -671,6 +765,7 @@ async def _zoom_memories(conn, actor: dict, member_ids: list,
 # ---------------------------------------------------------------------------
 # Endpoints — CRUD (existing v2.0)
 # ---------------------------------------------------------------------------
+
 
 @router.get("")
 async def list_clusters(
@@ -700,6 +795,7 @@ async def list_clusters(
             conditions.append("mc.narrative IS NULL AND mc.status = 'candidate'")
         if pattern_flags:
             import json as _json
+
             try:
                 _json.loads(pattern_flags)
             except (_json.JSONDecodeError, TypeError):
@@ -713,13 +809,18 @@ async def list_clusters(
             params.append(period_end)
             conditions.append(f"mc.period_end <= ${len(params)}")
         where = " AND ".join(conditions)
-        total = await conn.fetchval(
-            f"SELECT COUNT(*) FROM memory_clusters mc WHERE {where}", *params)
-        items, next_cursor = await paginate(conn, f"""
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM memory_clusters mc WHERE {where}", *params)
+        items, next_cursor = await paginate(
+            conn,
+            f"""
             SELECT mc.*, array_length(member_ids, 1) AS member_count,
                    coalesce(array_length(source_ids, 1), 0) AS source_count
             FROM memory_clusters mc WHERE {where}
-        """, list(params), limit, cursor)
+        """,
+            list(params),
+            limit,
+            cursor,
+        )
     return {"items": [_cluster_summary(r) for r in items], "total": total, "cursor_next": next_cursor}
 
 
@@ -734,21 +835,29 @@ async def cluster_stats(
         agent = await resolve_agent_for_actor(conn, actor, agent_identifier)
         aid = agent["id"]
         by_level = await conn.fetch(
-            "SELECT level, COUNT(*) AS cnt FROM memory_clusters WHERE agent_id=$1 GROUP BY level", aid)
+            "SELECT level, COUNT(*) AS cnt FROM memory_clusters WHERE agent_id=$1 GROUP BY level", aid
+        )
         by_status = await conn.fetch(
-            "SELECT status, COUNT(*) AS cnt FROM memory_clusters WHERE agent_id=$1 GROUP BY status", aid)
+            "SELECT status, COUNT(*) AS cnt FROM memory_clusters WHERE agent_id=$1 GROUP BY status", aid
+        )
         pending = await conn.fetchval(
-            "SELECT COUNT(*) FROM memory_clusters WHERE agent_id=$1 AND narrative IS NULL AND status='candidate'", aid)
+            "SELECT COUNT(*) FROM memory_clusters WHERE agent_id=$1 AND narrative IS NULL AND status='candidate'", aid
+        )
         avg_size = await conn.fetchval(
-            "SELECT AVG(array_length(member_ids,1)) FROM memory_clusters WHERE agent_id=$1 AND status='active'", aid)
-        last_run_row = await conn.fetchrow("""
+            "SELECT AVG(array_length(member_ids,1)) FROM memory_clusters WHERE agent_id=$1 AND status='active'", aid
+        )
+        last_run_row = await conn.fetchrow(
+            """
             SELECT finished_at, metrics FROM cell_runs
             WHERE agent_id=$1 AND cell_type='consolidation' AND status='completed'
             ORDER BY finished_at DESC LIMIT 1
-        """, aid)
+        """,
+            aid,
+        )
         _raw_m = last_run_row["metrics"] if last_run_row else {}
         if isinstance(_raw_m, str):
             import json as _json
+
             _raw_m = _json.loads(_raw_m)
         graph_led = (_raw_m or {}).get("graph_led_pct")
         last_run = last_run_row["finished_at"] if last_run_row else None
@@ -777,16 +886,20 @@ async def get_cluster_modelo(cluster_id: UUID, actor: dict = Depends(get_current
     """Qué modelo y qué célula escribieron este cluster. Solo aquí, y solo si se pide (norma de Pepe, 11-nov)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        cluster = await resolve_cluster_for_actor(conn, actor, cluster_id)   # misma visibilidad que el detalle
+        cluster = await resolve_cluster_for_actor(conn, actor, cluster_id)  # misma visibilidad que el detalle
     meta = _parse_jsonb(cluster.get("metadata")) or {}
-    return {"cluster_id": str(cluster["id"]), "cell_model": meta.get("cell_model"),
-            "model_source": "measured" if meta.get("cell_model") else None,
-            **{k: meta[k] for k in _CLAVES_MODELO if k in meta}}
+    return {
+        "cluster_id": str(cluster["id"]),
+        "cell_model": meta.get("cell_model"),
+        "model_source": "measured" if meta.get("cell_model") else None,
+        **{k: meta[k] for k in _CLAVES_MODELO if k in meta},
+    }
 
 
 @router.get("/{cluster_id}/members")
 async def get_cluster_members(
-    cluster_id: UUID, limit: int = Query(20, ge=1, le=100),
+    cluster_id: UUID,
+    limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = Query(None),
     actor: dict = Depends(get_current_user),
 ) -> ClusterMembersResponse:
@@ -794,22 +907,22 @@ async def get_cluster_members(
     async with pool.acquire() as conn:
         cluster = await resolve_cluster_for_actor(conn, actor, cluster_id)
         all_ids = cluster["member_ids"]
-        rows = await conn.fetch(
-            "SELECT * FROM memories WHERE id = ANY($1::uuid[]) ORDER BY created_at DESC",
-            all_ids)
+        rows = await conn.fetch("SELECT * FROM memories WHERE id = ANY($1::uuid[]) ORDER BY created_at DESC", all_ids)
         md = _parse_jsonb(cluster.get("metadata")).get("member_distances", {})
         vis = await precompute_read_visibility(conn, actor)
         visible = []
         for mem in rows:
             if check_read_memory(vis, mem):
-                visible.append(ClusterMember(
-                    memory_id=mem["id"],
-                    content=mem["content"],
-                    tags=list(mem["tags"]),
-                    type=mem["type"],
-                    created_at=mem["created_at"],
-                    distances=md.get(str(mem["id"]), {}),
-                ))
+                visible.append(
+                    ClusterMember(
+                        memory_id=mem["id"],
+                        content=mem["content"],
+                        tags=list(mem["tags"]),
+                        type=mem["type"],
+                        created_at=mem["created_at"],
+                        distances=md.get(str(mem["id"]), {}),
+                    )
+                )
         if cursor:
             try:
                 cursor_dt = datetime.fromisoformat(cursor)
@@ -818,14 +931,13 @@ async def get_cluster_members(
             visible = [m for m in visible if m.created_at < cursor_dt]
         page = visible[:limit]
         next_cursor = page[-1].created_at.isoformat() if len(visible) > limit else None
-    return ClusterMembersResponse(
-        cluster_id=cluster_id, members=page,
-        total=len(visible), cursor_next=next_cursor)
+    return ClusterMembersResponse(cluster_id=cluster_id, members=page, total=len(visible), cursor_next=next_cursor)
 
 
 @router.get("/{cluster_id}/sources")
 async def get_cluster_sources(
-    cluster_id: UUID, actor: dict = Depends(get_current_user),
+    cluster_id: UUID,
+    actor: dict = Depends(get_current_user),
 ) -> ClusterSourcesResponse:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -837,16 +949,24 @@ async def get_cluster_sources(
                 "SELECT *, coalesce(array_length(member_ids,1),0) AS member_count, "
                 "coalesce(array_length(source_ids,1),0) AS source_count "
                 "FROM memory_clusters WHERE id = ANY($1::uuid[]) AND agent_id = $2 AND status = 'active'",
-                cluster["source_ids"], agent_id)
+                cluster["source_ids"],
+                agent_id,
+            )
             sources = [_cluster_summary(r) for r in source_rows]
-        parents = await conn.fetch("""
+        parents = await conn.fetch(
+            """
             SELECT *, coalesce(array_length(member_ids,1),0) AS member_count,
                    coalesce(array_length(source_ids,1),0) AS source_count
             FROM memory_clusters WHERE $1::uuid = ANY(source_ids) AND agent_id = $2 AND status = 'active'
-        """, cluster_id, agent_id)
-    return {"cluster_id": str(cluster_id),
-            "sources": sources,
-            "parent_clusters": [_cluster_summary(r) for r in parents]}
+        """,
+            cluster_id,
+            agent_id,
+        )
+    return {
+        "cluster_id": str(cluster_id),
+        "sources": sources,
+        "parent_clusters": [_cluster_summary(r) for r in parents],
+    }
 
 
 # C23 (#221): an owner rewrite is no longer the cell's text, so the cluster must stop
@@ -872,26 +992,27 @@ _OWNER_NARRATE_SQL = """
 
 @router.put("/{cluster_id}/narrate")
 async def narrate_cluster(
-    cluster_id: UUID, body: NarrateBody,
+    cluster_id: UUID,
+    body: NarrateBody,
     actor: dict = Depends(get_current_user),
 ) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         cluster = await resolve_cluster_for_actor(conn, actor, cluster_id)
         await conn.execute(_OWNER_NARRATE_SQL, body.narrative, cluster_id)
-        org_id = await conn.fetchval(
-            "SELECT organization_id FROM workspaces WHERE id=$1",
-            cluster["workspace_id"])
-        await broadcast_event("cluster.narrated",
-            {"cluster_id": str(cluster_id),
-             "agent_identifier": cluster["agent_identifier"]},
-            org_id=org_id)
+        org_id = await conn.fetchval("SELECT organization_id FROM workspaces WHERE id=$1", cluster["workspace_id"])
+        await broadcast_event(
+            "cluster.narrated",
+            {"cluster_id": str(cluster_id), "agent_identifier": cluster["agent_identifier"]},
+            org_id=org_id,
+        )
     return {"ok": True}
 
 
 @router.put("/{cluster_id}/status")
 async def update_cluster_status(
-    cluster_id: UUID, body: ClusterStatusBody,
+    cluster_id: UUID,
+    body: ClusterStatusBody,
     actor: dict = Depends(get_current_user),
 ) -> dict:
     pool = await get_pool()
@@ -900,16 +1021,10 @@ async def update_cluster_status(
         valid = {("candidate", "active"), ("candidate", "rejected"), ("active", "superseded")}
         if (cluster["status"], body.status) not in valid:
             raise HTTPException(422, f"invalid transition {cluster['status']} -> {body.status}")
-        await conn.execute(
-            "UPDATE memory_clusters SET status=$1 WHERE id=$2",
-            body.status, cluster_id)
-        event_map = {"active": "cluster.promoted", "rejected": "cluster.rejected",
-                     "superseded": "cluster.superseded"}
-        org_id = await conn.fetchval(
-            "SELECT organization_id FROM workspaces WHERE id=$1",
-            cluster["workspace_id"])
-        event_data = {"cluster_id": str(cluster_id),
-             "agent_identifier": cluster["agent_identifier"]}
+        await conn.execute("UPDATE memory_clusters SET status=$1 WHERE id=$2", body.status, cluster_id)
+        event_map = {"active": "cluster.promoted", "rejected": "cluster.rejected", "superseded": "cluster.superseded"}
+        org_id = await conn.fetchval("SELECT organization_id FROM workspaces WHERE id=$1", cluster["workspace_id"])
+        event_data = {"cluster_id": str(cluster_id), "agent_identifier": cluster["agent_identifier"]}
         if body.reason:
             event_data["reason"] = body.reason
         await broadcast_event(event_map[body.status], event_data, org_id=org_id)
@@ -924,5 +1039,4 @@ async def delete_cluster(cluster_id: UUID, actor: dict = Depends(get_current_use
     async with pool.acquire() as conn:
         if not await conn.fetchval("SELECT 1 FROM memory_clusters WHERE id=$1", cluster_id):
             raise HTTPException(404)
-        await conn.execute(
-            "UPDATE memory_clusters SET status='rejected' WHERE id=$1", cluster_id)
+        await conn.execute("UPDATE memory_clusters SET status='rejected' WHERE id=$1", cluster_id)

@@ -15,6 +15,7 @@ estar FUERA del pool DB cuando llame esto. Si embeddings tarda 30s con la GPU
 saturada, no queremos bloquear conexiones del pool. El patron trifasico
 (validar → libera pool → embed → re-acquire) lo aplica el endpoint llamante.
 """
+
 from __future__ import annotations
 
 import base64

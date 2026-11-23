@@ -3,6 +3,7 @@ superseded cluster's content lives in its kept (active) twin, but it stays in
 the parent's source_ids — so every child/source/parent lookup filters
 status='active'. Router-only, fake conn recording SQL — no DB.
 """
+
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,9 +46,20 @@ def _client(monkeypatch, conn):
         return {"id": 1}
 
     async def _cluster(c, actor, cid):
-        return {"id": cid, "agent_id": 1, "level": "monthly", "label": "m", "member_ids": [],
-                "source_ids": [SRC], "status": "active", "period_start": "2026-09-01", "period_end": "2026-09-30",
-                "created_at": "2026-09-01T00:00:00", "metadata": {}, "workspace_id": 1}
+        return {
+            "id": cid,
+            "agent_id": 1,
+            "level": "monthly",
+            "label": "m",
+            "member_ids": [],
+            "source_ids": [SRC],
+            "status": "active",
+            "period_start": "2026-09-01",
+            "period_end": "2026-09-30",
+            "created_at": "2026-09-01T00:00:00",
+            "metadata": {},
+            "workspace_id": 1,
+        }
 
     monkeypatch.setattr(clusters, "get_pool", _pool)
     monkeypatch.setattr(clusters, "resolve_agent_for_actor", _agent)

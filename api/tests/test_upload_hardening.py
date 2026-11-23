@@ -2,6 +2,7 @@
 store — size cap, extension denylist, permission. Now that the MCP routes every
 agent document through it, it is the only gate. No DB: router-only app, fake pool.
 """
+
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path

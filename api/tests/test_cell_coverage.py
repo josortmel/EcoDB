@@ -4,6 +4,7 @@ memoria (muere en MIN_CLUSTER_SIZE), el índice que el LLM no devuelve, la dedup
 solapado con sus miembros, y la semana con menos memorias que un cluster. Ahora, después de todo eso, cada memoria
 que sigue fuera entra de forma determinista en el cluster de centroide más parecido; sin embedding o sin ningún
 cluster, en «Sueltas de la semana», que no tiene narrativa (no entra en prev_narratives). El rollup las ve."""
+
 import asyncio
 import inspect
 import json
@@ -25,14 +26,21 @@ A, B = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]
 
 
 def _m(i, emb):
-    return {"id": f"m{i}", "weight": 0.5, "type": "momento", "agent_identifier": "Prima",
-            "created_at": datetime(2026, 4, 6, tzinfo=timezone.utc), "content": f"memoria {i}",
-            "embedding": cw._vec_literal(emb) if emb is not None else None}
+    return {
+        "id": f"m{i}",
+        "weight": 0.5,
+        "type": "momento",
+        "agent_identifier": "Prima",
+        "created_at": datetime(2026, 4, 6, tzinfo=timezone.utc),
+        "content": f"memoria {i}",
+        "embedding": cw._vec_literal(emb) if emb is not None else None,
+    }
 
 
 def _llm(answer):
     async def fake(system_prompt, user_prompt):
         return json.dumps(answer)
+
     return fake
 
 
@@ -65,8 +73,9 @@ def test_a_singleton_group_is_not_lost(monkeypatch):
 def test_the_dedup_does_not_take_members_with_it(monkeypatch):
     # «b» overlaps «a» by 4/5 > 0.8 and is dropped by the dedup; m4 was only in «b».
     mems = [_m(i, A) for i in range(5)]
-    ans = {"clusters": [{"label": "a", "member_indices": [0, 1, 2, 3]},
-                        {"label": "b", "member_indices": [0, 1, 2, 3, 4]}]}
+    ans = {
+        "clusters": [{"label": "a", "member_indices": [0, 1, 2, 3]}, {"label": "b", "member_indices": [0, 1, 2, 3, 4]}]
+    }
     clusters, added = _run(monkeypatch, mems, [0, 0, 0, 0, 0], ans)
     assert [c["label"] for c in clusters] == ["a"] and added == ["m4"]
     assert _covered(clusters) == [f"m{i}" for i in range(5)]
@@ -96,7 +105,7 @@ def test_nothing_is_added_when_everything_is_covered(monkeypatch):
 def test_the_loose_cluster_never_enters_the_next_weeks_context():
     src = inspect.getsource(cw.run_consolidation)
     prev = re.search(r"prev_narratives = await conn\.fetch\(\"\"\"(.*?)\"\"\"", src, re.S).group(1)
-    assert "narrative IS NOT NULL" in prev        # the loose cluster has narrative None
+    assert "narrative IS NOT NULL" in prev  # the loose cluster has narrative None
 
 
 def test_a_small_week_skips_the_thematic_llm_and_is_covered():

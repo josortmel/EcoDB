@@ -1,4 +1,5 @@
 """Document parsers for EcoDB ingestion pipeline — Tasks 4.2 + 4.3."""
+
 import asyncio
 import logging
 import os
@@ -28,6 +29,7 @@ def _get_whisper_model():
         if WHISPER_MODEL not in _WHISPER_MODEL_ALLOWLIST:
             raise ValueError(f"WHISPER_MODEL '{WHISPER_MODEL}' not in allowlist: {_WHISPER_MODEL_ALLOWLIST}")
         import whisper
+
         _whisper_model = whisper.load_model(WHISPER_MODEL, device="cpu")
     return _whisper_model
 
@@ -36,14 +38,14 @@ def _get_whisper_model():
 class ParseResult:
     text: str
     sections: list[dict] = field(default_factory=list)  # [{title, level, content}]
-    tables: list[str] = field(default_factory=list)      # markdown tables
-    metadata: dict = field(default_factory=dict)          # {title, author, pages, language, size_bytes}
+    tables: list[str] = field(default_factory=list)  # markdown tables
+    metadata: dict = field(default_factory=dict)  # {title, author, pages, language, size_bytes}
 
 
 @dataclass
 class TranscriptionResult:
     text: str
-    segments: list[dict] = field(default_factory=list)   # [{text, start, end}]
+    segments: list[dict] = field(default_factory=list)  # [{text, start, end}]
     language: str = ""
     metadata: dict = field(default_factory=dict)
 
@@ -51,6 +53,7 @@ class TranscriptionResult:
 # ---------------------------------------------------------------------------
 # Task 4.2 — Docling parser (PDF, TXT, MD, DOCX, HTML)
 # ---------------------------------------------------------------------------
+
 
 async def parse_document(file_path: str, doc_type: str) -> ParseResult:
     """Parse document using Docling. CPU-only (CUDA_VISIBLE_DEVICES='').
@@ -93,14 +96,16 @@ async def parse_document(file_path: str, doc_type: str) -> ParseResult:
         sections = []
         for item in doc.iterate_items():
             if hasattr(item, "label") and "heading" in str(item.label).lower():
-                sections.append({
-                    "title": item.text if hasattr(item, "text") else str(item),
-                    "level": getattr(item, "level", 1),
-                    "content": "",
-                })
+                sections.append(
+                    {
+                        "title": item.text if hasattr(item, "text") else str(item),
+                        "level": getattr(item, "level", 1),
+                        "content": "",
+                    }
+                )
 
         tables = []
-        for table in (doc.tables if hasattr(doc, "tables") else []):
+        for table in doc.tables if hasattr(doc, "tables") else []:
             try:
                 tables.append(table.export_to_markdown())
             except Exception:
@@ -115,7 +120,11 @@ async def parse_document(file_path: str, doc_type: str) -> ParseResult:
 
         log.info(
             "Parsed %s (%s): %d chars, %d sections, %d tables",
-            file_path, doc_type, len(text), len(sections), len(tables),
+            file_path,
+            doc_type,
+            len(text),
+            len(sections),
+            len(tables),
         )
         return ParseResult(text=text, sections=sections, tables=tables, metadata=metadata)
 
@@ -125,17 +134,20 @@ async def parse_document(file_path: str, doc_type: str) -> ParseResult:
 def _extract_markdown_sections(text: str) -> list[dict]:
     sections = []
     for match in re.finditer(r"^(#{1,6})\s+(.+)$", text, re.MULTILINE):
-        sections.append({
-            "title": match.group(2).strip(),
-            "level": len(match.group(1)),
-            "content": "",
-        })
+        sections.append(
+            {
+                "title": match.group(2).strip(),
+                "level": len(match.group(1)),
+                "content": "",
+            }
+        )
     return sections
 
 
 # ---------------------------------------------------------------------------
 # Task 4.3 — Whisper parser (audio transcription)
 # ---------------------------------------------------------------------------
+
 
 async def transcribe_audio(file_path: str) -> TranscriptionResult:
     """Transcribe audio using Whisper CPU. Auto-detects language.
@@ -155,9 +167,13 @@ async def transcribe_audio(file_path: str) -> TranscriptionResult:
     # Check duration before loading model (async — does not block event loop)
     try:
         proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "quiet",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             file_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -190,15 +206,17 @@ async def transcribe_audio(file_path: str) -> TranscriptionResult:
     result = await loop.run_in_executor(None, _transcribe)
 
     segments = [
-        {"text": seg["text"].strip(), "start": seg["start"], "end": seg["end"]}
-        for seg in result.get("segments", [])
+        {"text": seg["text"].strip(), "start": seg["start"], "end": seg["end"]} for seg in result.get("segments", [])
     ]
     language = result.get("language", "unknown")
     full_text = result.get("text", "").strip()
 
     log.info(
         "Transcribed %s: %d chars, %d segments, language=%s",
-        file_path, len(full_text), len(segments), language,
+        file_path,
+        len(full_text),
+        len(segments),
+        language,
     )
 
     return TranscriptionResult(

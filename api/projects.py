@@ -33,6 +33,7 @@ respeta el flag en read-cascade.
 Deuda registrada para Tarea 2.x (multi-tenant fork): rate limit en bulk-delete
 /memories antes de exponer DELETE /projects a CEOs cliente.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,6 +64,7 @@ router = APIRouter(tags=["projects"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class ProjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -111,6 +113,7 @@ class ProjectListResponse(BaseModel):
 # project_leads
 # ---------------------------------------------------------------------------
 
+
 class ProjectLeadAdd(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: int = Field(..., gt=0)
@@ -136,6 +139,7 @@ class ProjectLeadsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/workspaces/{workspace_id}/projects", response_model=ProjectResponse, status_code=201)
 async def create_project(
@@ -163,7 +167,9 @@ async def create_project(
                 VALUES ($1, $2, $3)
                 RETURNING id, workspace_id, name, is_common, created_at
                 """,
-                workspace_id, body.name, body.is_common,
+                workspace_id,
+                body.name,
+                body.is_common,
             )
         except UniqueViolationError:
             # Schema tiene UNIQUE(workspace_id, name).
@@ -174,7 +180,8 @@ async def create_project(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'create_project', 'project', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(row["id"]),
+            int(actor["sub"]),
+            str(row["id"]),
             json.dumps({"workspace_id": workspace_id, "name": body.name, "is_common": body.is_common}),
             actor.get("organization_id"),
         )
@@ -223,7 +230,12 @@ async def list_projects_in_workspace(
             FROM workspaces w
             WHERE w.id = $6
             """,
-            is_super, is_ceo, org_id, lead_ws, user_id, workspace_id,
+            is_super,
+            is_ceo,
+            org_id,
+            lead_ws,
+            user_id,
+            workspace_id,
         )
         if access_row is None:
             raise HTTPException(403, "no access to this workspace")
@@ -251,7 +263,8 @@ async def list_projects_in_workspace(
                   )
                 ORDER BY id
                 """,
-                workspace_id, user_id,
+                workspace_id,
+                user_id,
             )
         else:
             raise HTTPException(403, "no access to this workspace")
@@ -299,7 +312,12 @@ async def get_project(
                    ))
               )
             """,
-            project_id, is_super, is_ceo, org_id, lead_ws, user_id,
+            project_id,
+            is_super,
+            is_ceo,
+            org_id,
+            lead_ws,
+            user_id,
         )
     if row is None:
         raise HTTPException(403, "no access to this project")
@@ -339,7 +357,8 @@ async def update_project(
                 WHERE id = $1
                 RETURNING id, workspace_id, name, is_common, created_at
                 """,
-                project_id, body.name,
+                project_id,
+                body.name,
             )
         except UniqueViolationError:
             raise HTTPException(409, "project with this name already exists in the workspace")
@@ -352,7 +371,8 @@ async def update_project(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'update_project', 'project', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(project_id),
+            int(actor["sub"]),
+            str(project_id),
             json.dumps({"name": body.name}),
             actor.get("organization_id"),
         )
@@ -414,12 +434,16 @@ async def delete_project(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'delete', 'project', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), str(project_id),
-                    json.dumps({
-                        "name": row["name"],
-                        "workspace_id": row["workspace_id"],
-                        "is_common": row["is_common"],
-                    }), actor.get("organization_id"),
+                    int(actor["sub"]),
+                    str(project_id),
+                    json.dumps(
+                        {
+                            "name": row["name"],
+                            "workspace_id": row["workspace_id"],
+                            "is_common": row["is_common"],
+                        }
+                    ),
+                    actor.get("organization_id"),
                 )
                 # Cleanup explícito project_leads (no hay CASCADE en projects→
                 # project_leads en orden — sí lo hay vía FK pero el DELETE de
@@ -427,12 +451,8 @@ async def delete_project(
                 await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
         except ForeignKeyViolationError:
             # Project tiene memorias o documentos → bloqueo del schema.
-            n_memories = await conn.fetchval(
-                "SELECT count(*) FROM memories WHERE project_id = $1", project_id
-            )
-            n_documents = await conn.fetchval(
-                "SELECT count(*) FROM documents WHERE project_id = $1", project_id
-            )
+            n_memories = await conn.fetchval("SELECT count(*) FROM memories WHERE project_id = $1", project_id)
+            n_documents = await conn.fetchval("SELECT count(*) FROM documents WHERE project_id = $1", project_id)
             parts = []
             if n_memories:
                 parts.append(f"{n_memories} memories")
@@ -448,6 +468,7 @@ async def delete_project(
 # ---------------------------------------------------------------------------
 # — endpoints project_leads
 # ---------------------------------------------------------------------------
+
 
 @router.post("/projects/{project_id}/leads", response_model=ProjectLeadLink, status_code=201)
 async def add_project_lead(
@@ -483,15 +504,18 @@ async def add_project_lead(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'add_lead', 'project', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), str(project_id),
-                    json.dumps({"user_id": body.user_id}), actor.get("organization_id"),
+                    int(actor["sub"]),
+                    str(project_id),
+                    json.dumps({"user_id": body.user_id}),
+                    actor.get("organization_id"),
                 )
                 await conn.execute(
                     """
                     INSERT INTO project_leads (project_id, user_id) VALUES ($1, $2)
                     ON CONFLICT (project_id, user_id) DO NOTHING
                     """,
-                    project_id, body.user_id,
+                    project_id,
+                    body.user_id,
                 )
         except ForeignKeyViolationError:
             raise HTTPException(422, "user does not exist")
@@ -533,7 +557,8 @@ async def remove_project_lead(
                 WHERE project_id = $1 AND user_id = $2
                 RETURNING user_id
                 """,
-                project_id, user_id,
+                project_id,
+                user_id,
             )
             if deleted is not None:
                 await conn.execute(
@@ -541,8 +566,10 @@ async def remove_project_lead(
                     INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                     VALUES ($1, 'remove_lead', 'project', $2, $3::jsonb, $4)
                     """,
-                    int(actor["sub"]), str(project_id),
-                    json.dumps({"user_id": user_id}), actor.get("organization_id"),
+                    int(actor["sub"]),
+                    str(project_id),
+                    json.dumps({"user_id": user_id}),
+                    actor.get("organization_id"),
                 )
 
 
@@ -579,7 +606,12 @@ async def list_project_leads(
                           WHERE project_id = p.id AND user_id = $6)
               )
             """,
-            project_id, is_super, is_ceo, org_id, lead_ws, user_id,
+            project_id,
+            is_super,
+            is_ceo,
+            org_id,
+            lead_ws,
+            user_id,
         )
         if row is None:
             raise HTTPException(403, "no access to this project")

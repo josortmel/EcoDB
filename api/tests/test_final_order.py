@@ -4,6 +4,7 @@ document chunks. Before, include_documents=true re-sorted by composite while
 include_documents=false kept the reranker's order (ms-marco degrades Spanish, #374).
 Pure: reranker stubbed.
 """
+
 import sys
 from pathlib import Path
 
@@ -14,8 +15,9 @@ import search  # noqa: E402
 
 
 def _res(content, score, source_type="memory"):
-    return search.SearchResult.model_construct(content=content, score=score,
-                                               reranker_score=None, source_type=source_type)
+    return search.SearchResult.model_construct(
+        content=content, score=score, reranker_score=None, source_type=source_type
+    )
 
 
 def _pipeline(monkeypatch, with_docs: bool, limit=3):
@@ -37,8 +39,8 @@ def _pipeline(monkeypatch, with_docs: bool, limit=3):
 
 def test_docs_off_final_order_is_composite(monkeypatch):
     out = _pipeline(monkeypatch, with_docs=False)
-    assert [r.content for r in out] == ["b", "c", "d"]          # membership: reranker; order: composite
-    assert [r.reranker_score for r in out] == [1.0, 2.0, 3.0]    # still visible
+    assert [r.content for r in out] == ["b", "c", "d"]  # membership: reranker; order: composite
+    assert [r.reranker_score for r in out] == [1.0, 2.0, 3.0]  # still visible
 
 
 def test_docs_on_and_off_give_the_same_memory_order(monkeypatch):

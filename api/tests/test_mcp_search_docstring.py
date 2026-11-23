@@ -4,6 +4,7 @@ after the cut (cluster_mode, response fields) was invisible. It must stay
 short and must name every parameter. Also: include_dormant must be exposed
 and passed through to POST /search. Static (AST) check.
 """
+
 import ast
 from pathlib import Path
 
@@ -38,7 +39,8 @@ def test_search_exposes_and_forwards_include_dormant():
     forwarded = {
         node.targets[0].slice.value
         for node in ast.walk(func)
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Subscript)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Subscript)
         and getattr(node.targets[0].value, "id", None) == "payload"
         and isinstance(node.targets[0].slice, ast.Constant)
     }
@@ -50,11 +52,17 @@ def test_search_always_forwards_include_documents():
     func = _search_func()
     top_level_keys = set()
     for stmt in func.body:  # direct statements, not nested under an `if`
-        if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Subscript) \
-                and getattr(stmt.targets[0].value, "id", None) == "payload":
+        if (
+            isinstance(stmt, ast.Assign)
+            and isinstance(stmt.targets[0], ast.Subscript)
+            and getattr(stmt.targets[0].value, "id", None) == "payload"
+        ):
             top_level_keys.add(stmt.targets[0].slice.value)
-        if isinstance(stmt, (ast.Assign, ast.AnnAssign)) and isinstance(stmt.value, ast.Dict) \
-                and getattr(stmt.targets[0] if isinstance(stmt, ast.Assign) else stmt.target, "id", None) == "payload":
+        if (
+            isinstance(stmt, (ast.Assign, ast.AnnAssign))
+            and isinstance(stmt.value, ast.Dict)
+            and getattr(stmt.targets[0] if isinstance(stmt, ast.Assign) else stmt.target, "id", None) == "payload"
+        ):
             top_level_keys |= {k.value for k in stmt.value.keys if isinstance(k, ast.Constant)}
     assert "include_documents" in top_level_keys
 

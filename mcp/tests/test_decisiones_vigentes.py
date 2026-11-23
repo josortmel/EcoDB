@@ -3,6 +3,7 @@
 La lógica vive en la API (api/vigentes.py). El MCP no se queda con una copia: si volviera a
 existir mcp/vigentes.py, este test lo dice.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -32,11 +33,14 @@ def _llamar(monkeypatch, **kw):
 
 
 def test_llama_al_endpoint_con_sus_parametros(monkeypatch):
-    datos, llamadas = _llamar(monkeypatch, tema="horario de la tienda", agente="Hilo",
-                              incluir_superadas=True, limit=7)
-    assert llamadas == [("GET", "/api/v1/decisiones/vigentes",
-                         {"tema": "horario de la tienda", "incluir_superadas": "true", "limit": 7,
-                          "agente": "Hilo"})]
+    datos, llamadas = _llamar(monkeypatch, tema="horario de la tienda", agente="Hilo", incluir_superadas=True, limit=7)
+    assert llamadas == [
+        (
+            "GET",
+            "/api/v1/decisiones/vigentes",
+            {"tema": "horario de la tienda", "incluir_superadas": "true", "limit": 7, "agente": "Hilo"},
+        )
+    ]
     assert datos["vigentes"][0]["id"] == "C"
 
 

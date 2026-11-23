@@ -1,4 +1,5 @@
 """Measure EcoDB search latency across all golden set queries."""
+
 import httpx
 import yaml
 import time
@@ -35,9 +36,9 @@ if latencies:
     s = sorted(latencies)
     n = len(s)
     print(f"\n--- Latency Summary ({n} queries) ---")
-    print(f"p50:  {s[n//2]:.0f}ms")
-    print(f"p95:  {s[int(n*0.95)]:.0f}ms")
-    print(f"p99:  {s[int(n*0.99)]:.0f}ms")
+    print(f"p50:  {s[n // 2]:.0f}ms")
+    print(f"p95:  {s[int(n * 0.95)]:.0f}ms")
+    print(f"p99:  {s[int(n * 0.99)]:.0f}ms")
     print(f"min:  {min(s):.0f}ms")
     print(f"max:  {max(s):.0f}ms")
     print(f"mean: {statistics.mean(s):.0f}ms")

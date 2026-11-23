@@ -10,6 +10,7 @@ Etapas:
 7. Contradicciones
 8. Ensamblaje score compuesto
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,12 +34,21 @@ from embeddings_client import embed_image, embed_text
 from permissions import no_null_bytes as _no_null_bytes
 from permissions import ids_legibles, visible_project_ids, visible_workspace_ids
 import settings
-from settings import ENABLE_BM25, ENABLE_BM25_EXPANSION, ENABLE_STOP_ENTITIES_DYNAMIC, ENABLE_TRUST_TIERS, ENABLE_WEIGHT_DYNAMIC, GAMR_WEIGHTS_BM25
+from settings import (
+    ENABLE_BM25,
+    ENABLE_BM25_EXPANSION,
+    ENABLE_STOP_ENTITIES_DYNAMIC,
+    ENABLE_TRUST_TIERS,
+    ENABLE_WEIGHT_DYNAMIC,
+    GAMR_WEIGHTS_BM25,
+)
 from settings import RERANK_BLEND_ALPHA, RERANK_MODE
+
 
 async def generate_hypothetical(query_text: str) -> str | None:
     """Generate a hypothetical answer for HyDE. Returns None if LLM unavailable."""
     from llm_provider import get_llm_provider
+
     provider = get_llm_provider()
     if not provider:
         return None
@@ -91,7 +101,7 @@ _GRAPH_ENTITY_NORM = 3.0
 CHUNK_SCORE_FACTOR = float(os.environ.get("CHUNK_SCORE_FACTOR", "0.7"))
 
 GAMR_WEIGHTS: dict[str, dict[str, float]] = {
-    "factual":    {"semantic": 0.35, "graph": 0.15, "weight": 0.20, "freshness": 0.30},
+    "factual": {"semantic": 0.35, "graph": 0.15, "weight": 0.20, "freshness": 0.30},
     "historical": {"semantic": 0.40, "graph": 0.20, "weight": 0.30, "freshness": 0.10},
     "analytical": {"semantic": 0.30, "graph": 0.30, "weight": 0.25, "freshness": 0.15},
     "contextual": {"semantic": 0.35, "graph": 0.25, "weight": 0.25, "freshness": 0.15},
@@ -197,8 +207,10 @@ def classify_query_type(query_text: str) -> str:
 # — Detección de contradicciones (Etapa 7 GAMR)
 # ---------------------------------------------------------------------------
 
+
 async def detect_contradictions(
-    pool, memory_ids: list[str],
+    pool,
+    memory_ids: list[str],
 ) -> list[dict]:
     """Etapa 7 GAMR — detección pairwise de contradicciones.
 
@@ -213,7 +225,8 @@ async def detect_contradictions(
     if len(memory_ids) < 2:
         return []
     async with pool.acquire() as conn:
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT m1.id AS id1, m2.id AS id2,
                    1 - (me1.embedding <=> me2.embedding) AS similarity,
                    m1.type::text AS type1, m2.type::text AS type2,
@@ -228,22 +241,26 @@ async def detect_contradictions(
               AND 1 - (me1.embedding <=> me2.embedding) > 0.85
               AND ABS(EXTRACT(EPOCH FROM m1.created_at - m2.created_at)) > 86400
             LIMIT {MAX_CONTRADICTION_PAIRS}
-        """, memory_ids)
+        """,
+            memory_ids,
+        )
 
     similar_types = {"decision", "acuerdo"}
     contradictions = []
     for r in rows:
         t1, t2 = r["type1"], r["type2"]
         if t1 == t2 or (t1 in similar_types and t2 in similar_types):
-            contradictions.append({
-                "memory_id_1": str(r["id1"]),
-                "memory_id_2": str(r["id2"]),
-                "similarity": round(float(r["similarity"]), 4),
-                "type_1": t1,
-                "type_2": t2,
-                "created_1": r["created1"].isoformat(),
-                "created_2": r["created2"].isoformat(),
-            })
+            contradictions.append(
+                {
+                    "memory_id_1": str(r["id1"]),
+                    "memory_id_2": str(r["id2"]),
+                    "similarity": round(float(r["similarity"]), 4),
+                    "type_1": t1,
+                    "type_2": t2,
+                    "created_1": r["created1"].isoformat(),
+                    "created_2": r["created2"].isoformat(),
+                }
+            )
     return contradictions
 
 
@@ -252,8 +269,9 @@ def _minmax(values: list[float]) -> list[float]:
     return [0.0] * len(values) if hi == lo else [(v - lo) / (hi - lo) for v in values]
 
 
-def _apply_rerank(results: list, query_text, limit: int, enabled: bool,
-                  mode: str = "replace", alpha: float = 0.5) -> list:
+def _apply_rerank(
+    results: list, query_text, limit: int, enabled: bool, mode: str = "replace", alpha: float = 0.5
+) -> list:
     """Etapa 9: decides which `limit` results survive (membership). `results` arrive sorted
     by composite score. C32 (#243) modes:
       replace — the cross-encoder's own top-k (historic behaviour);
@@ -264,6 +282,7 @@ def _apply_rerank(results: list, query_text, limit: int, enabled: bool,
     if not enabled or mode == "off":
         return results[:limit]
     import reranker
+
     rerank_dicts = [{"content": r.content, "_idx": i} for i, r in enumerate(results)]
     if mode == "replace":
         reranked = reranker.rerank(query_text, rerank_dicts, top_k=limit)
@@ -302,8 +321,11 @@ def agent_name_warning(query_text, requested_agent, identifiers, results) -> Opt
     passed, and some memory results belong to someone else. Label it; never re-rank."""
     if requested_agent is not None or not query_text:
         return None
-    named = {i for i in identifiers
-             if i != "SIN_AUTOR" and re.search(rf"(?<!\w){re.escape(i)}(?!\w)", query_text, re.IGNORECASE)}
+    named = {
+        i
+        for i in identifiers
+        if i != "SIN_AUTOR" and re.search(rf"(?<!\w){re.escape(i)}(?!\w)", query_text, re.IGNORECASE)
+    }
     if len(named) != 1:
         return None
     (agent,) = named
@@ -315,8 +337,10 @@ def agent_name_warning(query_text, requested_agent, identifiers, results) -> Opt
     others = [r for r in memories if (_get(r, "agent_identifier") or "").lower() != agent.lower()]
     if not others:
         return None
-    return (f"query names agent '{agent}' but results include other agents' memories "
-            f"({len(others)} of {len(memories)}); pass agent_identifier=\"{agent}\" to restrict")
+    return (
+        f"query names agent '{agent}' but results include other agents' memories "
+        f'({len(others)} of {len(memories)}); pass agent_identifier="{agent}" to restrict'
+    )
 
 
 def date_window_warnings(fecha_desde, fecha_hasta, result_count: int) -> list[str]:
@@ -329,13 +353,16 @@ def date_window_warnings(fecha_desde, fecha_hasta, result_count: int) -> list[st
     if fecha_desde is not None and fecha_hasta is not None and fecha_desde == fecha_hasta:
         out.append(
             f"zero-width date window: fecha_desde == fecha_hasta ({fecha_hasta.isoformat()}) is a single "
-            f"instant; to cover that whole day use fecha_hasta=\"{fecha_hasta.date().isoformat()}T23:59:59.999999\""
+            f'instant; to cover that whole day use fecha_hasta="{fecha_hasta.date().isoformat()}T23:59:59.999999"'
         )
-    elif (fecha_hasta is not None and result_count == 0
-          and (fecha_hasta.hour, fecha_hasta.minute, fecha_hasta.second, fecha_hasta.microsecond) == (0, 0, 0, 0)):
+    elif (
+        fecha_hasta is not None
+        and result_count == 0
+        and (fecha_hasta.hour, fecha_hasta.minute, fecha_hasta.second, fecha_hasta.microsecond) == (0, 0, 0, 0)
+    ):
         out.append(
             f"fecha_hasta={fecha_hasta.isoformat()} is the START of {fecha_hasta.date().isoformat()} and the "
-            f"result is empty; if you meant the whole day use fecha_hasta=\"{fecha_hasta.date().isoformat()}T23:59:59.999999\""
+            f'result is empty; if you meant the whole day use fecha_hasta="{fecha_hasta.date().isoformat()}T23:59:59.999999"'
         )
     return out
 
@@ -343,6 +370,7 @@ def date_window_warnings(fecha_desde, fecha_hasta, result_count: int) -> list[st
 # ---------------------------------------------------------------------------
 # — Coherencia temporal (Etapa 6 GAMR)
 # ---------------------------------------------------------------------------
+
 
 def compute_freshness_score(created_at: datetime, query_type: str) -> float:
     """Etapa 6 GAMR — freshness score variable por query_type.
@@ -368,8 +396,10 @@ def compute_freshness_score(created_at: datetime, query_type: str) -> float:
 # — Expansión por grafo (Etapa 4 GAMR)
 # ---------------------------------------------------------------------------
 
-async def _fetch_doc_expansion(conn, entity_ids: list, project_ids=None, limit: int = MAX_DOCUMENT_EXPANSION,
-                               query_vec=None):
+
+async def _fetch_doc_expansion(
+    conn, entity_ids: list, project_ids=None, limit: int = MAX_DOCUMENT_EXPANSION, query_vec=None
+):
     """Fetch document chunks linked to entity_ids, ranked by relevance to the query (#359).
 
     One row per chunk (dedup by chunk_id: a chunk linked through several matched
@@ -393,7 +423,8 @@ async def _fetch_doc_expansion(conn, entity_ids: list, project_ids=None, limit: 
     min_sim_idx = len(params)
     params.append(limit)
     limit_idx = len(params)
-    return await conn.fetch(f"""
+    return await conn.fetch(
+        f"""
         WITH links AS (
             SELECT del.chunk_id, del.document_id,
                    count(DISTINCT del.entity_node_id) AS matched_entities
@@ -420,7 +451,9 @@ async def _fetch_doc_expansion(conn, entity_ids: list, project_ids=None, limit: 
         SELECT * FROM ranked WHERE rn <= 2
         ORDER BY query_similarity DESC NULLS LAST, matched_entities DESC, base_weight DESC, chunk_id
         LIMIT ${limit_idx}
-    """, *params)
+    """,
+        *params,
+    )
 
 
 # #1144 (parche del grafo, Pepe 11-nov: «parche ya + arreglo después»): el salto 2 por cypher agota su tiempo
@@ -447,7 +480,8 @@ def _saltos(hop2: Optional[bool] = None) -> tuple[int, ...]:
 
 
 async def expand_by_graph(
-    pool, candidate_memory_ids: list[str],
+    pool,
+    candidate_memory_ids: list[str],
     visible_project_ids: Optional[list[int]] = None,
     query_vec=None,
     hop2: Optional[bool] = None,
@@ -467,12 +501,15 @@ async def expand_by_graph(
 
     async with pool.acquire() as conn:
         # Paso 1 — Obtener entidades vinculadas a TODOS los candidatos (SQL batch)
-        entity_rows = await conn.fetch("""
+        entity_rows = await conn.fetch(
+            """
             SELECT mel.memory_id, mel.entity_node_id, n.name AS entity_name
             FROM memory_entity_links mel
             JOIN nodes n ON n.id = mel.entity_node_id
             WHERE mel.memory_id = ANY($1::uuid[])
-        """, candidate_memory_ids)
+        """,
+            candidate_memory_ids,
+        )
 
         if not entity_rows:
             return {}, []
@@ -509,9 +546,11 @@ async def expand_by_graph(
 
         # Task 5.12 — IDF-based attenuation for high-frequency entities
         import math as _math
+
         entity_attenuation: dict[int, float] = {}
         if ENABLE_STOP_ENTITIES_DYNAMIC and all_entity_sql_ids:
-            freq_rows = await conn.fetch("""
+            freq_rows = await conn.fetch(
+                """
                 SELECT canonical_id, sum(doc_freq) AS doc_freq FROM (
                     SELECT COALESCE(n.merged_into, del.entity_node_id) AS canonical_id,
                            count(DISTINCT del.document_id) AS doc_freq
@@ -521,10 +560,10 @@ async def expand_by_graph(
                     GROUP BY canonical_id
                 ) sub
                 GROUP BY canonical_id
-            """, list(all_entity_sql_ids))
-            total_docs = await conn.fetchval(
-                "SELECT count(*) FROM documents WHERE status = 'indexed'"
+            """,
+                list(all_entity_sql_ids),
             )
+            total_docs = await conn.fetchval("SELECT count(*) FROM documents WHERE status = 'indexed'")
             if total_docs and total_docs > 0:
                 for fr in freq_rows:
                     freq_ratio = fr["doc_freq"] / total_docs
@@ -539,14 +578,20 @@ async def expand_by_graph(
             params = json.dumps({"ids": entity_ids_list})
             try:
                 await conn.execute("SET LOCAL statement_timeout = '4500'")
-                rows = await asyncio.wait_for(conn.fetch(f"""
+                rows = await asyncio.wait_for(
+                    conn.fetch(
+                        f"""
                     SELECT * FROM cypher('ecodb_graph', $$
                         UNWIND $ids AS sid
                         MATCH (e:Entity {{sql_id: sid}})-[*{hop_depth}]-(connected:Entity)
                         WHERE connected.sql_id <> sid
                         RETURN DISTINCT connected.sql_id AS csid
                     $$, $1::agtype) AS (csid agtype)
-                """, params), timeout=5.0)
+                """,
+                        params,
+                    ),
+                    timeout=5.0,
+                )
                 for r in rows:
                     csid_raw = r["csid"]
                     csid = int(str(csid_raw).strip('"'))
@@ -558,7 +603,9 @@ async def expand_by_graph(
                 logging.getLogger("ecodb.gamr").warning("expand_by_graph: AGE query timed out hop=%d", hop_depth)
                 continue
             except Exception as _age_err:
-                logging.getLogger("ecodb.gamr").warning("expand_by_graph: AGE query failed hop=%d: %r", hop_depth, _age_err)
+                logging.getLogger("ecodb.gamr").warning(
+                    "expand_by_graph: AGE query failed hop=%d: %r", hop_depth, _age_err
+                )
                 continue
 
         # Incluir entidades originales con hop=0
@@ -570,13 +617,17 @@ async def expand_by_graph(
             expanded_entity_ids = set(sorted(expanded_entity_ids)[:MAX_EXPANDED_ENTITIES])
         all_relevant_entities = list(all_entity_sql_ids | expanded_entity_ids)
         # GC1 aplica check_visibility al fetchear estas IDs — bypass resuelto en v0.8.6.
-        graph_memory_rows = await conn.fetch("""
+        graph_memory_rows = await conn.fetch(
+            """
             SELECT mel.memory_id, mel.entity_node_id
             FROM memory_entity_links mel
             WHERE mel.entity_node_id = ANY($1::int[])
               AND mel.memory_id != ALL($2::uuid[])
             LIMIT 2000
-        """, all_relevant_entities, candidate_memory_ids)
+        """,
+            all_relevant_entities,
+            candidate_memory_ids,
+        )
 
         # Paso 4 — Calcular graph_proximity_score
         # Para cada memoria (original o descubierta), score basado en
@@ -611,24 +662,28 @@ async def expand_by_graph(
 
         # Paso 3b — Document expansion via document_entity_links (Task 4.8)
         doc_graph_context: list[dict] = []
-        doc_chunk_rows = await _fetch_doc_expansion(conn, all_relevant_entities, visible_project_ids,
-                                                    query_vec=query_vec)
+        doc_chunk_rows = await _fetch_doc_expansion(
+            conn, all_relevant_entities, visible_project_ids, query_vec=query_vec
+        )
         for r in doc_chunk_rows:
             tier = (r["trust_tier"] or 1) if ENABLE_TRUST_TIERS else 1
             effective_weight = float(r["base_weight"]) * _TIER_MULTIPLIER.get(tier, 1.0)
-            doc_graph_context.append({
-                "source_type": "document_chunk",
-                "document_id": str(r["document_id"]),
-                "chunk_index": r["chunk_index"],
-                "section_path": r["section_path"],
-                "content": r["content"][:500],
-                "base_weight": effective_weight,
-                # #359: say how this chunk was chosen, so a reader can tell it from the entity channel.
-                "ranked_by": "query_similarity" if r["query_similarity"] is not None else "entity_overlap",
-                "query_similarity": (round(float(r["query_similarity"]), 4)
-                                     if r["query_similarity"] is not None else None),
-                "matched_entities": r["matched_entities"],
-            })
+            doc_graph_context.append(
+                {
+                    "source_type": "document_chunk",
+                    "document_id": str(r["document_id"]),
+                    "chunk_index": r["chunk_index"],
+                    "section_path": r["section_path"],
+                    "content": r["content"][:500],
+                    "base_weight": effective_weight,
+                    # #359: say how this chunk was chosen, so a reader can tell it from the entity channel.
+                    "ranked_by": "query_similarity" if r["query_similarity"] is not None else "entity_overlap",
+                    "query_similarity": (
+                        round(float(r["query_similarity"]), 4) if r["query_similarity"] is not None else None
+                    ),
+                    "matched_entities": r["matched_entities"],
+                }
+            )
 
         # graph_context para metadata de respuesta
         graph_context = []
@@ -647,6 +702,7 @@ async def expand_by_graph(
 # Task 4.9 — Source score resolution (Etapa 5 GAMR)
 # ---------------------------------------------------------------------------
 
+
 async def compute_source_scores(pool, memory_ids: list[str]) -> dict[str, float]:
     """For each memory: score based on linked source documents freshness.
 
@@ -660,12 +716,15 @@ async def compute_source_scores(pool, memory_ids: list[str]) -> dict[str, float]
         return {}
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(
+            """
             SELECT mdl.memory_id, mdl.validated, mdl.link_type, d.status, d.last_indexed, d.trust_tier
             FROM memory_document_links mdl
             JOIN documents d ON d.id = mdl.document_id
             WHERE mdl.memory_id = ANY($1::uuid[])
-        """, memory_ids)
+        """,
+            memory_ids,
+        )
 
     now = datetime.now(timezone.utc)
 
@@ -683,7 +742,7 @@ async def compute_source_scores(pool, memory_ids: list[str]) -> dict[str, float]
                     last_indexed = last_indexed.replace(tzinfo=timezone.utc)
                 days = (now - last_indexed).total_seconds() / 86400
                 if ENABLE_TRUST_TIERS:
-                    tier = (r.get("trust_tier") or 1)
+                    tier = r.get("trust_tier") or 1
                     decay_days = _TIER_DECAY_DAYS.get(tier, DOCUMENT_DECAY_DAYS)
                     tier_mult = _TIER_MULTIPLIER.get(tier, 1.0)
                 else:
@@ -711,9 +770,13 @@ def compute_dynamic_weight(weight_base: float, created_at, memory_type: str, sta
 
     DECAY_RATES = {"none": 0.0, "slow": 0.02, "medium": 0.05, "fast": 0.10}
     TYPE_DECAY = {
-        "acuerdo": "none", "decision": "none", "referencia": "none",
-        "momento": "slow", "descubrimiento": "medium",
-        "observacion": "medium", "tecnico": "fast",
+        "acuerdo": "none",
+        "decision": "none",
+        "referencia": "none",
+        "momento": "slow",
+        "descubrimiento": "medium",
+        "observacion": "medium",
+        "tecnico": "fast",
     }
     STALENESS_PENALTY = {"active": 1.0, "stale": 0.5, "dormant": 0.1, "archived": 0.0}
 
@@ -740,7 +803,9 @@ async def expand_query_bm25(pool, query_text: str, query_embedding, k: int = 3) 
             "SELECT term, 1 - (embedding <=> $1::vector) AS sim "
             "FROM corpus_vocabulary "
             "ORDER BY embedding <=> $1::vector LIMIT $2",
-            query_embedding, k)
+            query_embedding,
+            k,
+        )
         synonyms = [r["term"] for r in rows if float(r["sim"]) > 0.5 and r["term"].lower() not in query_text.lower()]
     if not synonyms:
         return query_text
@@ -751,6 +816,7 @@ async def get_bm25_query(query_text: str) -> str:
     """Extract named entities via GLiNER; use only those for BM25 to avoid noise."""
     try:
         from gliner_service import extract_entities
+
         entities = await extract_entities(query_text)
         if entities:
             return " ".join(e["text"] for e in entities)
@@ -781,18 +847,26 @@ def _graph_context_for_response(graph_context: list[dict], include_docs: bool) -
     return [g for g in graph_context if g.get("source_type") != "document_chunk"]
 
 
-async def compute_bm25_scores(pool, query_text: str, candidate_ids: list[UUID], query_embedding=None) -> dict[str, float]:
+async def compute_bm25_scores(
+    pool, query_text: str, candidate_ids: list[UUID], query_embedding=None
+) -> dict[str, float]:
     """Compute BM25 scores for candidate memories using fulltext search."""
     if not candidate_ids:
         return {}
     gliner_query = await get_bm25_query(query_text)
-    expanded = await expand_query_bm25(pool, gliner_query, query_embedding) if query_embedding is not None else gliner_query
+    expanded = (
+        await expand_query_bm25(pool, gliner_query, query_embedding) if query_embedding is not None else gliner_query
+    )
     async with pool.acquire() as conn:
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT id, ts_rank({_bm25_tsvector("content")}, plainto_tsquery('spanish', $1)) AS bm25
             FROM memories
             WHERE id = ANY($2::uuid[])
-        """, expanded, candidate_ids)
+        """,
+            expanded,
+            candidate_ids,
+        )
         scores = {str(r["id"]): float(r["bm25"]) for r in rows}
         max_s = max(scores.values()) if scores else 0.0
         if max_s > 0.01:
@@ -805,6 +879,7 @@ async def compute_bm25_scores(pool, query_text: str, candidate_ids: list[UUID], 
 # ---------------------------------------------------------------------------
 # — Score compuesto (Etapa 8 GAMR)
 # ---------------------------------------------------------------------------
+
 
 def compute_composite_score(
     semantic_score: float,
@@ -844,22 +919,32 @@ MAX_QUERY_LEN = 2000
 
 
 class SearchRequest(BaseModel):
-    query_text: Optional[str] = Field(None, min_length=MIN_QUERY_LEN, max_length=MAX_QUERY_LEN,
-                                      description="Buscar por texto (>=3 y <=2000 chars)")
-    query_image: Optional[str] = Field(None, min_length=4, max_length=10_000_000,
-                                       description="Buscar por imagen (base64 PNG/JPEG/WebP). Cross-modal: encuentra texto relevante a la imagen y viceversa.")
+    query_text: Optional[str] = Field(
+        None, min_length=MIN_QUERY_LEN, max_length=MAX_QUERY_LEN, description="Buscar por texto (>=3 y <=2000 chars)"
+    )
+    query_image: Optional[str] = Field(
+        None,
+        min_length=4,
+        max_length=10_000_000,
+        description="Buscar por imagen (base64 PNG/JPEG/WebP). Cross-modal: encuentra texto relevante a la imagen y viceversa.",
+    )
     query_type: Optional[QUERY_TYPES] = Field(
         None,
         description="Tipo de consulta (factual/historical/analytical/contextual). "
-                    "Si no se proporciona, se clasifica automaticamente por heuristicas.",
+        "Si no se proporciona, se clasifica automaticamente por heuristicas.",
     )
     modality_filter: Optional[Literal["all", "text", "image", "audio"]] = Field(
-        "all", description="Filtrar resultados por modalidad. 'all'=todas, 'text'=solo memorias con embedding texto, etc.")
+        "all",
+        description="Filtrar resultados por modalidad. 'all'=todas, 'text'=solo memorias con embedding texto, etc.",
+    )
     limit: int = Field(20, ge=1, le=100)
     workspace_id: Optional[int] = Field(None, description="Filtrar a un workspace concreto")
     project_id: Optional[int] = Field(None, description="Filtrar a un project concreto")
-    type: Optional[Literal["momento", "decision", "acuerdo", "tecnico",
-                           "descubrimiento", "observacion", "referencia", "caso", "skill"]] = None
+    type: Optional[
+        Literal[
+            "momento", "decision", "acuerdo", "tecnico", "descubrimiento", "observacion", "referencia", "caso", "skill"
+        ]
+    ] = None
 
     expand_scope: bool = Field(
         False,
@@ -871,30 +956,67 @@ class SearchRequest(BaseModel):
     )
     user_id: Optional[int] = Field(None, description="Filtrar memorias creadas por este user_id.")
     agent_identifier: Optional[str] = Field(
-        None, min_length=1, max_length=128,
+        None,
+        min_length=1,
+        max_length=128,
         description="Filter memories by agent identifier.",
     )
-    fecha_desde: Optional[datetime] = Field(None, description=(
-        "Memorias creadas >= este INSTANTE (ISO 8601). Una fecha sin hora = 00:00:00 de ese dia. "
-        "Intervalo cerrado por los dos lados."))
-    fecha_hasta: Optional[datetime] = Field(None, description=(
-        "Memorias creadas <= este INSTANTE (ISO 8601). OJO: una fecha sin hora = 00:00:00, el PRINCIPIO "
-        "del dia, no el final. Para cubrir el dia D entero: fecha_desde=\"D\", fecha_hasta=\"DT23:59:59.999999\"."))
-    graph_discovery: bool = Field(False, description="Si true, GAMR añade memorias descubiertas via grafo que no aparecieron en busqueda semantica. Requiere grafo denso para ser util.")
-    graph_hop2: Optional[bool] = Field(None, description="#1144, diagnóstico: hacer (true) o no (false) el salto 2 del grafo en esta llamada. Sin valor, lo que diga EXPAND_GRAPH_HOP2 (por defecto, sí).")
-    graph: Optional[bool] = Field(None, description="#1144, diagnóstico: usar (true) o no (false) el grafo en esta búsqueda: los dos saltos y su bonificación. Sin valor, lo que diga EXPAND_GRAPH (por defecto, sí).")
-    include_documents: bool = Field(True, description="Si true, añade resultados de chunks de documentos junto a memorias. Default true.")
-    max_document_results: int = Field(3, ge=0, le=20, description="Max chunks de documentos a incluir (0-20). Solo aplica si include_documents=true.")
-    tags: Optional[list[str]] = Field(None, max_length=20, description="Filtrar por tags (AND logic). Max 20 tags, each max 128 chars.")
-    include_dormant: bool = Field(False, description="Si true, incluye memorias dormant/archived en resultados. Default false.")
+    fecha_desde: Optional[datetime] = Field(
+        None,
+        description=(
+            "Memorias creadas >= este INSTANTE (ISO 8601). Una fecha sin hora = 00:00:00 de ese dia. "
+            "Intervalo cerrado por los dos lados."
+        ),
+    )
+    fecha_hasta: Optional[datetime] = Field(
+        None,
+        description=(
+            "Memorias creadas <= este INSTANTE (ISO 8601). OJO: una fecha sin hora = 00:00:00, el PRINCIPIO "
+            'del dia, no el final. Para cubrir el dia D entero: fecha_desde="D", fecha_hasta="DT23:59:59.999999".'
+        ),
+    )
+    graph_discovery: bool = Field(
+        False,
+        description="Si true, GAMR añade memorias descubiertas via grafo que no aparecieron en busqueda semantica. Requiere grafo denso para ser util.",
+    )
+    graph_hop2: Optional[bool] = Field(
+        None,
+        description="#1144, diagnóstico: hacer (true) o no (false) el salto 2 del grafo en esta llamada. Sin valor, lo que diga EXPAND_GRAPH_HOP2 (por defecto, sí).",
+    )
+    graph: Optional[bool] = Field(
+        None,
+        description="#1144, diagnóstico: usar (true) o no (false) el grafo en esta búsqueda: los dos saltos y su bonificación. Sin valor, lo que diga EXPAND_GRAPH (por defecto, sí).",
+    )
+    include_documents: bool = Field(
+        True, description="Si true, añade resultados de chunks de documentos junto a memorias. Default true."
+    )
+    max_document_results: int = Field(
+        3, ge=0, le=20, description="Max chunks de documentos a incluir (0-20). Solo aplica si include_documents=true."
+    )
+    tags: Optional[list[str]] = Field(
+        None, max_length=20, description="Filtrar por tags (AND logic). Max 20 tags, each max 128 chars."
+    )
+    include_dormant: bool = Field(
+        False, description="Si true, incluye memorias dormant/archived en resultados. Default false."
+    )
     rerank_mode: Optional[Literal["replace", "blend", "off"]] = Field(
-        None, description="Como elige el reranker los top-limit: replace (sus top-k), blend (mezcla con el score "
-                          "compuesto), off (sin reranker). None = RERANK_MODE del servidor. El orden final es siempre compuesto.")
+        None,
+        description="Como elige el reranker los top-limit: replace (sus top-k), blend (mezcla con el score "
+        "compuesto), off (sin reranker). None = RERANK_MODE del servidor. El orden final es siempre compuesto.",
+    )
     rerank_alpha: Optional[float] = Field(
-        None, ge=0.0, le=1.0, description="Solo blend: peso del score compuesto (0-1). None = RERANK_BLEND_ALPHA del servidor.")
-    deep_factor: int = Field(2, ge=1, le=10, description="Internal pool multiplier. fetch_k = limit * deep_factor. Default 2.")
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Solo blend: peso del score compuesto (0-1). None = RERANK_BLEND_ALPHA del servidor.",
+    )
+    deep_factor: int = Field(
+        2, ge=1, le=10, description="Internal pool multiplier. fetch_k = limit * deep_factor. Default 2."
+    )
     cluster_mode: Optional[Literal["none", "include", "mixed"]] = Field(
-        "none", description="Cluster enrichment: none=no clusters, include=add related_clusters, mixed=merged_results interleaving memories+clusters")
+        "none",
+        description="Cluster enrichment: none=no clusters, include=add related_clusters, mixed=merged_results interleaving memories+clusters",
+    )
 
     @field_validator("query_text")
     @classmethod
@@ -964,14 +1086,18 @@ class SearchResult(BaseModel):
     freshness_score: float = Field(1.0, description="Score de frescura temporal [0..1]")
     score_breakdown: Optional[ScoreBreakdown] = Field(None, description="Desglose del score compuesto")
     reranker_score: Optional[float] = Field(
-        None, description="Score del cross-encoder que fija el orden final (null si el reranker esta off o fallo). "
-                          "Compararlo con score muestra cuanto reordeno el reranker.")
+        None,
+        description="Score del cross-encoder que fija el orden final (null si el reranker esta off o fallo). "
+        "Compararlo con score muestra cuanto reordeno el reranker.",
+    )
     matched_modality: str = Field(..., description="Modalidad del embedding que produjo el match (text/image/audio)")
     media_path: Optional[str] = None
     created_at: Optional[datetime] = None
     source_score: Optional[float] = Field(None, description="Score de confianza basado en documentos fuente [0..1]")
     source_type: str = Field("memory", description="Tipo de resultado: 'memory' o 'document_chunk'")
-    document_id: Optional[UUID] = Field(None, description="ID del documento padre (solo para source_type=document_chunk)")
+    document_id: Optional[UUID] = Field(
+        None, description="ID del documento padre (solo para source_type=document_chunk)"
+    )
     trust_warnings: list[str] = Field(default_factory=list, description="Avisos de confianza sobre este resultado")
 
 
@@ -1022,8 +1148,9 @@ class SearchInDocumentRequest(BaseModel):
         return _no_null_bytes(v, "query_text")
 
 
-async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=3, agent_identifier=None,
-                                warnings: Optional[list] = None):
+async def _get_related_clusters(
+    conn, query_embedding, query_text, actor, limit=3, agent_identifier=None, warnings: Optional[list] = None
+):
     """Clusters related to the query by centroid + label BM25.
 
     #370: same "mesa" rule as POST /clusters/search (CLAUDE.md invariant 29):
@@ -1045,7 +1172,8 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
         agent_clause = "AND a.identifier = 'SIN_AUTOR'"
     _label_tsv = _bm25_tsvector("mc.label")
     try:
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT mc.id, mc.level, mc.label, a.identifier AS agent_identifier,
                    1 - (mc.centroid <=> $1::vector) AS vector_score,
                    ts_rank({_label_tsv}, plainto_tsquery('spanish', $4)) AS bm25_score
@@ -1064,13 +1192,18 @@ async def _get_related_clusters(conn, query_embedding, query_text, actor, limit=
             ORDER BY (1 - (mc.centroid <=> $1::vector)
                       + ts_rank({_label_tsv}, plainto_tsquery('spanish', $4))) DESC
             LIMIT $5
-        """, *params)
+        """,
+            *params,
+        )
         return [dict(r) for r in rows]
     except Exception as _rc_err:
         import logging as _rc_log
+
         _rc_log.getLogger("ecodb.search").warning("related_clusters query failed: %r", _rc_err)
         if warnings is not None:
-            warnings.append(f"related_clusters failed: {type(_rc_err).__name__}; the empty list is an error, not 'no clusters'")
+            warnings.append(
+                f"related_clusters failed: {type(_rc_err).__name__}; the empty list is an error, not 'no clusters'"
+            )
         return []
 
 
@@ -1090,10 +1223,16 @@ class SearchResponse(BaseModel):
     duration_ms: float
     cluster_mode: str = Field("none", description="Echo of requested cluster_mode")
     graph_context: list[dict] = Field(default_factory=list, description="Entidades del grafo usadas en expansion")
-    contradictions: list[ContradictionPair] = Field(default_factory=list, description="Pares de memorias potencialmente contradictorias")
+    contradictions: list[ContradictionPair] = Field(
+        default_factory=list, description="Pares de memorias potencialmente contradictorias"
+    )
     warnings: list[str] = Field(default_factory=list, description="Machine-parseable warnings about query behavior")
-    related_clusters: list[dict] = Field(default_factory=list, description="Clusters related to query by centroid + label BM25")
-    merged_results: Optional[list[MergedResultItem]] = Field(None, description="Interleaved memories+clusters when cluster_mode=mixed")
+    related_clusters: list[dict] = Field(
+        default_factory=list, description="Clusters related to query by centroid + label BM25"
+    )
+    merged_results: Optional[list[MergedResultItem]] = Field(
+        None, description="Interleaved memories+clusters when cluster_mode=mixed"
+    )
     audit_id: Optional[str] = Field(
         None,
         description="UUID del audit_log row si expand_scope=true (null si no hubo expand_scope).",
@@ -1148,11 +1287,11 @@ async def search_memories(
     pool = await get_pool()
 
     # Etapa 1 — Clasificacion query_type.
-    resolved_query_type = body.query_type or (
-        classify_query_type(body.query_text) if body.query_text else "contextual"
-    )
+    resolved_query_type = body.query_type or (classify_query_type(body.query_text) if body.query_text else "contextual")
     if body.query_type is not None and body.query_text is not None:
-        logging.getLogger("ecodb.gamr").info("query_type override: %s (auto would be: %s)", body.query_type, classify_query_type(body.query_text))
+        logging.getLogger("ecodb.gamr").info(
+            "query_type override: %s (auto would be: %s)", body.query_type, classify_query_type(body.query_text)
+        )
 
     is_super = bool(actor.get("is_super"))
     is_ceo = bool(actor.get("is_ceo"))
@@ -1164,15 +1303,19 @@ async def search_memories(
     # (no_super, no_ceo, sin lead_ws) con expand_scope=true + user_id ajeno NO
     # puede pedir contenido dirigido a otro user. Es el patrón "fingerprinting
     # dirigido" que la observación quiere prevenir.
-    if (body.expand_scope and body.user_id is not None
-            and body.user_id != user_id_actor
-            and not is_super and not is_ceo and not lead_ws):
+    if (
+        body.expand_scope
+        and body.user_id is not None
+        and body.user_id != user_id_actor
+        and not is_super
+        and not is_ceo
+        and not lead_ws
+    ):
         raise HTTPException(
             403,
             "worker without elevated role cannot use expand_scope with user_id filter on another user",
         )
-    if (body.expand_scope and body.agent_identifier is not None
-            and not is_super and not is_ceo and not lead_ws):
+    if body.expand_scope and body.agent_identifier is not None and not is_super and not is_ceo and not lead_ws:
         raise HTTPException(
             403,
             "worker without elevated role cannot use expand_scope with agent_identifier filter",
@@ -1198,22 +1341,26 @@ async def search_memories(
                         INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                         VALUES ($1, 'search_expanded', 'memories_batch', $2, $3::jsonb, $4)
                         """,
-                        user_id_actor, audit_uuid_early,
-                        json.dumps({
-                            "filters": {
-                                "workspace_id": body.workspace_id,
-                                "project_id": body.project_id,
-                                "type": body.type,
-                                "user_id": body.user_id,
-                                "agent_identifier": body.agent_identifier,
-                                "fecha_desde": body.fecha_desde.isoformat() if body.fecha_desde else None,
-                                "fecha_hasta": body.fecha_hasta.isoformat() if body.fecha_hasta else None,
-                            },
-                            "result_count": 0,
-                            "actor_is_super": is_super,
-                            "actor_is_ceo": is_ceo,
-                            "no_visible_projects": True,
-                        }), actor.get("organization_id"),
+                        user_id_actor,
+                        audit_uuid_early,
+                        json.dumps(
+                            {
+                                "filters": {
+                                    "workspace_id": body.workspace_id,
+                                    "project_id": body.project_id,
+                                    "type": body.type,
+                                    "user_id": body.user_id,
+                                    "agent_identifier": body.agent_identifier,
+                                    "fecha_desde": body.fecha_desde.isoformat() if body.fecha_desde else None,
+                                    "fecha_hasta": body.fecha_hasta.isoformat() if body.fecha_hasta else None,
+                                },
+                                "result_count": 0,
+                                "actor_is_super": is_super,
+                                "actor_is_ceo": is_ceo,
+                                "no_visible_projects": True,
+                            }
+                        ),
+                        actor.get("organization_id"),
                     )
                 return SearchResponse(
                     query=body.query_text or "(image query)",
@@ -1242,9 +1389,7 @@ async def search_memories(
         # Resolver agent_identifier → agent_id si hay filtro.
         target_agent_id: Optional[int] = None
         if body.agent_identifier is not None:
-            target_agent_id = await conn.fetchval(
-                "SELECT id FROM agents WHERE identifier = $1", body.agent_identifier
-            )
+            target_agent_id = await conn.fetchval("SELECT id FROM agents WHERE identifier = $1", body.agent_identifier)
             if target_agent_id is None:
                 raise HTTPException(422, "agent_identifier not found")
 
@@ -1270,9 +1415,7 @@ async def search_memories(
     # B.4 pre-compute: HyDE hypothetical embedding BEFORE acquiring conn to
     # avoid holding a DB connection during a 30s LLM call (pool starvation).
     hyde_vec = None
-    if (settings.ENABLE_HYDE
-            and body.query_text
-            and resolved_query_type == "factual"):
+    if settings.ENABLE_HYDE and body.query_text and resolved_query_type == "factual":
         hyp_answer = await generate_hypothetical(body.query_text)
         if hyp_answer:
             hyde_vec = await embed_text(hyp_answer, prompt_name="query")
@@ -1335,6 +1478,7 @@ async def search_memories(
         # but max(20, 50)=50 = same as deep_factor=1).
         from reranker import is_available as reranker_available
         from settings import MAX_FETCH_K
+
         fetch_k = min(body.limit * body.deep_factor, MAX_FETCH_K)
         params.append(fetch_k)
         limit_idx = idx
@@ -1385,11 +1529,17 @@ async def search_memories(
             _dw.append("m.staleness IN ('dormant', 'archived')")
             # $1/$2 are referenced so the parameter list stays positionally identical.
             if len(_dw) == len(where_parts):  # exactly one clause swapped, else don't guess
-                _dormant_hidden = await conn.fetchval(f"""
+                _dormant_hidden = (
+                    await conn.fetchval(
+                        f"""
                     SELECT count(*) FROM memories m
                     WHERE $1::vector IS NOT NULL AND ($2::text IS NULL OR TRUE)
                       AND {" AND ".join(_dw)}
-                """, *params[:-1]) or 0
+                """,
+                        *params[:-1],
+                    )
+                    or 0
+                )
 
         # B.4: HyDE — use pre-computed hyde_vec (generated outside conn block).
         # score here is raw cosine similarity (1 - distance), NOT GAMR composite.
@@ -1398,7 +1548,8 @@ async def search_memories(
             if semantic_top < 0.5:
                 logging.getLogger("ecodb.hyde").info(
                     "HyDE triggered: semantic_top=%.3f < 0.5, query=%r",
-                    semantic_top, body.query_text[:60],
+                    semantic_top,
+                    body.query_text[:60],
                 )
                 hyde_rows = await conn.fetch(sql, *([hyde_vec] + params[1:]))
                 if hyde_rows:
@@ -1409,18 +1560,22 @@ async def search_memories(
                         if hyde_top != original_top:
                             logging.getLogger("ecodb.hyde").info(
                                 "HyDE changed top result: %s -> %s (query=%r)",
-                                original_top, hyde_top, body.query_text[:80],
+                                original_top,
+                                hyde_top,
+                                body.query_text[:80],
                             )
                         rows = hyde_rows
                     else:
                         logging.getLogger("ecodb.hyde").info(
                             "HyDE results worse (%.3f < %.3f), keeping original",
-                            hyde_score, semantic_top,
+                            hyde_score,
+                            semantic_top,
                         )
             else:
                 logging.getLogger("ecodb.hyde").debug(
                     "HyDE skipped: semantic_top=%.3f >= 0.5, query=%r",
-                    semantic_top, body.query_text[:60],
+                    semantic_top,
+                    body.query_text[:60],
                 )
 
         # Audit log obligatorio con expand_scope=true: fila en
@@ -1435,21 +1590,25 @@ async def search_memories(
                 INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'search_expanded', 'memories_batch', $2, $3::jsonb, $4)
                 """,
-                user_id_actor, audit_uuid,
-                json.dumps({
-                    "filters": {
-                        "workspace_id": body.workspace_id,
-                        "project_id": body.project_id,
-                        "type": body.type,
-                        "user_id": body.user_id,
-                        "agent_identifier": body.agent_identifier,
-                        "fecha_desde": body.fecha_desde.isoformat() if body.fecha_desde else None,
-                        "fecha_hasta": body.fecha_hasta.isoformat() if body.fecha_hasta else None,
-                    },
-                    "result_count": len(rows),
-                    "actor_is_super": is_super,
-                    "actor_is_ceo": is_ceo,
-                }), actor.get("organization_id"),
+                user_id_actor,
+                audit_uuid,
+                json.dumps(
+                    {
+                        "filters": {
+                            "workspace_id": body.workspace_id,
+                            "project_id": body.project_id,
+                            "type": body.type,
+                            "user_id": body.user_id,
+                            "agent_identifier": body.agent_identifier,
+                            "fecha_desde": body.fecha_desde.isoformat() if body.fecha_desde else None,
+                            "fecha_hasta": body.fecha_hasta.isoformat() if body.fecha_hasta else None,
+                        },
+                        "result_count": len(rows),
+                        "actor_is_super": is_super,
+                        "actor_is_ceo": is_ceo,
+                    }
+                ),
+                actor.get("organization_id"),
             )
 
     # --- Etapas 4-8 GAMR ---
@@ -1459,10 +1618,11 @@ async def search_memories(
     # Etapa 4 — Expansión por grafo.
     _vp_list = list(visible_projects) if visible_projects else None
     if _usa_grafo(body.graph):
-        graph_scores, graph_context = await expand_by_graph(pool, candidate_ids, visible_project_ids=_vp_list,
-                                                            query_vec=query_vec, hop2=body.graph_hop2)
+        graph_scores, graph_context = await expand_by_graph(
+            pool, candidate_ids, visible_project_ids=_vp_list, query_vec=query_vec, hop2=body.graph_hop2
+        )
     else:
-        graph_scores, graph_context = {}, []      # sin grafo: graph_score 0 y nada descubierto por él
+        graph_scores, graph_context = {}, []  # sin grafo: graph_score 0 y nada descubierto por él
 
     # Etapa 3b — BM25 scoring (re-rank de candidatos).
     bm25_scores: dict[str, float] = {}
@@ -1497,7 +1657,10 @@ async def search_memories(
         s_score = source_scores.get(mid, 1.0)
         dynamic_w = compute_dynamic_weight(
             float(r["weight_base"]) if r.get("weight_base") is not None else float(r["weight"]),
-            r["created_at"], r["type"], r.get("staleness", "active"))
+            r["created_at"],
+            r["type"],
+            r.get("staleness", "active"),
+        )
         mem_weight = dynamic_w * s_score
 
         b_score = bm25_scores.get(mid, 0.0)
@@ -1509,41 +1672,47 @@ async def search_memories(
         # #919 (decisiones vigentes): se avisa, no se esconde ni se baja la puntuación (Pepe, 16-oct).
         warnings.extend(_avisos_vigencia(r, legibles))
 
-        results.append(SearchResult(
-            id=r["id"],
-            user_id=r["user_id"],
-            agent_identifier=r["agent_identifier"],
-            workspace_id=r["workspace_id"],
-            project_id=r["project_id"],
-            type=r["type"],
-            content_type=r["content_type"],
-            visibility=r["visibility"],
-            content=r["content"],
-            tags=list(r["tags"]),
-            weight=mem_weight,
-            score=comp["composite"],
-            semantic_score=sem_score,
-            graph_score=g_score,
-            freshness_score=f_score,
-            score_breakdown=ScoreBreakdown(**comp["breakdown"]),
-            matched_modality=r["matched_modality"],
-            media_path=r.get("media_path"),
-            created_at=r["created_at"],
-            source_score=s_score,
-            source_type="memory",
-            trust_warnings=warnings,
-        ))
+        results.append(
+            SearchResult(
+                id=r["id"],
+                user_id=r["user_id"],
+                agent_identifier=r["agent_identifier"],
+                workspace_id=r["workspace_id"],
+                project_id=r["project_id"],
+                type=r["type"],
+                content_type=r["content_type"],
+                visibility=r["visibility"],
+                content=r["content"],
+                tags=list(r["tags"]),
+                weight=mem_weight,
+                score=comp["composite"],
+                semantic_score=sem_score,
+                graph_score=g_score,
+                freshness_score=f_score,
+                score_breakdown=ScoreBreakdown(**comp["breakdown"]),
+                matched_modality=r["matched_modality"],
+                media_path=r.get("media_path"),
+                created_at=r["created_at"],
+                source_score=s_score,
+                source_type="memory",
+                trust_warnings=warnings,
+            )
+        )
 
     # Re-sort por score compuesto (puede diferir del orden semántico puro)
     results.sort(key=lambda x: x.score, reverse=True)
 
     # Etapa 9 — Cross-encoder reranking (Option A: memories only, before graph bonus)
     from reranker import is_available as reranker_available
+
     results = _apply_rerank(
-        results, body.query_text, body.limit,
+        results,
+        body.query_text,
+        body.limit,
         enabled=bool(reranker_available() and body.query_text and resolved_query_type != "cross_modal"),
         mode=body.rerank_mode or RERANK_MODE,
-        alpha=RERANK_BLEND_ALPHA if body.rerank_alpha is None else body.rerank_alpha)
+        alpha=RERANK_BLEND_ALPHA if body.rerank_alpha is None else body.rerank_alpha,
+    )
 
     # GC1 — Discovery: fetch memorias descubiertas por grafo (opt-in)
     if body.graph_discovery:
@@ -1562,7 +1731,8 @@ async def search_memories(
             discovered_ids = raw_discovered[:20]
         if discovered_ids:
             async with pool.acquire() as conn:
-                disc_rows = await conn.fetch("""
+                disc_rows = await conn.fetch(
+                    """
                     SELECT m.id, m.user_id, a.identifier AS agent_identifier,
                            m.workspace_id, m.project_id,
                            m.type::text, m.content_type::text, m.visibility::text,
@@ -1575,8 +1745,15 @@ async def search_memories(
                           m.user_id, m.visibility::text, m.workspace_id, m.project_id,
                           $2, $3::bool, $4::bool, $5, $6::int[], $7::bool
                       )
-                """, [uuid.UUID(mid) for mid in discovered_ids],
-                     user_id_actor, is_super, is_ceo, org_id, lead_ws, body.expand_scope)
+                """,
+                    [uuid.UUID(mid) for mid in discovered_ids],
+                    user_id_actor,
+                    is_super,
+                    is_ceo,
+                    org_id,
+                    lead_ws,
+                    body.expand_scope,
+                )
                 for r in disc_rows:
                     mid = str(r["id"])
                     g_score = graph_scores.get(mid, 0.0)
@@ -1585,21 +1762,31 @@ async def search_memories(
                     disc_warnings = []
                     if r.get("staleness") and r["staleness"] != "active":
                         disc_warnings.append(f"memoria {r['staleness']}")
-                    results.append(SearchResult(
-                        id=r["id"], user_id=r["user_id"],
-                        agent_identifier=r["agent_identifier"],
-                        workspace_id=r["workspace_id"], project_id=r["project_id"],
-                        type=r["type"], content_type=r["content_type"],
-                        visibility=r["visibility"], content=r["content"],
-                        tags=list(r["tags"]), weight=float(r["weight"]),
-                        score=comp["composite"], semantic_score=0.0,
-                        graph_score=g_score, freshness_score=f_score,
-                        score_breakdown=ScoreBreakdown(**comp["breakdown"]),
-                        matched_modality="graph",
-                        media_path=r.get("media_path"), created_at=r["created_at"],
-                        source_type="memory",
-                        trust_warnings=disc_warnings,
-                    ))
+                    results.append(
+                        SearchResult(
+                            id=r["id"],
+                            user_id=r["user_id"],
+                            agent_identifier=r["agent_identifier"],
+                            workspace_id=r["workspace_id"],
+                            project_id=r["project_id"],
+                            type=r["type"],
+                            content_type=r["content_type"],
+                            visibility=r["visibility"],
+                            content=r["content"],
+                            tags=list(r["tags"]),
+                            weight=float(r["weight"]),
+                            score=comp["composite"],
+                            semantic_score=0.0,
+                            graph_score=g_score,
+                            freshness_score=f_score,
+                            score_breakdown=ScoreBreakdown(**comp["breakdown"]),
+                            matched_modality="graph",
+                            media_path=r.get("media_path"),
+                            created_at=r["created_at"],
+                            source_type="memory",
+                            trust_warnings=disc_warnings,
+                        )
+                    )
 
     # D6 guard: user_id filter excludes documents (documents have no individual author)
     _include_docs = body.include_documents
@@ -1636,12 +1823,15 @@ async def search_memories(
                 doc_idx += 1
             doc_bm25_col = "0.0::real AS bm25_score"
             if ENABLE_BM25 and body.query_text:
-                doc_bm25_col = f"ts_rank({_bm25_tsvector('dc.content')}, plainto_tsquery('spanish', ${doc_idx})) AS bm25_score"
+                doc_bm25_col = (
+                    f"ts_rank({_bm25_tsvector('dc.content')}, plainto_tsquery('spanish', ${doc_idx})) AS bm25_score"
+                )
                 doc_params.append(body.query_text)
                 doc_idx += 1
             doc_where_str = " AND ".join(doc_where)
             doc_params.append(body.max_document_results)
-            doc_rows = await conn.fetch(f"""
+            doc_rows = await conn.fetch(
+                f"""
                 SELECT dc.id AS chunk_id, dc.document_id, dc.chunk_index,
                        dc.content, dc.section_path, dc.metadata, dc.tags,
                        d.filename, d.doc_type, d.base_weight,
@@ -1653,7 +1843,9 @@ async def search_memories(
                 WHERE {doc_where_str}
                 ORDER BY dc.embedding <=> $1::vector
                 LIMIT ${doc_idx}
-            """, *doc_params)
+            """,
+                *doc_params,
+            )
             _max_chunk_bm25 = max((float(dr["bm25_score"]) for dr in doc_rows), default=0.0) if ENABLE_BM25 else 0.0
             for dr in doc_rows:
                 chunk_sem = float(dr["semantic_score"])
@@ -1663,30 +1855,32 @@ async def search_memories(
                     chunk_score = round((chunk_sem * 0.7 + chunk_bm25 * 0.3) * CHUNK_SCORE_FACTOR, 4)
                 else:
                     chunk_score = round(chunk_sem * CHUNK_SCORE_FACTOR, 4)
-                results.append(SearchResult(
-                    id=dr["chunk_id"],
-                    user_id=None,
-                    agent_identifier=None,
-                    workspace_id=dr["workspace_id"],
-                    project_id=dr["project_id"],
-                    type="referencia",
-                    content_type="document",
-                    visibility="public",
-                    content=dr["content"],
-                    tags=list(dr["tags"]) if dr.get("tags") else [],
-                    weight=float(dr["base_weight"]),
-                    score=chunk_score,
-                    semantic_score=chunk_sem,
-                    graph_score=0.0,
-                    freshness_score=1.0,
-                    score_breakdown=None,
-                    matched_modality="text",
-                    media_path=None,
-                    created_at=None,
-                    source_type="document_chunk",
-                    document_id=dr["document_id"],
-                    trust_warnings=[],
-                ))
+                results.append(
+                    SearchResult(
+                        id=dr["chunk_id"],
+                        user_id=None,
+                        agent_identifier=None,
+                        workspace_id=dr["workspace_id"],
+                        project_id=dr["project_id"],
+                        type="referencia",
+                        content_type="document",
+                        visibility="public",
+                        content=dr["content"],
+                        tags=list(dr["tags"]) if dr.get("tags") else [],
+                        weight=float(dr["base_weight"]),
+                        score=chunk_score,
+                        semantic_score=chunk_sem,
+                        graph_score=0.0,
+                        freshness_score=1.0,
+                        score_breakdown=None,
+                        matched_modality="text",
+                        media_path=None,
+                        created_at=None,
+                        source_type="document_chunk",
+                        document_id=dr["document_id"],
+                        trust_warnings=[],
+                    )
+                )
 
     # Final order + cap — memories + graph_discovery + document chunks all compete;
     # one rule for every path (C30): composite score, then body.limit.
@@ -1701,17 +1895,26 @@ async def search_memories(
     contradictions = [ContradictionPair(**c) for c in contradictions_raw]
 
     from events import broadcast_event
+
     _actor_org = actor.get("organization_id")
 
     if contradictions:
-        await broadcast_event("contradiction_detected", {
-            "count": len(contradictions),
-        }, org_id=_actor_org)
+        await broadcast_event(
+            "contradiction_detected",
+            {
+                "count": len(contradictions),
+            },
+            org_id=_actor_org,
+        )
 
-    await broadcast_event("search_completed", {
-        "query_type": resolved_query_type,
-        "results_count": len(results),
-    }, org_id=_actor_org)
+    await broadcast_event(
+        "search_completed",
+        {
+            "query_type": resolved_query_type,
+            "results_count": len(results),
+        },
+        org_id=_actor_org,
+    )
 
     _related = []
     _merged = None
@@ -1721,39 +1924,57 @@ async def search_memories(
         async with pool.acquire() as _rc_conn:
             if _cluster_mode == "include":
                 _related = await _get_related_clusters(
-                    _rc_conn, query_vec, body.query_text, actor, limit=10,
-                    agent_identifier=body.agent_identifier, warnings=_search_warnings)
+                    _rc_conn,
+                    query_vec,
+                    body.query_text,
+                    actor,
+                    limit=10,
+                    agent_identifier=body.agent_identifier,
+                    warnings=_search_warnings,
+                )
             elif _cluster_mode == "mixed":
                 _related = await _get_related_clusters(
-                    _rc_conn, query_vec, body.query_text, actor, limit=10,
-                    agent_identifier=body.agent_identifier, warnings=_search_warnings)
+                    _rc_conn,
+                    query_vec,
+                    body.query_text,
+                    actor,
+                    limit=10,
+                    agent_identifier=body.agent_identifier,
+                    warnings=_search_warnings,
+                )
                 _merged = []
                 for r in results:
-                    _merged.append(MergedResultItem(
-                        result_type="memory", score=r.score, memory=r))
+                    _merged.append(MergedResultItem(result_type="memory", score=r.score, memory=r))
                 for c in _related:
-                    _merged.append(MergedResultItem(
-                        result_type="cluster",
-                        score=float(c.get("vector_score", 0)) * 0.8,
-                        cluster=c))
+                    _merged.append(
+                        MergedResultItem(result_type="cluster", score=float(c.get("vector_score", 0)) * 0.8, cluster=c)
+                    )
                 _merged.sort(key=lambda x: x.score, reverse=True)
             else:
                 _related = await _get_related_clusters(
-                    _rc_conn, query_vec, body.query_text, actor,
-                    agent_identifier=body.agent_identifier, warnings=_search_warnings)
+                    _rc_conn,
+                    query_vec,
+                    body.query_text,
+                    actor,
+                    agent_identifier=body.agent_identifier,
+                    warnings=_search_warnings,
+                )
 
     _search_warnings.extend(date_window_warnings(body.fecha_desde, body.fecha_hasta, len(results)))
     if body.agent_identifier is None and body.query_text and results:
         async with pool.acquire() as _an_conn:
-            _own_agents = [r["identifier"] for r in await _an_conn.fetch(
-                "SELECT identifier FROM agents WHERE user_id = $1", int(actor["sub"]))]
+            _own_agents = [
+                r["identifier"]
+                for r in await _an_conn.fetch("SELECT identifier FROM agents WHERE user_id = $1", int(actor["sub"]))
+            ]
         _an_warning = agent_name_warning(body.query_text, body.agent_identifier, _own_agents, results)
         if _an_warning:
             _search_warnings.append(_an_warning)
     if _dormant_hidden:
         _search_warnings.append(
             f"{_dormant_hidden} dormant/archived memories match these filters and were excluded; "
-            f"pass include_dormant=true to include them")
+            f"pass include_dormant=true to include them"
+        )
 
     # #365 + C8c: same rule for the document chunks that ride in graph_context —
     # whatever excluded the doc channel (include_documents=False, user_id, image/audio).
@@ -1779,6 +2000,7 @@ async def search_memories(
 # ---------------------------------------------------------------------------
 # Task 4.10 — Search within a specific document
 # ---------------------------------------------------------------------------
+
 
 class DocumentChunkResult(BaseModel):
     chunk_id: UUID
@@ -1823,7 +2045,8 @@ async def search_in_document(
     query_vec = await embed_text(body.query_text, prompt_name="query")
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(
+            """
             SELECT id AS chunk_id, chunk_index, section_path, content,
                    1 - (embedding <=> $1::vector) AS semantic_score
             FROM document_chunks
@@ -1831,7 +2054,11 @@ async def search_in_document(
               AND embedding IS NOT NULL
             ORDER BY embedding <=> $1::vector
             LIMIT $3
-        """, query_vec, document_id, body.limit)
+        """,
+            query_vec,
+            document_id,
+            body.limit,
+        )
 
     return SearchInDocumentResponse(
         document_id=document_id,

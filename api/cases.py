@@ -1,4 +1,5 @@
 """Cases endpoint — metacognicion v2.0 §7.6."""
+
 from __future__ import annotations
 
 import json
@@ -47,23 +48,23 @@ async def list_cases(
             params.append(json.dumps({"success": success}))
             conditions.append(f"metadata @> ${len(params)}::jsonb")
         where = " AND ".join(conditions)
-        total = await conn.fetchval(
-            f"SELECT COUNT(*) FROM memories WHERE {where}", *params)
-        items, next_cursor = await paginate(conn,
-            f"SELECT * FROM memories WHERE {where}", list(params), limit, cursor)
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM memories WHERE {where}", *params)
+        items, next_cursor = await paginate(conn, f"SELECT * FROM memories WHERE {where}", list(params), limit, cursor)
         vis = await precompute_read_visibility(conn, actor)
         visible = []
         for r in items:
             if check_read_memory(vis, r):
                 meta = r["metadata"] or {}
-                visible.append(CaseResponse(
-                    id=r["id"],
-                    content=r["content"],
-                    task_type=meta.get("task_type"),
-                    steps=meta.get("steps"),
-                    result=meta.get("result"),
-                    success=meta.get("success"),
-                    skill_id=_safe_uuid(meta.get("skill_id")),
-                    created_at=r["created_at"],
-                ))
+                visible.append(
+                    CaseResponse(
+                        id=r["id"],
+                        content=r["content"],
+                        task_type=meta.get("task_type"),
+                        steps=meta.get("steps"),
+                        result=meta.get("result"),
+                        success=meta.get("success"),
+                        skill_id=_safe_uuid(meta.get("skill_id")),
+                        created_at=r["created_at"],
+                    )
+                )
     return {"items": visible, "total": total, "cursor_next": next_cursor}

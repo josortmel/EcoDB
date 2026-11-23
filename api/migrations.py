@@ -19,6 +19,7 @@ _BEFORE_REGISTRY are recorded as applied ("baseline", like Flyway's).
 That list is closed on purpose: a migration added after #812 always
 runs, baseline or not.
 """
+
 import hashlib
 import logging
 import time
@@ -29,18 +30,18 @@ import settings
 log = logging.getLogger("ecodb.migrations")
 
 MIGRATIONS: list[tuple[str, str]] = [
-    ("3_0h_multimodal",   "sql/migrate_3_0h_multimodal.sql"),
+    ("3_0h_multimodal", "sql/migrate_3_0h_multimodal.sql"),
     ("5.1.0_multitenant", "sql/migrate_5.0.1_to_5.1.0.sql"),
-    ("5.1.1_clusters",    "sql/migrate_5.1.0_to_5.1.1.sql"),
+    ("5.1.1_clusters", "sql/migrate_5.1.0_to_5.1.1.sql"),
     ("age_sync_triggers", "sql/trigger_age_sync.sql"),
     # --- Metacognicion ---
-    ("5.2.0_foresight",      "sql/migrate_06_foresight.sql"),
-    ("5.2.0_types_schema",   "sql/migrate_07a_types_schema.sql"),
-    ("5.2.0_types_config",   "sql/migrate_07b_types_config.sql"),
-    ("5.2.0_agents",         "sql/migrate_08_agents.sql"),
-    ("5.2.0_metacognition",  "sql/migrate_09_metacognition.sql"),
+    ("5.2.0_foresight", "sql/migrate_06_foresight.sql"),
+    ("5.2.0_types_schema", "sql/migrate_07a_types_schema.sql"),
+    ("5.2.0_types_config", "sql/migrate_07b_types_config.sql"),
+    ("5.2.0_agents", "sql/migrate_08_agents.sql"),
+    ("5.2.0_metacognition", "sql/migrate_09_metacognition.sql"),
     # --- Memory Agent v1.3 ---
-    ("5.3.0_memory_agent",   "sql/migrate_5.2.0_to_5.3.0_memory_agent.sql"),
+    ("5.3.0_memory_agent", "sql/migrate_5.2.0_to_5.3.0_memory_agent.sql"),
     ("5.3.0_memory_agent_seed", "sql/seed_memory_agent.sql"),
     # Level-specific higher-consolidation prompts (monthly/quarterly/yearly) + config rewire.
     ("5.3.0_higher_prompts", "sql/seed_higher_prompts.sql"),
@@ -87,7 +88,10 @@ async def _record(conn, name: str, sha: str, baseline: bool = False) -> None:
         """INSERT INTO schema_migrations (name, sha256, baseline) VALUES ($1, $2, $3)
            ON CONFLICT (name) DO UPDATE SET sha256 = EXCLUDED.sha256, applied_at = now(),
                                             baseline = EXCLUDED.baseline""",
-        name, sha, baseline)
+        name,
+        sha,
+        baseline,
+    )
 
 
 async def run_migrations(pool) -> None:
@@ -101,10 +105,11 @@ async def run_migrations(pool) -> None:
                 for name, sql in files:
                     if name in _BEFORE_REGISTRY:
                         await _record(conn, name, _sha(sql), baseline=True)
-                log.info("migrations: registry created over an already migrated database "
-                         "(baseline of %d, nothing re-run)", len(_BEFORE_REGISTRY))
-            applied = {r["name"]: r["sha256"]
-                       for r in await conn.fetch("SELECT name, sha256 FROM schema_migrations")}
+                log.info(
+                    "migrations: registry created over an already migrated database (baseline of %d, nothing re-run)",
+                    len(_BEFORE_REGISTRY),
+                )
+            applied = {r["name"]: r["sha256"] for r in await conn.fetch("SELECT name, sha256 FROM schema_migrations")}
             for name, sql in files:
                 sha = _sha(sql)
                 if applied.get(name) == sha:
@@ -118,8 +123,9 @@ async def run_migrations(pool) -> None:
                     raise
                 await _record(conn, name, sha)
                 elapsed = (time.monotonic() - t0) * 1000
-                log.info("migration %s: %s (%.0f ms)",
-                         "CHANGED, re-applied" if name in applied else "OK", name, elapsed)
+                log.info(
+                    "migration %s: %s (%.0f ms)", "CHANGED, re-applied" if name in applied else "OK", name, elapsed
+                )
             log.info("schema at target %s", settings.SCHEMA_VERSION)
         finally:
             await conn.execute("SELECT pg_advisory_unlock($1)", _LOCK_KEY)

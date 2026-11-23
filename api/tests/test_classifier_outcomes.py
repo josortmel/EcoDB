@@ -37,13 +37,16 @@ def _classify(monkeypatch, provider):
     return asyncio.run(classifier.classify_with_llm("Decidimos pasar la base a Postgres 16."))
 
 
-@pytest.mark.parametrize("provider, outcome", [
-    (None, "no_provider"),                                   # proceso sin el lifespan de main.py, o el LLM apagado
-    (_FakeProvider(None), "empty"),                          # el proveedor falló (llm_provider ya avisa) o no dijo nada
-    (_FakeProvider('{"type": "other"}'), "other"),           # respuesta legítima: no es de ningún tipo
-    (_FakeProvider('{"type": "poema"}'), "unknown_type"),    # un tipo que no existe
-    (_FakeProvider("no es json"), "bad_json"),
-])
+@pytest.mark.parametrize(
+    "provider, outcome",
+    [
+        (None, "no_provider"),  # proceso sin el lifespan de main.py, o el LLM apagado
+        (_FakeProvider(None), "empty"),  # el proveedor falló (llm_provider ya avisa) o no dijo nada
+        (_FakeProvider('{"type": "other"}'), "other"),  # respuesta legítima: no es de ningún tipo
+        (_FakeProvider('{"type": "poema"}'), "unknown_type"),  # un tipo que no existe
+        (_FakeProvider("no es json"), "bad_json"),
+    ],
+)
 def test_cada_none_dice_su_motivo(monkeypatch, provider, outcome):
     assert _classify(monkeypatch, provider) is None
     assert dict(classifier.CLASSIFY_LLM_OUTCOMES) == {outcome: 1}

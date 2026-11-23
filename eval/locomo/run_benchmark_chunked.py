@@ -7,6 +7,7 @@ Reranker disabled (RERANKER_ENABLED=false) for retrieval baseline.
 Usage:
     ECODB_API_KEY=<key> python eval/locomo/run_benchmark_chunked.py
 """
+
 import functools
 import json
 import math
@@ -40,29 +41,24 @@ def headers():
 
 def create_workspace(client: httpx.Client, name: str) -> tuple[int, int]:
     """Create workspace + project, return (workspace_id, project_id)."""
-    r = client.post(f"{API_URL}/workspaces", headers=headers(),
-                     json={"name": name})
+    r = client.post(f"{API_URL}/workspaces", headers=headers(), json={"name": name})
     r.raise_for_status()
     ws_id = r.json()["id"]
 
-    r = client.post(f"{API_URL}/workspaces/{ws_id}/projects", headers=headers(),
-                     json={"name": "benchmark"})
+    r = client.post(f"{API_URL}/workspaces/{ws_id}/projects", headers=headers(), json={"name": "benchmark"})
     r.raise_for_status()
     proj_id = r.json()["id"]
     return ws_id, proj_id
 
 
-def load_conversation_sessions(client: httpx.Client, conv: dict,
-                                ws_id: int, proj_id: int,
-                                sample_id: str) -> dict:
+def load_conversation_sessions(client: httpx.Client, conv: dict, ws_id: int, proj_id: int, sample_id: str) -> dict:
     """Load all sessions as chunked memories (5-turn windows, overlap=1).
 
     Returns mapping: session_key -> [list of memory_ids for all chunks]
     """
     c = conv["conversation"]
     session_keys = sorted(
-        [k for k in c if k.startswith("session_") and not k.endswith("_date_time")],
-        key=lambda x: int(x.split("_")[1])
+        [k for k in c if k.startswith("session_") and not k.endswith("_date_time")], key=lambda x: int(x.split("_")[1])
     )
 
     mapping = {}
@@ -76,7 +72,7 @@ def load_conversation_sessions(client: httpx.Client, conv: dict,
         chunks = []
         i = 0
         while i < len(turns):
-            window = turns[i:i + CHUNK_WINDOW]
+            window = turns[i : i + CHUNK_WINDOW]
             chunks.append(window)
             if i + CHUNK_WINDOW >= len(turns):
                 break
@@ -90,17 +86,20 @@ def load_conversation_sessions(client: httpx.Client, conv: dict,
             tag_session = f"session:{sample_id}_{sk}"
 
             for attempt in range(5):
-                r = client.post(f"{API_URL}/memories", headers=headers(),
-                                 json={
-                                     "content": text,
-                                     "type": "tecnico",
-                                     "workspace_id": ws_id,
-                                     "project_id": proj_id,
-                                     "tags": [tag_session, f"chunk:{chunk_i}", f"total_chunks:{n}", f"date:{date}"],
-                                 })
+                r = client.post(
+                    f"{API_URL}/memories",
+                    headers=headers(),
+                    json={
+                        "content": text,
+                        "type": "tecnico",
+                        "workspace_id": ws_id,
+                        "project_id": proj_id,
+                        "tags": [tag_session, f"chunk:{chunk_i}", f"total_chunks:{n}", f"date:{date}"],
+                    },
+                )
                 if r.status_code == 503:
-                    wait = 2 ** attempt
-                    print(f"    503 on {sk} chunk {chunk_i}, retry {attempt+1}/5 in {wait}s...")
+                    wait = 2**attempt
+                    print(f"    503 on {sk} chunk {chunk_i}, retry {attempt + 1}/5 in {wait}s...")
                     time.sleep(wait)
                     continue
                 r.raise_for_status()
@@ -137,8 +136,9 @@ def evidence_to_sessions(evidence: list[str]) -> set[str]:
     return sessions
 
 
-def search_and_evaluate(client: httpx.Client, conv: dict, ws_id: int,
-                         session_mapping: dict, conv_id: str) -> list[dict]:
+def search_and_evaluate(
+    client: httpx.Client, conv: dict, ws_id: int, session_mapping: dict, conv_id: str
+) -> list[dict]:
     """Run all QA pairs for a conversation and compute metrics.
 
     session_mapping: session_key -> [list of memory_ids]
@@ -165,18 +165,20 @@ def search_and_evaluate(client: httpx.Client, conv: dict, ws_id: int,
         query = q["question"]
 
         try:
-            r = client.post(f"{API_URL}/search", headers=headers(),
-                             json={
-                                 "query_text": query,
-                                 "workspace_id": ws_id,
-                                 "limit": SEARCH_LIMIT,
-                                 "include_documents": False,
-                             })
+            r = client.post(
+                f"{API_URL}/search",
+                headers=headers(),
+                json={
+                    "query_text": query,
+                    "workspace_id": ws_id,
+                    "limit": SEARCH_LIMIT,
+                    "include_documents": False,
+                },
+            )
             r.raise_for_status()
             search_results = r.json()
         except Exception as e:
-            results.append({"question": query, "category": q.get("category", 0),
-                           "error": str(e), "metrics": {}})
+            results.append({"question": query, "category": q.get("category", 0), "error": str(e), "metrics": {}})
             continue
 
         # Dedup: walk ranked chunks, keep first occurrence per session
@@ -211,23 +213,25 @@ def search_and_evaluate(client: httpx.Client, conv: dict, ws_id: int,
         r10 = entry_metrics.get("recall_any@10", 0)
         print(f"  [{conv_id}] Query {query_num}/{total_queries}: R@1={r1:.0f} R@5={r5:.0f} R@10={r10:.0f}")
 
-        results.append({
-            "question": query,
-            "category": q.get("category", 0),
-            "category_name": CAT_NAMES.get(q.get("category", 0), "unknown"),
-            "gold_sessions": sorted(gold_sessions),
-            "retrieved_sessions": retrieved_sessions[:10],
-            "metrics": entry_metrics,
-        })
+        results.append(
+            {
+                "question": query,
+                "category": q.get("category", 0),
+                "category_name": CAT_NAMES.get(q.get("category", 0), "unknown"),
+                "gold_sessions": sorted(gold_sessions),
+                "retrieved_sessions": retrieved_sessions[:10],
+                "metrics": entry_metrics,
+            }
+        )
 
     return results
 
 
 def print_metrics(all_results: list[dict], label: str):
     """Print aggregated metrics."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"LoCoMo Results -- {label}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     metrics_accum = defaultdict(list)
     by_category = defaultdict(lambda: defaultdict(list))
@@ -242,7 +246,7 @@ def print_metrics(all_results: list[dict], label: str):
     print(f"\nOverall ({len(metrics_accum.get('recall_any@5', []))} queries):")
     for key in sorted(metrics_accum.keys()):
         vals = metrics_accum[key]
-        print(f"  {key}: {sum(vals)/len(vals):.4f}")
+        print(f"  {key}: {sum(vals) / len(vals):.4f}")
 
     print(f"\nBy category:")
     for cat_name in ["single-hop", "temporal", "multi-hop", "open-domain", "adversarial"]:
@@ -251,7 +255,7 @@ def print_metrics(all_results: list[dict], label: str):
         cat_metrics = by_category[cat_name]
         r5 = cat_metrics.get("recall_any@5", [])
         if r5:
-            print(f"  {cat_name}: R@5={sum(r5)/len(r5):.4f} ({len(r5)} queries)")
+            print(f"  {cat_name}: R@5={sum(r5) / len(r5):.4f} ({len(r5)} queries)")
 
 
 def main():
@@ -277,7 +281,9 @@ def main():
             session_keys = [k for k in c if k.startswith("session_") and not k.endswith("_date_time")]
             qa_count = len(conv["qa"])
 
-            print(f"\n--- Conversation {conv_idx+1}/10: {sample_id} ({len(session_keys)} sessions, {qa_count} QA) ---")
+            print(
+                f"\n--- Conversation {conv_idx + 1}/10: {sample_id} ({len(session_keys)} sessions, {qa_count} QA) ---"
+            )
 
             ws_name = f"locomo-chunked-{sample_id}-{int(time.time())}"
             ws_id, proj_id = create_workspace(client, ws_name)

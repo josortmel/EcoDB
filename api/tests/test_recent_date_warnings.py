@@ -2,6 +2,7 @@
 midnight fecha_hasta with no results must say so in `warnings` instead of
 returning a silent zero. Pure unit tests — no DB.
 """
+
 import sys
 from datetime import datetime, timezone
 from pathlib import Path

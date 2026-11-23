@@ -7,6 +7,7 @@ Run from the api/ directory:
 Los tests usan create_app(environment) en vez del app module-level para que
 cada caso pueda forzar el env sin depender de variables de entorno externas.
 """
+
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ client_dev = TestClient(app_dev)
 
 
 # --- Liveness checks ---
+
 
 def test_get_health_returns_200():
     response = client_prod.get("/health")
@@ -63,6 +65,7 @@ def test_health_no_required_auth():
 
 # --- Security headers (VS5) ---
 
+
 def test_security_headers_present():
     """X-Content-Type-Options + Referrer-Policy en cada respuesta."""
     response = client_prod.get("/health")
@@ -71,6 +74,7 @@ def test_security_headers_present():
 
 
 # --- Docs gating por ENVIRONMENT (VS3) ---
+
 
 def test_docs_hidden_in_production():
     """En production, /docs y /openapi.json deben devolver 404 (no exponer schema sin auth)."""
@@ -95,6 +99,7 @@ def test_openapi_schema_in_development_describes_health():
 
 # --- Comportamiento HTTP general ---
 
+
 def test_inexistent_endpoint_returns_404():
     response = client_prod.get("/foo/bar/baz")
     assert response.status_code == 404
@@ -106,6 +111,7 @@ def test_post_health_method_not_allowed():
 
 
 # --- Schema version DB check ---
+
 
 def test_schema_version_matches_db():
     """DB schema_version table must report settings.SCHEMA_VERSION.
@@ -121,9 +127,7 @@ def test_schema_version_matches_db():
         except Exception:
             pytest.skip("postgres not available")
         try:
-            row = await conn.fetchrow(
-                "SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1"
-            )
+            row = await conn.fetchrow("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
         finally:
             await conn.close()
         assert row is not None, "schema_version table is empty"

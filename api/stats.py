@@ -1,4 +1,5 @@
 """Endpoints de estadísticas."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -30,6 +31,7 @@ def _period_to_days(period: str) -> int:
 # ---------------------------------------------------------------------------
 # GET /stats/memories
 # ---------------------------------------------------------------------------
+
 
 @router.get("/memories")
 async def stats_memories(
@@ -89,6 +91,7 @@ async def stats_memories(
 # GET /stats/graph
 # ---------------------------------------------------------------------------
 
+
 @router.get("/graph")
 async def stats_graph(actor: dict = Depends(get_current_user)) -> dict:
     """Totales y crecimiento diario de nodos y tripletas (últimos 30 días)."""
@@ -133,6 +136,7 @@ async def stats_graph(actor: dict = Depends(get_current_user)) -> dict:
 # GET /stats/agents
 # ---------------------------------------------------------------------------
 
+
 @router.get("/agents")
 async def stats_agents(
     workspace_id: Optional[int] = Query(None),
@@ -162,7 +166,8 @@ async def stats_agents(
             params.append(workspace_id)
             ws_clause = f"AND m.workspace_id = ${len(params)}"
 
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             SELECT a.identifier,
                    COUNT(m.id) AS memories_created,
                    MAX(a.last_seen) AS last_activity
@@ -174,26 +179,35 @@ async def stats_agents(
             GROUP BY a.id, a.identifier, a.last_seen
             {having_clause}
             ORDER BY memories_created DESC
-        """, *params)
+        """,
+            *params,
+        )
 
         # searches from search_log — filter by visible project_ids
         if not is_super:
-            search_rows = await conn.fetch(f"""
+            search_rows = await conn.fetch(
+                f"""
                 SELECT a.identifier, COUNT(sl.id) AS searches
                 FROM agents a
                 LEFT JOIN search_log sl ON sl.agent_id = a.id
                     AND sl.created_at >= NOW() - make_interval(days => $1)
                     AND sl.project_ids && $2::int[]
                 GROUP BY a.identifier
-            """, days, list(visible))
+            """,
+                days,
+                list(visible),
+            )
         else:
-            search_rows = await conn.fetch(f"""
+            search_rows = await conn.fetch(
+                f"""
                 SELECT a.identifier, COUNT(sl.id) AS searches
                 FROM agents a
                 LEFT JOIN search_log sl ON sl.agent_id = a.id
                     AND sl.created_at >= NOW() - make_interval(days => $1)
                 GROUP BY a.identifier
-            """, days)
+            """,
+                days,
+            )
 
     search_map = {r["identifier"]: r["searches"] for r in search_rows}
     agents = [
@@ -212,6 +226,7 @@ async def stats_agents(
 # GET /stats/search
 # ---------------------------------------------------------------------------
 
+
 @router.get("/search")
 async def stats_search(
     period: str = Query("7d"),
@@ -226,9 +241,16 @@ async def stats_search(
         if not is_super:
             visible = await visible_project_ids(conn, actor)
             if not visible:
-                return {"available": True, "period": period, "total_queries": 0,
-                        "failed_count": 0, "avg_latency_ms": None, "p95_latency_ms": None}
-            rows = await conn.fetch("""
+                return {
+                    "available": True,
+                    "period": period,
+                    "total_queries": 0,
+                    "failed_count": 0,
+                    "avg_latency_ms": None,
+                    "p95_latency_ms": None,
+                }
+            rows = await conn.fetch(
+                """
                 SELECT COUNT(*) AS total,
                        COUNT(*) FILTER (WHERE failed) AS failed_count,
                        AVG(latency_ms) AS avg_latency_ms,
@@ -236,16 +258,22 @@ async def stats_search(
                 FROM search_log
                 WHERE created_at >= NOW() - make_interval(days => $1)
                   AND project_ids && $2::int[]
-            """, days, list(visible))
+            """,
+                days,
+                list(visible),
+            )
         else:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT COUNT(*) AS total,
                        COUNT(*) FILTER (WHERE failed) AS failed_count,
                        AVG(latency_ms) AS avg_latency_ms,
                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_latency_ms
                 FROM search_log
                 WHERE created_at >= NOW() - make_interval(days => $1)
-            """, days)
+            """,
+                days,
+            )
 
     r = rows[0]
     return {
@@ -262,6 +290,7 @@ async def stats_search(
 # GET /stats/system
 # ---------------------------------------------------------------------------
 
+
 @router.get("/system")
 async def stats_system(actor: dict = Depends(get_current_user)) -> dict:
     """Métricas de sistema: embeddings VRAM, DB counts, media."""
@@ -275,9 +304,7 @@ async def stats_system(actor: dict = Depends(get_current_user)) -> dict:
         nodes_count = await conn.fetchval("SELECT COUNT(*) FROM nodes")
         triples_count = await conn.fetchval("SELECT COUNT(*) FROM triples")
         # Media: count non-null media_path entries in memories
-        media_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM memories WHERE media_path IS NOT NULL"
-        )
+        media_count = await conn.fetchval("SELECT COUNT(*) FROM memories WHERE media_path IS NOT NULL")
 
     # Embeddings health
     embeddings_info: dict = {"status": "unknown"}
@@ -315,6 +342,7 @@ async def stats_system(actor: dict = Depends(get_current_user)) -> dict:
 # GET /stats/timeline
 # ---------------------------------------------------------------------------
 
+
 @router.get("/timeline")
 async def stats_timeline(
     period: int = Query(30, ge=1, le=365, description="Days of history"),
@@ -339,7 +367,8 @@ async def stats_timeline(
             search_filter = "AND project_ids && $2::int[]"
             params = [period, visible_list]
 
-        rows = await conn.fetch(f"""
+        rows = await conn.fetch(
+            f"""
             WITH gs AS (
                 SELECT gs::date AS day
                 FROM generate_series(
@@ -381,7 +410,9 @@ async def stats_timeline(
             LEFT JOIN docs ON docs.day = gs.day
             LEFT JOIN searches ON searches.day = gs.day
             ORDER BY gs.day
-        """, *params)
+        """,
+            *params,
+        )
 
     timeline = [
         {
@@ -399,9 +430,12 @@ async def stats_timeline(
 # Task 5.17 — Observabilidad cognitiva
 # ---------------------------------------------------------------------------
 
+
 @router.get("/knowledge")
 async def knowledge_stats(
-    project_id: Optional[int] = Query(None, description="Scope memory counts to a project. Graph/entity metrics remain system-wide."),
+    project_id: Optional[int] = Query(
+        None, description="Scope memory counts to a project. Graph/entity metrics remain system-wide."
+    ),
     actor: dict = Depends(get_current_user),
 ) -> dict:
     """Knowledge graph health metrics. Super-only."""
@@ -410,18 +444,12 @@ async def knowledge_stats(
     pool = await get_pool()
     async with pool.acquire() as conn:
         data: dict = {}
-        data["entity_count"] = await conn.fetchval(
-            "SELECT count(*) FROM nodes WHERE status = 'active'"
-        )
-        data["merged_entity_count"] = await conn.fetchval(
-            "SELECT count(*) FROM nodes WHERE status = 'merged'"
-        )
+        data["entity_count"] = await conn.fetchval("SELECT count(*) FROM nodes WHERE status = 'active'")
+        data["merged_entity_count"] = await conn.fetchval("SELECT count(*) FROM nodes WHERE status = 'merged'")
         data["alias_candidate_count"] = await conn.fetchval(
             "SELECT count(*) FROM entity_alias_candidates WHERE status = 'pending'"
         )
-        data["merge_count"] = await conn.fetchval(
-            "SELECT count(*) FROM entity_merge_log WHERE undone_at IS NULL"
-        )
+        data["merge_count"] = await conn.fetchval("SELECT count(*) FROM entity_merge_log WHERE undone_at IS NULL")
         data["orphan_entity_count"] = await conn.fetchval(
             """SELECT count(*) FROM nodes n
                WHERE status = 'active'
@@ -429,9 +457,7 @@ async def knowledge_stats(
                  AND NOT EXISTS (SELECT 1 FROM document_entity_links del WHERE del.entity_node_id = n.id)"""
         )
         if project_id is None:
-            data["stale_memory_count"] = await conn.fetchval(
-                "SELECT count(*) FROM memories WHERE staleness = 'stale'"
-            )
+            data["stale_memory_count"] = await conn.fetchval("SELECT count(*) FROM memories WHERE staleness = 'stale'")
             data["dormant_memory_count"] = await conn.fetchval(
                 "SELECT count(*) FROM memories WHERE staleness = 'dormant'"
             )
@@ -476,6 +502,7 @@ async def knowledge_stats(
 # ---------------------------------------------------------------------------
 # Metacognition stats models
 # ---------------------------------------------------------------------------
+
 
 class ClusteringMetrics(BaseModel):
     silhouette_cosine: Optional[float] = None
@@ -532,6 +559,7 @@ class MetacognitionStatsResponse(BaseModel):
 # GET /stats/metacognition
 # ---------------------------------------------------------------------------
 
+
 @router.get("/metacognition")
 async def stats_metacognition(actor: dict = Depends(get_current_user)) -> MetacognitionStatsResponse:
     if not actor.get("is_super"):
@@ -545,12 +573,14 @@ async def stats_metacognition(actor: dict = Depends(get_current_user)) -> Metaco
             ORDER BY finished_at DESC LIMIT 1
         """)
         import json as _json
+
         _raw_metrics = last_run["metrics"] if last_run else {}
         if isinstance(_raw_metrics, str):
             _raw_metrics = _json.loads(_raw_metrics)
         cm = (_raw_metrics or {}).get("clustering", {})
         avg_size = await conn.fetchval(
-            "SELECT AVG(array_length(member_ids,1)) FROM memory_clusters WHERE status='active'")
+            "SELECT AVG(array_length(member_ids,1)) FROM memory_clusters WHERE status='active'"
+        )
 
         # Foresight
         active_f = await conn.fetchval("""
@@ -569,9 +599,11 @@ async def stats_metacognition(actor: dict = Depends(get_current_user)) -> Metaco
         # Skills
         total_sk = await conn.fetchval("SELECT COUNT(*) FROM memories WHERE type='skill'")
         active_sk = await conn.fetchval(
-            "SELECT COUNT(*) FROM memories WHERE type='skill' AND metadata @> '{\"status\":\"active\"}'::jsonb")
+            "SELECT COUNT(*) FROM memories WHERE type='skill' AND metadata @> '{\"status\":\"active\"}'::jsonb"
+        )
         stale_sk = await conn.fetchval(
-            "SELECT COUNT(*) FROM memories WHERE type='skill' AND metadata @> '{\"status\":\"stale\"}'::jsonb")
+            "SELECT COUNT(*) FROM memories WHERE type='skill' AND metadata @> '{\"status\":\"stale\"}'::jsonb"
+        )
 
         # Identity
         open_t = await conn.fetchval("""
@@ -588,14 +620,16 @@ async def stats_metacognition(actor: dict = Depends(get_current_user)) -> Metaco
         """)
 
         # Cells
-        runs_30d = await conn.fetchval(
-            "SELECT COUNT(*) FROM cell_runs WHERE started_at > NOW()-INTERVAL '30 days'")
+        runs_30d = await conn.fetchval("SELECT COUNT(*) FROM cell_runs WHERE started_at > NOW()-INTERVAL '30 days'")
         cost_30d = await conn.fetchval(
-            "SELECT SUM(cost_usd) FROM cell_runs WHERE started_at > NOW()-INTERVAL '30 days'")
+            "SELECT SUM(cost_usd) FROM cell_runs WHERE started_at > NOW()-INTERVAL '30 days'"
+        )
         errors_30d = await conn.fetchval(
-            "SELECT COUNT(*) FROM cell_runs WHERE status='failed' AND started_at > NOW()-INTERVAL '30 days'")
+            "SELECT COUNT(*) FROM cell_runs WHERE status='failed' AND started_at > NOW()-INTERVAL '30 days'"
+        )
         runs_by = await conn.fetch(
-            "SELECT cell_type, COUNT(*) AS cnt FROM cell_runs WHERE started_at > NOW()-INTERVAL '30 days' GROUP BY cell_type")
+            "SELECT cell_type, COUNT(*) AS cnt FROM cell_runs WHERE started_at > NOW()-INTERVAL '30 days' GROUP BY cell_type"
+        )
 
     return {
         "clustering": {
@@ -606,8 +640,10 @@ async def stats_metacognition(actor: dict = Depends(get_current_user)) -> Metaco
             "graph_led_useful_pct": cm.get("graph_led_useful_pct"),
         },
         "foresight": {
-            "active_count": active_f, "expired_unused_count": expired_unused,
-            "auto_extracted_count": auto_extracted, "precision_estimate": None,
+            "active_count": active_f,
+            "expired_unused_count": expired_unused,
+            "auto_extracted_count": auto_extracted,
+            "precision_estimate": None,
         },
         "skills": {"total": total_sk, "active": active_sk, "stale": stale_sk},
         "briefing": {"avg_items": None, "nuisance_rate": None, "dismiss_rate": None},

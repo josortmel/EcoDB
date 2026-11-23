@@ -10,6 +10,7 @@ publishes as the OpenAPI operation description.
 
 Static (AST) check — no DB, no running API.
 """
+
 import ast
 import re
 from pathlib import Path
@@ -26,7 +27,8 @@ TRUNCATION_PATTERNS = {
 }
 _PARAM_CALLS = {"Field", "Query", "Path", "Body", "Header", "Form"}
 _DOC_DECORATORS = {"mcp.tool", "tool"} | {
-    f"{obj}.{verb}" for obj in ("router", "app") for verb in ("get", "post", "put", "patch", "delete", "head")}
+    f"{obj}.{verb}" for obj in ("router", "app") for verb in ("get", "post", "put", "patch", "delete", "head")
+}
 
 
 def truncations(text: str) -> list[str]:
@@ -52,8 +54,7 @@ def agent_facing_texts(source: str, filename: str = "<src>") -> list[tuple[str, 
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) in _PARAM_CALLS:
             for kw in node.keywords:
-                if kw.arg == "description" and isinstance(kw.value, ast.Constant) \
-                        and isinstance(kw.value.value, str):
+                if kw.arg == "description" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                     out.append((f"{filename}:{kw.value.lineno}", kw.value.value))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if any(_decorator_name(d) in _DOC_DECORATORS for d in node.decorator_list):
@@ -71,22 +72,22 @@ def _scanned_files() -> list[Path]:
 
 
 def test_detector_flags_fabricated_truncation():
-    fabricated = '''
+    fabricated = """
 from fastapi import Query
 def f(user: int = Query(None, description="Filtrar por creador (."),
       scope: bool = Query(False, description=". Audit log obligatorio.")): ...
-'''
+"""
     texts = agent_facing_texts(fabricated)
     assert len(texts) == 2
     assert all(truncations(t) for _, t in texts)
 
 
 def test_detector_accepts_complete_parentheticals():
-    ok = '''
+    ok = """
 from fastapi import Query
 def f(t: float = Query(0.7, description="Score minimo (0-1). Default 0.7 (ver .env)."),
       e: str = Query(None, description="Extensiones (.png/.jpg) soportadas.")): ...
-'''
+"""
     assert not any(truncations(t) for _, t in agent_facing_texts(ok))
 
 

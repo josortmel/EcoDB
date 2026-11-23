@@ -3,6 +3,7 @@
 Runs hourly in the worker process via asyncio. Tasks execute sequentially
 (serialized with ingesta via the worker's main loop).
 """
+
 import json
 import logging
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ async def run_governance_cycle(pool) -> None:
     log.info("Governance cycle starting")
     t0 = datetime.now(timezone.utc)
     from search import flush_accessed_buffer
+
     await flush_accessed_buffer(pool)
     for task_fn in (
         mark_stale_memories,
@@ -51,19 +53,25 @@ async def mark_stale_memories(pool) -> None:
         # Access was never recorded by /search before 2026-09-25 (flush ran in the wrong
         # process), so ANY last_accessed older than that is incomplete (NULL, or only the odd
         # GET /memories read). Age every memory from ACCESS_TRACKING_SINCE at the earliest.
-        staled = await conn.execute("""
+        staled = await conn.execute(
+            """
             UPDATE memories SET staleness = 'stale', updated_at = now()
             WHERE staleness = 'active'
               AND type NOT IN ('decision', 'acuerdo')
               AND GREATEST(COALESCE(last_accessed, created_at), $1::timestamptz) < now() - INTERVAL '60 days'
               AND created_at < now() - INTERVAL '60 days'
-        """, ACCESS_TRACKING_SINCE)
+        """,
+            ACCESS_TRACKING_SINCE,
+        )
         # stale → dormant
-        dormanted = await conn.execute("""
+        dormanted = await conn.execute(
+            """
             UPDATE memories SET staleness = 'dormant', updated_at = now()
             WHERE staleness = 'stale'
               AND GREATEST(COALESCE(last_accessed, created_at), $1::timestamptz) < now() - INTERVAL '90 days'
-        """, ACCESS_TRACKING_SINCE)
+        """,
+            ACCESS_TRACKING_SINCE,
+        )
         log.info("Stale marking: %s→stale, %s→dormant", staled, dormanted)
 
 
@@ -97,13 +105,15 @@ async def purge_old_related_documents(pool) -> None:
             for row in archived:
                 await conn.execute(
                     "INSERT INTO trash (id, original_table, original_data, deleted_at) VALUES (gen_random_uuid(), 'related_documents', $1::jsonb, now())",
-                    json.dumps({
-                        "source_id": str(row["source_id"]),
-                        "target_id": str(row["target_id"]),
-                        "relation_type": row["relation_type"],
-                        "similarity": row["similarity"],
-                        "detected_at": row["detected_at"].isoformat() if row["detected_at"] else None,
-                    }),
+                    json.dumps(
+                        {
+                            "source_id": str(row["source_id"]),
+                            "target_id": str(row["target_id"]),
+                            "relation_type": row["relation_type"],
+                            "similarity": row["similarity"],
+                            "detected_at": row["detected_at"].isoformat() if row["detected_at"] else None,
+                        }
+                    ),
                 )
         log.info("Related documents purged: %d (archived to trash)", len(archived))
 
@@ -123,7 +133,8 @@ async def reconcile_document_entities(pool) -> None:
         )
         for doc in docs:
             try:
-                pairs = await conn.fetch("""
+                pairs = await conn.fetch(
+                    """
                     SELECT del1.entity_node_id AS e1, del2.entity_node_id AS e2,
                            1 - (n1.embedding <=> n2.embedding) AS sim,
                            n2.name AS e2_name
@@ -137,13 +148,16 @@ async def reconcile_document_entities(pool) -> None:
                       AND n1.embedding IS NOT NULL AND n2.embedding IS NOT NULL
                       AND 1 - (n1.embedding <=> n2.embedding) > 0.90
                       AND n1.status = 'active' AND n2.status = 'active'
-                """, doc["id"])
+                """,
+                    doc["id"],
+                )
                 for pair in pairs:
                     existing = await conn.fetchrow(
                         """SELECT id, status FROM entity_alias_candidates
                            WHERE source_name = $1 AND target_node_id = $2
                              AND status IN ('pending', 'rejected')""",
-                        pair["e2_name"], pair["e1"],
+                        pair["e2_name"],
+                        pair["e1"],
                     )
                     if existing:
                         await conn.execute(
@@ -152,19 +166,20 @@ async def reconcile_document_entities(pool) -> None:
                                    confidence = GREATEST(confidence, $2),
                                    last_seen = now()
                                WHERE id = $1""",
-                            existing["id"], float(pair["sim"]),
+                            existing["id"],
+                            float(pair["sim"]),
                         )
                     elif existing is None:
                         await conn.execute(
                             """INSERT INTO entity_alias_candidates
                                    (source_name, target_node_id, confidence, occurrences, sample_contexts)
                                VALUES ($1, $2, $3, 1, ARRAY[$4]::text[])""",
-                            pair["e2_name"], pair["e1"], float(pair["sim"]),
+                            pair["e2_name"],
+                            pair["e1"],
+                            float(pair["sim"]),
                             f"reconcile:{doc['id']}",
                         )
-                await conn.execute(
-                    "UPDATE documents SET reconciled = true WHERE id = $1", doc["id"]
-                )
+                await conn.execute("UPDATE documents SET reconciled = true WHERE id = $1", doc["id"])
             except Exception as exc:
                 log.warning("reconcile_document_entities doc=%s failed: %r", doc["id"], exc)
 
@@ -190,12 +205,14 @@ async def reconcile_merged_entity_links(pool) -> None:
                 async with conn.transaction():
                     await conn.execute(
                         "DELETE FROM memory_entity_links WHERE memory_id = $1 AND entity_node_id = $2",
-                        r["memory_id"], r["old_id"],
+                        r["memory_id"],
+                        r["old_id"],
                     )
                     await conn.execute(
                         """INSERT INTO memory_entity_links (memory_id, entity_node_id)
                            VALUES ($1, $2) ON CONFLICT DO NOTHING""",
-                        r["memory_id"], r["new_id"],
+                        r["memory_id"],
+                        r["new_id"],
                     )
                     mem_fixed += 1
             except Exception as exc:
@@ -214,12 +231,16 @@ async def reconcile_merged_entity_links(pool) -> None:
                 async with conn.transaction():
                     await conn.execute(
                         "DELETE FROM document_entity_links WHERE document_id = $1 AND entity_node_id = $2 AND chunk_id IS NOT DISTINCT FROM $3",
-                        r["document_id"], r["old_id"], r["chunk_id"],
+                        r["document_id"],
+                        r["old_id"],
+                        r["chunk_id"],
                     )
                     await conn.execute(
                         """INSERT INTO document_entity_links (document_id, entity_node_id, chunk_id)
                            VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
-                        r["document_id"], r["new_id"], r["chunk_id"],
+                        r["document_id"],
+                        r["new_id"],
+                        r["chunk_id"],
                     )
                     doc_fixed += 1
             except Exception as exc:
@@ -231,6 +252,7 @@ async def reconcile_merged_entity_links(pool) -> None:
 async def update_corpus_vocabulary(pool) -> None:
     """Fase B.3 — Extract unique terms from recent memories and embed for BM25 expansion."""
     from settings import ENABLE_BM25_EXPANSION
+
     if not ENABLE_BM25_EXPANSION:
         return
     async with pool.acquire() as conn:
@@ -243,12 +265,9 @@ async def update_corpus_vocabulary(pool) -> None:
               AND (staleness IS NULL OR staleness NOT IN ('dormant', 'archived'))
             LIMIT 500
         """)
-        new_terms = [r["term"] for r in rows
-                     if len(r["term"]) >= 4 and r["term"].isalpha()]
+        new_terms = [r["term"] for r in rows if len(r["term"]) >= 4 and r["term"].isalpha()]
 
-        existing = await conn.fetch(
-            "SELECT term FROM corpus_vocabulary WHERE term = ANY($1::text[])",
-            new_terms)
+        existing = await conn.fetch("SELECT term FROM corpus_vocabulary WHERE term = ANY($1::text[])", new_terms)
         existing_set = {r["term"] for r in existing}
         to_embed = [t for t in new_terms if t not in existing_set][:50]
 
@@ -256,6 +275,7 @@ async def update_corpus_vocabulary(pool) -> None:
             return
 
         from embeddings_client import embed_text
+
         added = 0
         for term in to_embed:
             try:
@@ -263,7 +283,9 @@ async def update_corpus_vocabulary(pool) -> None:
                 await conn.execute(
                     "INSERT INTO corpus_vocabulary (term, embedding) VALUES ($1, $2::vector) "
                     "ON CONFLICT (term) DO NOTHING",
-                    term, emb)
+                    term,
+                    emb,
+                )
                 added += 1
             except Exception as e:
                 log.debug("embed term %s failed: %r", term, e)
@@ -280,6 +302,7 @@ async def detect_tensions(pool) -> None:
     No-op when ENABLE_TENSION_DETECTION is False.
     """
     from settings import ENABLE_TENSION_DETECTION
+
     if not ENABLE_TENSION_DETECTION:
         return
     async with pool.acquire() as conn:
@@ -317,6 +340,7 @@ async def detect_tensions(pool) -> None:
         count = tensions[0]["tension_count"] if tensions else 0
         if count > 0:
             from events import broadcast_event
+
             await broadcast_event("tension_detected", {"count": count}, org_id=None)
             log.info("Tensions detected: %d", count)
 
@@ -329,18 +353,18 @@ async def update_graph_clusters(pool) -> None:
     """
     import asyncio
     import os
+
     min_degree = int(os.getenv("LOUVAIN_MIN_DEGREE", "2"))
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, name FROM nodes WHERE status = 'active'"
-        )
+        rows = await conn.fetch("SELECT id, name FROM nodes WHERE status = 'active'")
         if len(rows) < 10:
             log.info("update_graph_clusters: skipped, only %d active nodes", len(rows))
             return
 
         if min_degree > 1:
-            triples = await conn.fetch("""
+            triples = await conn.fetch(
+                """
                 WITH active_edges AS (
                     SELECT t.subject_id, t.object_id
                     FROM triples t
@@ -358,7 +382,9 @@ async def update_graph_clusters(pool) -> None:
                 FROM active_edges ae
                 WHERE ae.subject_id IN (SELECT node_id FROM node_degrees)
                   AND ae.object_id IN (SELECT node_id FROM node_degrees)
-            """, min_degree)
+            """,
+                min_degree,
+            )
         else:
             triples = await conn.fetch("""
                 SELECT t.subject_id, t.object_id
@@ -376,9 +402,7 @@ async def update_graph_clusters(pool) -> None:
 
     try:
         communities = await asyncio.wait_for(
-            asyncio.get_running_loop().run_in_executor(
-                None, lambda: louvain_communities(G, seed=42)
-            ),
+            asyncio.get_running_loop().run_in_executor(None, lambda: louvain_communities(G, seed=42)),
             timeout=120.0,
         )
     except asyncio.TimeoutError:

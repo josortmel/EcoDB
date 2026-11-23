@@ -1,6 +1,7 @@
 """#816 (1): rebuilding past weeks (the #702 regeneration, 28-oct) wrote one «Identity tension» per
 rebuilt week, all dated today: 101 that crowded the recent days of every boot. Now only a recently
 closed week gets one, and never a second one for the same week. Offline: fake conn + fake LLM."""
+
 import asyncio
 import json
 import os
@@ -20,8 +21,7 @@ import cell_worker as cw  # noqa: E402
 if not _HABIA_URL:
     del os.environ["DATABASE_URL"]
 
-TENSION = json.dumps({"tensions": [{"observed_trait": "o", "declared_trait": "d",
-                                    "tension_type": "gap"}]})
+TENSION = json.dumps({"tensions": [{"observed_trait": "o", "declared_trait": "d", "tension_type": "gap"}]})
 
 
 class FakeConn:
@@ -55,8 +55,11 @@ def _run(monkeypatch, week_end, existing=False):
     monkeypatch.setattr(cw, "_embed_for_memory", no_embed)
     conn = FakeConn(existing)
     memories = [{"id": f"m{i}", "type": "momento"} for i in range(6)]
-    n = asyncio.run(cw._detect_identity_tensions(
-        conn, 3, 1, [{"content": "soy Hilo"}], memories, week_end - timedelta(days=6), week_end))
+    n = asyncio.run(
+        cw._detect_identity_tensions(
+            conn, 3, 1, [{"content": "soy Hilo"}], memories, week_end - timedelta(days=6), week_end
+        )
+    )
     return n, conn, len(calls)
 
 

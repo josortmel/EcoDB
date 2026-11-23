@@ -2,6 +2,7 @@
 
 La comprobación se hace al importar server.py, así que cada caso importa el módulo en un proceso aparte.
 """
+
 import os
 import subprocess
 import sys
@@ -17,8 +18,9 @@ def _importar(api_url: str, extra_hosts: str | None) -> subprocess.CompletedProc
     env.update(ECODB_API_URL=api_url, ECODB_API_KEY="clave-de-prueba", MCP_TRANSPORT="stdio")
     if extra_hosts is not None:
         env["ECODB_INTERNAL_HOSTS"] = extra_hosts
-    return subprocess.run([sys.executable, "-c", "import server"], cwd=MCP_DIR, env=env,
-                          capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        [sys.executable, "-c", "import server"], cwd=MCP_DIR, env=env, capture_output=True, text=True, timeout=120
+    )
 
 
 def test_http_a_un_host_no_interno_se_rechaza():

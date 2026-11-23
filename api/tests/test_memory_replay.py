@@ -1,6 +1,7 @@
 """#547: a save_memory queued by the MCP during an embeddings outage is re-sent later with
 the id it already gave the agent (client_id) and the time it really happened (occurred_at).
 Against the throwaway Postgres (5436); embeddings stubbed so the outage is controllable."""
+
 import asyncio
 import os
 import sys
@@ -14,6 +15,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -42,6 +44,7 @@ def _sql(q, *args):
             return await conn.fetch(q, *args)
         finally:
             await conn.close()
+
     return asyncio.run(run())
 
 
@@ -54,8 +57,10 @@ def client():
 @pytest.fixture(scope="module")
 def jwt(client):
     key_plain, key_hash = generate_api_key()
-    key_id = _sql("INSERT INTO api_keys (key_hash, name, user_id, active) "
-                  "VALUES ($1, 'pytest-replay', 1, true) RETURNING id", key_hash)[0]["id"]
+    key_id = _sql(
+        "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-replay', 1, true) RETURNING id",
+        key_hash,
+    )[0]["id"]
     token = client.post("/auth/token", json={"api_key": key_plain}).json()["access_token"]
     yield token
     _sql("DELETE FROM api_keys WHERE id = $1", key_id)
@@ -63,8 +68,7 @@ def jwt(client):
 
 
 def _post(client, jwt, **extra):
-    body = {"type": "observacion", "content": PREFIX + uuid.uuid4().hex,
-            "workspace_id": 1, "project_id": 1, **extra}
+    body = {"type": "observacion", "content": PREFIX + uuid.uuid4().hex, "workspace_id": 1, "project_id": 1, **extra}
     return client.post("/memories", headers={"Authorization": f"Bearer {jwt}"}, json=body)
 
 
@@ -86,9 +90,17 @@ def test_resend_returns_the_same_memory_without_embedding_again(client, jwt, mon
     assert first.status_code == 201
     # embeddings down: a replay must not need it, and must not create a second row
     monkeypatch.setattr(memories, "embed_text", _down_embed)
-    again = client.post("/memories", headers={"Authorization": f"Bearer {jwt}"},
-                        json={"type": "observacion", "content": first.json()["content"],
-                              "workspace_id": 1, "project_id": 1, "client_id": str(mid)})
+    again = client.post(
+        "/memories",
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "type": "observacion",
+            "content": first.json()["content"],
+            "workspace_id": 1,
+            "project_id": 1,
+            "client_id": str(mid),
+        },
+    )
     assert again.status_code == 201, again.text
     assert again.json()["id"] == str(mid)
     assert _sql("SELECT count(*) AS n FROM memories WHERE id = $1", mid)[0]["n"] == 1
@@ -114,8 +126,14 @@ def test_client_id_of_another_owner_is_409(client, jwt, monkeypatch):
     other = _sql("INSERT INTO users (name) VALUES ($1) RETURNING id", PREFIX + "other-owner")[0]["id"]
     mid = uuid.uuid4()
     try:
-        _sql("INSERT INTO memories (id, user_id, workspace_id, project_id, type, content, embedding) "
-             "VALUES ($1, $2, 1, 1, 'observacion', $3, $4::vector)", mid, other, PREFIX + "other", FAKE_VEC)
+        _sql(
+            "INSERT INTO memories (id, user_id, workspace_id, project_id, type, content, embedding) "
+            "VALUES ($1, $2, 1, 1, 'observacion', $3, $4::vector)",
+            mid,
+            other,
+            PREFIX + "other",
+            FAKE_VEC,
+        )
         assert _post(client, jwt, client_id=str(mid)).status_code == 409
     finally:
         _sql("DELETE FROM memories WHERE id = $1", mid)
@@ -133,9 +151,17 @@ def test_resend_of_a_deleted_memory_is_409_and_not_recreated(client, jwt, monkey
     assert first.status_code == 201, first.text
     gone = client.delete(f"/memories/{mid}", headers={"Authorization": f"Bearer {jwt}"})
     assert gone.status_code in (200, 204), gone.text
-    again = client.post("/memories", headers={"Authorization": f"Bearer {jwt}"},
-                        json={"type": "observacion", "content": first.json()["content"],
-                              "workspace_id": 1, "project_id": 1, "client_id": str(mid)})
+    again = client.post(
+        "/memories",
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "type": "observacion",
+            "content": first.json()["content"],
+            "workspace_id": 1,
+            "project_id": 1,
+            "client_id": str(mid),
+        },
+    )
     assert again.status_code == 409, again.text
     assert "deleted" in again.json()["detail"]
     assert _sql("SELECT count(*) AS n FROM memories WHERE id = $1", mid)[0]["n"] == 0

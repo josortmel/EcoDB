@@ -10,6 +10,7 @@ api_keys, asi no contaminan el seed. Cleanup en teardown.
 Si el postgres no esta accesible, los tests fallan con error claro (no skip
 silencioso — porque la auth de verdad necesita DB).
 """
+
 import os
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -44,6 +46,7 @@ def super_api_key():
     """Creates an API key for the superuser (user_id=1) and returns the plain key.
     Cleanup tras los tests."""
     import asyncio
+
     key_plain, key_hash = generate_api_key()
 
     async def _setup():
@@ -77,6 +80,7 @@ def super_api_key():
 # POST /auth/token
 # ---------------------------------------------------------------------------
 
+
 def test_token_with_valid_api_key_returns_jwt(client, super_api_key):
     response = client.post("/auth/token", json={"api_key": super_api_key})
     assert response.status_code == 200
@@ -100,6 +104,7 @@ def test_token_with_missing_api_key_returns_422(client):
 # ---------------------------------------------------------------------------
 # GET /auth/me
 # ---------------------------------------------------------------------------
+
 
 def test_me_without_auth_returns_401(client):
     response = client.get("/auth/me")
@@ -147,6 +152,7 @@ def test_me_with_malformed_authorization_returns_401(client):
 # POST /auth/api-keys (super-only)
 # ---------------------------------------------------------------------------
 
+
 def test_create_api_key_as_super_returns_new_key(client, super_api_key):
     token = client.post("/auth/token", json={"api_key": super_api_key}).json()["access_token"]
     response = client.post(
@@ -161,12 +167,14 @@ def test_create_api_key_as_super_returns_new_key(client, super_api_key):
     assert body["name"] == "pytest-created-key"
     # Cleanup la key recien creada
     import asyncio
+
     async def _cleanup():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
         try:
             await conn.execute("DELETE FROM api_keys WHERE id = $1", body["id"])
         finally:
             await conn.close()
+
     asyncio.run(_cleanup())
 
 
@@ -191,6 +199,7 @@ def test_create_api_key_for_inexistent_user_returns_404(client, super_api_key):
 # ---------------------------------------------------------------------------
 # Security headers present on auth endpoints (VS5 + NV1 ASGI)
 # ---------------------------------------------------------------------------
+
 
 def test_security_headers_on_auth_endpoint(client, super_api_key):
     token = client.post("/auth/token", json={"api_key": super_api_key}).json()["access_token"]

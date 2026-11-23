@@ -5,6 +5,7 @@ Archivo: events.py | Endpoint: GET /api/v1/events/stream
 Hooks activos: memory_created, search_completed, contradiction_detected, tension_detected, duplicate_detected, document_indexed
 The frontend connects with EventSource("/api/v1/events/stream")
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -84,11 +85,14 @@ async def post_session_event(
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'agent_session', 'agent', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), body.agent_identifier,
+            int(actor["sub"]),
+            body.agent_identifier,
             json.dumps({"event": body.event}),
             actor.get("organization_id"),
         )
-    await broadcast_event(f"agent_{body.event}", {"agent_identifier": body.agent_identifier}, org_id=actor.get("organization_id"))
+    await broadcast_event(
+        f"agent_{body.event}", {"agent_identifier": body.agent_identifier}, org_id=actor.get("organization_id")
+    )
     return {
         "ok": True,
         "agent_identifier": row["identifier"],
@@ -134,6 +138,7 @@ async def event_stream(
 # Task 4.13 — Internal broadcast endpoint (worker → SSE clients)
 # ---------------------------------------------------------------------------
 
+
 class BroadcastBody(BaseModel):
     event_type: str = Field(..., min_length=1, max_length=128)
     data: dict = Field(default_factory=dict)
@@ -159,6 +164,7 @@ async def broadcast_internal(
     elif auth_header.startswith("Bearer "):
         try:
             from auth import decode_jwt
+
             payload = decode_jwt(auth_header[7:])
             # #1345 (lo vio Fiel): esta ruta no pasa por get_current_user, así que la marca de solo lectura (#1332)
             # se mira aquí. Emitir un evento es escribir, aunque no toque la base.

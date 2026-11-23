@@ -4,6 +4,7 @@
 Run from host: python eval/gamr_k_eval.py
 Requires: ECODB_EVAL_API_KEY or ECODB_API_KEY env var, API on http://localhost:8080
 """
+
 import os
 import sys
 import json
@@ -27,7 +28,7 @@ def get_auth_headers() -> dict:
         if env_file.exists():
             for line in env_file.read_text().splitlines():
                 if line.startswith(("ECODB_EVAL_API_KEY=", "ECODB_API_KEY=")):
-                    key = line.split("=", 1)[1].strip().strip('"\'')
+                    key = line.split("=", 1)[1].strip().strip("\"'")
                     break
     return {"Authorization": f"Bearer {key}"} if key else {}
 
@@ -42,7 +43,7 @@ def search(client: httpx.Client, query: str, headers: dict, limit: int = 10) -> 
                 timeout=45.0,
             )
             if resp.status_code == 429:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
                 continue
             resp.raise_for_status()
             data = resp.json()
@@ -109,13 +110,18 @@ def main():
                 f"  [{i:2d}/{len(queries)}] {query_text[:48]:48s}"
                 f"  R@5={r5:.2f} R@10={r10:.2f}  MRR@5={mrr5:.2f} MRR@10={mrr10:.2f}"
             )
-            results.append({
-                "query": query_text,
-                "category": category,
-                "expected": expected,
-                "found": found10,
-                "r5": r5, "r10": r10, "mrr5": mrr5, "mrr10": mrr10,
-            })
+            results.append(
+                {
+                    "query": query_text,
+                    "category": category,
+                    "expected": expected,
+                    "found": found10,
+                    "r5": r5,
+                    "r10": r10,
+                    "mrr5": mrr5,
+                    "mrr10": mrr10,
+                }
+            )
 
     # Aggregate
     total = len(results)
@@ -138,25 +144,28 @@ def main():
         v = categories[cat]
         c = v["count"]
         print(
-            f"  {cat:14s}  {c:2d}  "
-            f"{avg(v,'r5'):.3f}  {avg(v,'r10'):.3f}  "
-            f"{avg(v,'mrr5'):.3f}  {avg(v,'mrr10'):.3f}"
+            f"  {cat:14s}  {c:2d}  {avg(v, 'r5'):.3f}  {avg(v, 'r10'):.3f}  {avg(v, 'mrr5'):.3f}  {avg(v, 'mrr10'):.3f}"
         )
 
     overall_r5 = sum(r["r5"] for r in results) / total
     overall_r10 = sum(r["r10"] for r in results) / total
     overall_mrr5 = sum(r["mrr5"] for r in results) / total
     overall_mrr10 = sum(r["mrr10"] for r in results) / total
-    print(f"\n  {'OVERALL':14s}  {total:2d}  {overall_r5:.3f}  {overall_r10:.3f}  {overall_mrr5:.3f}  {overall_mrr10:.3f}")
+    print(
+        f"\n  {'OVERALL':14s}  {total:2d}  {overall_r5:.3f}  {overall_r10:.3f}  {overall_mrr5:.3f}  {overall_mrr10:.3f}"
+    )
 
     output = {
         "tag": "gamr-full",
         "total": total,
-        "overall": {"r5": round(overall_r5, 3), "r10": round(overall_r10, 3),
-                    "mrr5": round(overall_mrr5, 3), "mrr10": round(overall_mrr10, 3)},
+        "overall": {
+            "r5": round(overall_r5, 3),
+            "r10": round(overall_r10, 3),
+            "mrr5": round(overall_mrr5, 3),
+            "mrr10": round(overall_mrr10, 3),
+        },
         "categories": {
-            cat: {k: round(avg(v, k), 3) for k in ("r5", "r10", "mrr5", "mrr10")}
-            for cat, v in categories.items()
+            cat: {k: round(avg(v, k), 3) for k in ("r5", "r10", "mrr5", "mrr10")} for cat, v in categories.items()
         },
     }
     print("\n" + json.dumps(output, indent=2))

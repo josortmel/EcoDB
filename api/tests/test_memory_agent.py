@@ -20,6 +20,7 @@ cleaned up. Real data is never touched.
 Requires a live postgres at TEST_DB_URL. Embeddings/LLM-dependent tests skip when the
 backend returns 5xx (service not up).
 """
+
 import asyncio
 import os
 import sys
@@ -54,6 +55,7 @@ TEST_AGENT = "pytest-ma-agent"
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def app():
     return create_app("development")
@@ -87,24 +89,27 @@ def ma_env(client):
         conn = await _aconn()
         try:
             await conn.execute(
-                "INSERT INTO api_keys (key_hash, name, user_id, active) "
-                "VALUES ($1, 'pytest-ma-super', 1, true)",
-                hash_api_key(super_plain))
+                "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-ma-super', 1, true)",
+                hash_api_key(super_plain),
+            )
             u = await conn.fetchrow(
                 "INSERT INTO users (name, is_super, is_ceo, active) "
-                "VALUES ('pytest-ma-nonsuper', false, false, true) RETURNING id")
+                "VALUES ('pytest-ma-nonsuper', false, false, true) RETURNING id"
+            )
             uid = u["id"]
             await conn.execute(
-                "INSERT INTO user_emails (user_id, email, is_primary) "
-                "VALUES ($1, 'pytest-ma-nonsuper@test', true)", uid)
+                "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, 'pytest-ma-nonsuper@test', true)", uid
+            )
             await conn.execute(
-                "INSERT INTO api_keys (key_hash, name, user_id, active) "
-                "VALUES ($1, 'pytest-ma-nonsuper', $2, true)",
-                hash_api_key(nonsuper_plain), uid)
+                "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-ma-nonsuper', $2, true)",
+                hash_api_key(nonsuper_plain),
+                uid,
+            )
             ag = await conn.fetchrow(
                 "INSERT INTO agents (identifier, user_id, active) VALUES ($1, 1, true) "
                 "ON CONFLICT (identifier) DO UPDATE SET active=true RETURNING id",
-                TEST_AGENT)
+                TEST_AGENT,
+            )
             return uid, ag["id"]
         finally:
             await conn.close()
@@ -112,18 +117,14 @@ def ma_env(client):
     async def _cleanup(agent_id):
         conn = await _aconn()
         try:
-            await conn.execute(
-                "DELETE FROM cell_task_configs WHERE agent_id = $1", agent_id)
-            await conn.execute(
-                "DELETE FROM cell_prompt_templates WHERE name LIKE 'pytest-ma-%'")
-            await conn.execute(
-                "DELETE FROM llm_provider_keys WHERE provider LIKE 'pytest_ma_%'")
-            await conn.execute(
-                "DELETE FROM agents WHERE identifier = $1", TEST_AGENT)
+            await conn.execute("DELETE FROM cell_task_configs WHERE agent_id = $1", agent_id)
+            await conn.execute("DELETE FROM cell_prompt_templates WHERE name LIKE 'pytest-ma-%'")
+            await conn.execute("DELETE FROM llm_provider_keys WHERE provider LIKE 'pytest_ma_%'")
+            await conn.execute("DELETE FROM agents WHERE identifier = $1", TEST_AGENT)
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-ma-%'")
             await conn.execute(
-                "DELETE FROM user_emails WHERE user_id IN "
-                "(SELECT id FROM users WHERE name LIKE 'pytest-ma-%')")
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ma-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-ma-%'")
         finally:
             await conn.close()
@@ -131,8 +132,7 @@ def ma_env(client):
     uid, agent_id = _run(_setup())
     super_tok = client.post("/auth/token", json={"api_key": super_plain}).json()["access_token"]
     nonsuper_tok = client.post("/auth/token", json={"api_key": nonsuper_plain}).json()["access_token"]
-    yield {"super": super_tok, "nonsuper": nonsuper_tok,
-           "user_id": uid, "agent_id": agent_id}
+    yield {"super": super_tok, "nonsuper": nonsuper_tok, "user_id": uid, "agent_id": agent_id}
     _run(_cleanup(agent_id))
 
 
@@ -146,9 +146,16 @@ CONFIGS = "/api/v1/cells/configs"
 def test_config_crud(client, ma_env):
     s = _h(ma_env["super"])
     # create
-    r = client.post(CONFIGS, headers=s, json={
-        "agent_identifier": TEST_AGENT, "cell_type": "pytest_custom",
-        "model": "deepseek-chat", "provider": "deepseek"})
+    r = client.post(
+        CONFIGS,
+        headers=s,
+        json={
+            "agent_identifier": TEST_AGENT,
+            "cell_type": "pytest_custom",
+            "model": "deepseek-chat",
+            "provider": "deepseek",
+        },
+    )
     assert r.status_code == 201, r.text
     cid = r.json()["id"]
     # list (filtered by agent)
@@ -176,32 +183,36 @@ def test_config_duplicate_409(client, ma_env):
 
 
 def test_config_invalid_cron_422(client, ma_env):
-    r = client.post(CONFIGS, headers=_h(ma_env["super"]), json={
-        "agent_identifier": TEST_AGENT, "cell_type": "pytest_badcron",
-        "schedule_cron": "not a cron"})
+    r = client.post(
+        CONFIGS,
+        headers=_h(ma_env["super"]),
+        json={"agent_identifier": TEST_AGENT, "cell_type": "pytest_badcron", "schedule_cron": "not a cron"},
+    )
     assert r.status_code == 422
     assert "cron" in r.text.lower()
 
 
 def test_config_cron_too_frequent_422(client, ma_env):
     # _MIN_CRON_INTERVAL_MINUTES floor (VS_L4_4): every-minute cron rejected.
-    r = client.post(CONFIGS, headers=_h(ma_env["super"]), json={
-        "agent_identifier": TEST_AGENT, "cell_type": "pytest_freq",
-        "schedule_cron": "* * * * *"})
+    r = client.post(
+        CONFIGS,
+        headers=_h(ma_env["super"]),
+        json={"agent_identifier": TEST_AGENT, "cell_type": "pytest_freq", "schedule_cron": "* * * * *"},
+    )
     assert r.status_code == 422
     assert "frequent" in r.text.lower() or "minutes" in r.text.lower()
 
 
 def test_config_cell_type_regex_reject_422(client, ma_env):
     # cell_type pattern ^[a-z0-9_]+$ rejects path-traversal-ish input.
-    r = client.post(CONFIGS, headers=_h(ma_env["super"]), json={
-        "agent_identifier": TEST_AGENT, "cell_type": "../x"})
+    r = client.post(CONFIGS, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "cell_type": "../x"})
     assert r.status_code == 422
 
 
 def test_config_non_super_write_403(client, ma_env):
-    r = client.post(CONFIGS, headers=_h(ma_env["nonsuper"]), json={
-        "agent_identifier": TEST_AGENT, "cell_type": "pytest_nope"})
+    r = client.post(
+        CONFIGS, headers=_h(ma_env["nonsuper"]), json={"agent_identifier": TEST_AGENT, "cell_type": "pytest_nope"}
+    )
     assert r.status_code == 403
 
 
@@ -219,13 +230,14 @@ def test_templates_list_super_only_403(client, ma_env):
 
 def test_template_in_use_delete_409(client, ma_env):
     s = _h(ma_env["super"])
-    t = client.post(TEMPLATES, headers=s, json={
-        "name": "pytest-ma-inuse", "cell_type": "pytest_iu", "content": "x"})
+    t = client.post(TEMPLATES, headers=s, json={"name": "pytest-ma-inuse", "cell_type": "pytest_iu", "content": "x"})
     assert t.status_code == 201, t.text
     tid = t.json()["id"]
-    c = client.post(CONFIGS, headers=s, json={
-        "agent_identifier": TEST_AGENT, "cell_type": "pytest_iu_cfg",
-        "prompt_template_id": tid})
+    c = client.post(
+        CONFIGS,
+        headers=s,
+        json={"agent_identifier": TEST_AGENT, "cell_type": "pytest_iu_cfg", "prompt_template_id": tid},
+    )
     assert c.status_code == 201, c.text
     cid = c.json()["id"]
     # in-use -> 409
@@ -239,13 +251,17 @@ def test_template_in_use_delete_409(client, ma_env):
 
 def test_template_unique_default_409(client, ma_env):
     s = _h(ma_env["super"])
-    a = client.post(TEMPLATES, headers=s, json={
-        "name": "pytest-ma-def-a", "cell_type": "pytest_def",
-        "content": "x", "is_default": True})
+    a = client.post(
+        TEMPLATES,
+        headers=s,
+        json={"name": "pytest-ma-def-a", "cell_type": "pytest_def", "content": "x", "is_default": True},
+    )
     assert a.status_code == 201, a.text
-    b = client.post(TEMPLATES, headers=s, json={
-        "name": "pytest-ma-def-b", "cell_type": "pytest_def",
-        "content": "y", "is_default": True})
+    b = client.post(
+        TEMPLATES,
+        headers=s,
+        json={"name": "pytest-ma-def-b", "cell_type": "pytest_def", "content": "y", "is_default": True},
+    )
     assert b.status_code == 409
     assert "default" in b.text.lower()
     client.delete(f"{TEMPLATES}/{a.json()['id']}", headers=s)
@@ -260,9 +276,11 @@ PROVIDERS = "/api/v1/providers"
 
 def test_provider_roundtrip_and_mask(client, ma_env):
     s = _h(ma_env["super"])
-    r = client.post(PROVIDERS, headers=s, json={
-        "provider": "pytest_ma_ds", "api_key": "sk-test-12345",
-        "model_default": "deepseek-chat"})
+    r = client.post(
+        PROVIDERS,
+        headers=s,
+        json={"provider": "pytest_ma_ds", "api_key": "sk-test-12345", "model_default": "deepseek-chat"},
+    )
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["api_key_masked"] == "sk-****...2345"
@@ -278,11 +296,9 @@ def test_provider_roundtrip_and_mask(client, ma_env):
 
 def test_provider_duplicate_409(client, ma_env):
     s = _h(ma_env["super"])
-    r1 = client.post(PROVIDERS, headers=s, json={
-        "provider": "pytest_ma_dup", "api_key": "sk-aaaa-1111"})
+    r1 = client.post(PROVIDERS, headers=s, json={"provider": "pytest_ma_dup", "api_key": "sk-aaaa-1111"})
     assert r1.status_code == 201, r1.text
-    r2 = client.post(PROVIDERS, headers=s, json={
-        "provider": "pytest_ma_dup", "api_key": "sk-bbbb-2222"})
+    r2 = client.post(PROVIDERS, headers=s, json={"provider": "pytest_ma_dup", "api_key": "sk-bbbb-2222"})
     assert r2.status_code == 409
     client.delete(f"{PROVIDERS}/{r1.json()['id']}", headers=s)
 
@@ -299,8 +315,7 @@ CSEARCH = "/api/v1/clusters/search"
 
 
 def test_cluster_search_status_pattern_422(client, ma_env):
-    r = client.post(CSEARCH, headers=_h(ma_env["super"]), json={
-        "query_text": "workflow design", "status": "bogus"})
+    r = client.post(CSEARCH, headers=_h(ma_env["super"]), json={"query_text": "workflow design", "status": "bogus"})
     assert r.status_code == 422
 
 
@@ -312,8 +327,7 @@ def test_cluster_search_short_query_422(client, ma_env):
 def test_cluster_search_mesa_rule_non_super(client, ma_env):
     # Without agent_identifier, a non-super actor must only ever see SIN_AUTOR
     # clusters (contamination prevention). Embeddings-guarded.
-    r = client.post(CSEARCH, headers=_h(ma_env["nonsuper"]),
-                    json={"query_text": "workflow design", "limit": 10})
+    r = client.post(CSEARCH, headers=_h(ma_env["nonsuper"]), json={"query_text": "workflow design", "limit": 10})
     if r.status_code >= 500:
         pytest.skip("embeddings/search backend not available")
     assert r.status_code == 200, r.text
@@ -337,8 +351,7 @@ def test_telescopic_structure(client, ma_env):
 
 
 def test_telescopic_invalid_level_422(client, ma_env):
-    r = client.get(f"{TELE}?agent_identifier={TEST_AGENT}&levels=bogus",
-                   headers=_h(ma_env["super"]))
+    r = client.get(f"{TELE}?agent_identifier={TEST_AGENT}&levels=bogus", headers=_h(ma_env["super"]))
     assert r.status_code == 422
 
 
@@ -389,7 +402,12 @@ def zoom_env(client, ma_env):
                     "INSERT INTO memories (agent_id, workspace_id, project_id, "
                     "type, content, created_at) "
                     "VALUES ($1, $2, $3, 'tecnico', $4, $5) RETURNING id",
-                    aid, ws, pj, content, created)
+                    aid,
+                    ws,
+                    pj,
+                    content,
+                    created,
+                )
 
             mem1 = await _mem("pytest-ma zoom mem old week 1", _ts(today - timedelta(days=67)))
             mem2 = await _mem("pytest-ma zoom mem old week 2", _ts(today - timedelta(days=60)))
@@ -401,41 +419,51 @@ def zoom_env(client, ma_env):
                     "INSERT INTO memory_clusters (agent_id, workspace_id, level, "
                     "label, member_ids, source_ids, period_start, period_end, status) "
                     "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active') RETURNING id",
-                    agent, ws, level, f"pytest-ma-{level}", members, sources,
-                    p_start, p_end)
+                    agent,
+                    ws,
+                    level,
+                    f"pytest-ma-{level}",
+                    members,
+                    sources,
+                    p_start,
+                    p_end,
+                )
 
-            w_old1 = await _cluster(aid, "weekly", today - timedelta(days=70),
-                                    today - timedelta(days=64), [mem1])
-            w_old2 = await _cluster(aid, "weekly", today - timedelta(days=63),
-                                    today - timedelta(days=57), [mem2])
-            w_rec = await _cluster(aid, "weekly", today - timedelta(days=10),
-                                   today - timedelta(days=4), [mem_w])
-            m_old = await _cluster(aid, "monthly", today - timedelta(days=75),
-                                   today - timedelta(days=50), [mem1, mem2],
-                                   [w_old1, w_old2])
+            w_old1 = await _cluster(aid, "weekly", today - timedelta(days=70), today - timedelta(days=64), [mem1])
+            w_old2 = await _cluster(aid, "weekly", today - timedelta(days=63), today - timedelta(days=57), [mem2])
+            w_rec = await _cluster(aid, "weekly", today - timedelta(days=10), today - timedelta(days=4), [mem_w])
+            m_old = await _cluster(
+                aid, "monthly", today - timedelta(days=75), today - timedelta(days=50), [mem1, mem2], [w_old1, w_old2]
+            )
 
             ag2 = await conn.fetchrow(
                 "INSERT INTO agents (identifier, user_id, active) VALUES ($1, 1, true) "
                 "ON CONFLICT (identifier) DO UPDATE SET active=true RETURNING id",
-                TEST_AGENT2)
+                TEST_AGENT2,
+            )
             mem_a2 = await _mem("pytest-ma zoom mem other agent", _ts(today))
-            await conn.execute(
-                "UPDATE memories SET agent_id = $1 WHERE id = $2", ag2["id"], mem_a2)
-            c_other = await _cluster(ag2["id"], "weekly", today - timedelta(days=10),
-                                     today - timedelta(days=4), [mem_a2])
-            return {"w_old1": w_old1, "w_old2": w_old2, "w_rec": w_rec,
-                    "m_old": m_old, "c_other": c_other,
-                    "mem1": mem1, "mem_w": mem_w, "mem_loose": mem_loose}
+            await conn.execute("UPDATE memories SET agent_id = $1 WHERE id = $2", ag2["id"], mem_a2)
+            c_other = await _cluster(
+                ag2["id"], "weekly", today - timedelta(days=10), today - timedelta(days=4), [mem_a2]
+            )
+            return {
+                "w_old1": w_old1,
+                "w_old2": w_old2,
+                "w_rec": w_rec,
+                "m_old": m_old,
+                "c_other": c_other,
+                "mem1": mem1,
+                "mem_w": mem_w,
+                "mem_loose": mem_loose,
+            }
         finally:
             await conn.close()
 
     async def _cleanup():
         conn = await _aconn()
         try:
-            await conn.execute(
-                "DELETE FROM memories WHERE content LIKE 'pytest-ma zoom mem%'")
-            await conn.execute(
-                "DELETE FROM agents WHERE identifier = $1", TEST_AGENT2)
+            await conn.execute("DELETE FROM memories WHERE content LIKE 'pytest-ma zoom mem%'")
+            await conn.execute("DELETE FROM agents WHERE identifier = $1", TEST_AGENT2)
         finally:
             await conn.close()
 
@@ -479,6 +507,7 @@ def test_progressive_recent_days_hides_closed_week_outliers(client, ma_env, zoom
     """A memory inside a consolidated week's period but NOT woven into any
     cluster (outlier) must still be hidden — closed weeks are never re-read."""
     from datetime import date, datetime, time, timedelta, timezone as tz
+
     today = date.today()
     created = datetime.combine(today - timedelta(days=6), time(12, 0), tzinfo=tz.utc)
 
@@ -491,7 +520,11 @@ def test_progressive_recent_days_hides_closed_week_outliers(client, ma_env, zoom
                 "INSERT INTO memories (agent_id, workspace_id, project_id, type, "
                 "content, created_at) VALUES ($1,$2,$3,'tecnico',"
                 "'pytest-ma zoom mem outlier in closed week',$4) RETURNING id",
-                ma_env["agent_id"], ws, pj, created)
+                ma_env["agent_id"],
+                ws,
+                pj,
+                created,
+            )
         finally:
             await conn.close()
 
@@ -501,12 +534,14 @@ def test_progressive_recent_days_hides_closed_week_outliers(client, ma_env, zoom
         assert r.status_code == 200, r.text
         assert str(outlier_id) not in {m["id"] for m in r.json()["recent_days"]}
     finally:
+
         async def _del():
             conn = await _aconn()
             try:
                 await conn.execute("DELETE FROM memories WHERE id=$1", outlier_id)
             finally:
                 await conn.close()
+
         _run(_del())
 
 
@@ -517,8 +552,7 @@ def test_progressive_unknown_agent_404(client, ma_env):
 
 def test_progressive_sections_filter(client, ma_env, zoom_env):
     """sections=monthly computes only that layer; the rest come back empty."""
-    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}&sections=monthly",
-                   headers=_h(ma_env["super"]))
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}&sections=monthly", headers=_h(ma_env["super"]))
     assert r.status_code == 200, r.text
     data = r.json()
     assert str(zoom_env["m_old"]) in {c["id"] for c in data["monthly"]}
@@ -526,15 +560,13 @@ def test_progressive_sections_filter(client, ma_env, zoom_env):
 
 
 def test_progressive_sections_invalid_422(client, ma_env):
-    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}&sections=bogus",
-                   headers=_h(ma_env["super"]))
+    r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}&sections=bogus", headers=_h(ma_env["super"]))
     assert r.status_code == 422
 
 
 def test_zoom_entry_highest_level(client, ma_env, zoom_env):
     """Entry without cluster_id starts at the highest abstraction (monthly here)."""
-    r = client.post(ZOOM, headers=_h(ma_env["super"]),
-                    json={"agent_identifier": TEST_AGENT})
+    r = client.post(ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT})
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["parent"] is None
@@ -546,8 +578,7 @@ def test_zoom_entry_highest_level(client, ma_env, zoom_env):
 def test_zoom_explicit_level(client, ma_env, zoom_env):
     """Lineage-absorbed clusters (sources of an active parent) are hidden at
     entry — w_old1/w_old2 are read by zooming their monthly, not raw."""
-    r = client.post(ZOOM, headers=_h(ma_env["super"]),
-                    json={"agent_identifier": TEST_AGENT, "level": "weekly"})
+    r = client.post(ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "level": "weekly"})
     assert r.status_code == 200, r.text
     ids = {c["id"] for c in r.json()["clusters"]}
     assert str(zoom_env["w_rec"]) in ids
@@ -571,59 +602,61 @@ def test_week_rollup_absorbs_thematic_in_views(client, ma_env, zoom_env):
                 "label, narrative, member_ids, source_ids, period_start, "
                 "period_end, status) VALUES ($1,$2,'weekly','pytest-ma-rollup',"
                 "'la semana tejida', $3, $4, $5, $6, 'active') RETURNING id",
-                ma_env["agent_id"], ws,
-                [zoom_env["mem_w"]], [zoom_env["w_rec"]],
-                today - timedelta(days=10), today - timedelta(days=4))
+                ma_env["agent_id"],
+                ws,
+                [zoom_env["mem_w"]],
+                [zoom_env["w_rec"]],
+                today - timedelta(days=10),
+                today - timedelta(days=4),
+            )
         finally:
             await conn.close()
 
     rollup_id = _run(_mk_rollup())
     try:
         # progressive: rollup visible, thematic source hidden
-        r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}",
-                       headers=_h(ma_env["super"]))
+        r = client.get(f"{PROG}?agent_identifier={TEST_AGENT}", headers=_h(ma_env["super"]))
         weekly_ids = {c["id"] for c in r.json()["weekly"]}
         assert str(rollup_id) in weekly_ids
         assert str(zoom_env["w_rec"]) not in weekly_ids
         # zoom entry weekly: same
-        z = client.post(ZOOM, headers=_h(ma_env["super"]),
-                        json={"agent_identifier": TEST_AGENT, "level": "weekly"})
+        z = client.post(ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "level": "weekly"})
         entry_ids = {c["id"] for c in z.json()["clusters"]}
         assert str(rollup_id) in entry_ids
         assert str(zoom_env["w_rec"]) not in entry_ids
         # zoom INTO the rollup: thematic source revealed
-        z2 = client.post(ZOOM, headers=_h(ma_env["super"]),
-                         json={"agent_identifier": TEST_AGENT,
-                               "cluster_id": str(rollup_id)})
+        z2 = client.post(
+            ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "cluster_id": str(rollup_id)}
+        )
         assert z2.json()["child_type"] == "clusters"
         assert {c["id"] for c in z2.json()["clusters"]} == {str(zoom_env["w_rec"])}
     finally:
+
         async def _del():
             conn = await _aconn()
             try:
-                await conn.execute(
-                    "DELETE FROM memory_clusters WHERE id=$1", rollup_id)
+                await conn.execute("DELETE FROM memory_clusters WHERE id=$1", rollup_id)
             finally:
                 await conn.close()
+
         _run(_del())
 
 
 def test_zoom_into_monthly_returns_source_weeklies(client, ma_env, zoom_env):
-    r = client.post(ZOOM, headers=_h(ma_env["super"]),
-                    json={"agent_identifier": TEST_AGENT,
-                          "cluster_id": str(zoom_env["m_old"])})
+    r = client.post(
+        ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "cluster_id": str(zoom_env["m_old"])}
+    )
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["parent"]["id"] == str(zoom_env["m_old"])
     assert data["child_type"] == "clusters"
-    assert {c["id"] for c in data["clusters"]} == {
-        str(zoom_env["w_old1"]), str(zoom_env["w_old2"])}
+    assert {c["id"] for c in data["clusters"]} == {str(zoom_env["w_old1"]), str(zoom_env["w_old2"])}
 
 
 def test_zoom_into_weekly_returns_memories(client, ma_env, zoom_env):
-    r = client.post(ZOOM, headers=_h(ma_env["super"]),
-                    json={"agent_identifier": TEST_AGENT,
-                          "cluster_id": str(zoom_env["w_old1"])})
+    r = client.post(
+        ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "cluster_id": str(zoom_env["w_old1"])}
+    )
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["child_type"] == "memories"
@@ -633,15 +666,14 @@ def test_zoom_into_weekly_returns_memories(client, ma_env, zoom_env):
 def test_zoom_cross_agent_404(client, ma_env, zoom_env):
     """A cluster of another agent must 404 even for super when the
     agent_identifier doesn't match (anti cross-agent traversal)."""
-    r = client.post(ZOOM, headers=_h(ma_env["super"]),
-                    json={"agent_identifier": TEST_AGENT,
-                          "cluster_id": str(zoom_env["c_other"])})
+    r = client.post(
+        ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "cluster_id": str(zoom_env["c_other"])}
+    )
     assert r.status_code == 404
 
 
 def test_zoom_short_query_422(client, ma_env):
-    r = client.post(ZOOM, headers=_h(ma_env["super"]),
-                    json={"agent_identifier": TEST_AGENT, "query_text": "ab"})
+    r = client.post(ZOOM, headers=_h(ma_env["super"]), json={"agent_identifier": TEST_AGENT, "query_text": "ab"})
     assert r.status_code == 422
 
 
@@ -649,9 +681,11 @@ def test_zoom_short_query_422(client, ma_env):
 # search cluster_mode (root /search)
 # ---------------------------------------------------------------------------
 
+
 def test_search_cluster_mode_include(client, ma_env):
-    r = client.post("/search", headers=_h(ma_env["super"]),
-                    json={"query_text": "workflow design", "cluster_mode": "include"})
+    r = client.post(
+        "/search", headers=_h(ma_env["super"]), json={"query_text": "workflow design", "cluster_mode": "include"}
+    )
     if r.status_code >= 500:
         pytest.skip("embeddings/search backend not available")
     assert r.status_code == 200, r.text
@@ -659,8 +693,9 @@ def test_search_cluster_mode_include(client, ma_env):
 
 
 def test_search_cluster_mode_mixed(client, ma_env):
-    r = client.post("/search", headers=_h(ma_env["super"]),
-                    json={"query_text": "workflow design", "cluster_mode": "mixed"})
+    r = client.post(
+        "/search", headers=_h(ma_env["super"]), json={"query_text": "workflow design", "cluster_mode": "mixed"}
+    )
     if r.status_code >= 500:
         pytest.skip("embeddings/search backend not available")
     assert r.status_code == 200, r.text

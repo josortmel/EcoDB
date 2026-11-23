@@ -3,6 +3,7 @@
 Cubre los 5 endpoints + cascada CEO/Lead/Worker + casos anti-IDOR + 409 hard
 delete con memorias dentro.
 """
+
 import asyncio
 import json
 import os
@@ -14,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -26,6 +28,7 @@ from auth import generate_api_key
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def app():
@@ -47,6 +50,7 @@ def _run(coro):
 
 
 # ---- super_jwt: superuser (is_super=true, user_id=1) ------------------------------
+
 
 @pytest.fixture(scope="module")
 def super_jwt(client):
@@ -80,8 +84,12 @@ def super_jwt(client):
                 """
             )
             # Borrar artefactos creados por los tests.
-            await conn.execute("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ws-%')")
-            await conn.execute("DELETE FROM workspace_leads WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ws-%')")
+            await conn.execute(
+                "DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ws-%')"
+            )
+            await conn.execute(
+                "DELETE FROM workspace_leads WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ws-%')"
+            )
             # Workspaces nuevos creados durante los tests.
             await conn.execute("DELETE FROM workspaces WHERE name LIKE 'pytest-ws-%'")
             # Organizations creadas por los tests (sin CEO ya borrado).
@@ -89,7 +97,9 @@ def super_jwt(client):
             # API keys de pytest.
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-ws-%'")
             # Users temporales.
-            await conn.execute("DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ws-%')")
+            await conn.execute(
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-ws-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-ws-%'")
         finally:
             await conn.close()
@@ -101,6 +111,7 @@ def super_jwt(client):
 
 
 # ---- Helper para crear user temp con rol especifico --------------------------
+
 
 async def _create_ceo(name: str, org_name: str) -> tuple[int, int, str]:
     """Crea user CEO + organization. Devuelve (user_id, org_id, api_key_plain)."""
@@ -115,22 +126,24 @@ async def _create_ceo(name: str, org_name: str) -> tuple[int, int, str]:
         # Email
         await conn.execute(
             "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-            user_id, f"{name}@pytest.local",
+            user_id,
+            f"{name}@pytest.local",
         )
         # Org
         o = await conn.fetchrow(
             "INSERT INTO organizations (name, ceo_user_id) VALUES ($1, $2) RETURNING id",
-            org_name, user_id,
+            org_name,
+            user_id,
         )
         org_id = o["id"]
-        await conn.execute(
-            "UPDATE users SET organization_id = $1 WHERE id = $2", org_id, user_id
-        )
+        await conn.execute("UPDATE users SET organization_id = $1 WHERE id = $2", org_id, user_id)
         # API key
         key_plain, key_hash = generate_api_key()
         await conn.execute(
             "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true)",
-            key_hash, f"pytest-ws-ceo-{name}", user_id,
+            key_hash,
+            f"pytest-ws-ceo-{name}",
+            user_id,
         )
         return user_id, org_id, key_plain
     finally:
@@ -141,18 +154,19 @@ async def _create_user_simple(name: str) -> tuple[int, str]:
     """Crea user no-super no-CEO. Devuelve (user_id, api_key_plain)."""
     conn = await _aconn()
     try:
-        u = await conn.fetchrow(
-            "INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name
-        )
+        u = await conn.fetchrow("INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name)
         user_id = u["id"]
         await conn.execute(
             "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-            user_id, f"{name}@pytest.local",
+            user_id,
+            f"{name}@pytest.local",
         )
         key_plain, key_hash = generate_api_key()
         await conn.execute(
             "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true)",
-            key_hash, f"pytest-ws-user-{name}", user_id,
+            key_hash,
+            f"pytest-ws-user-{name}",
+            user_id,
         )
         return user_id, key_plain
     finally:
@@ -160,6 +174,7 @@ async def _create_user_simple(name: str) -> tuple[int, str]:
 
 
 # ---- ceo_jwt: usuario CEO con su organization --------------------------------
+
 
 @pytest.fixture(scope="module")
 def ceo_setup(client, super_jwt):
@@ -169,6 +184,7 @@ def ceo_setup(client, super_jwt):
 
 
 # ---- worker_jwt: usuario simple sin lead ni org -------------------------------
+
 
 @pytest.fixture(scope="module")
 def worker_setup(client):
@@ -184,6 +200,7 @@ def auth(jwt):
 # ===========================================================================
 # POST /workspaces
 # ===========================================================================
+
 
 def test_super_creates_workspace_with_org(client, super_jwt, ceo_setup):
     r = client.post(
@@ -333,6 +350,7 @@ def test_unknown_organization_id_returns_422(client, super_jwt):
 # GET /workspaces
 # ===========================================================================
 
+
 def test_super_lists_all_workspaces(client, super_jwt):
     r = client.get("/workspaces", headers=auth(super_jwt))
     assert r.status_code == 200
@@ -365,6 +383,7 @@ def test_worker_without_assignments_lists_empty(client, worker_setup):
 # GET /workspaces/{id}
 # ===========================================================================
 
+
 def test_super_can_read_any_workspace(client, super_jwt):
     r = client.get("/workspaces/1", headers=auth(super_jwt))
     assert r.status_code == 200
@@ -387,10 +406,9 @@ def test_worker_cannot_read_foreign_workspace(client, worker_setup):
 # PUT /workspaces/{id}
 # ===========================================================================
 
+
 def test_super_updates_workspace_name(client, super_jwt):
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-put-orig"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-put-orig"})
     ws_id = r1.json()["id"]
     r2 = client.put(
         f"/workspaces/{ws_id}",
@@ -402,9 +420,7 @@ def test_super_updates_workspace_name(client, super_jwt):
 
 
 def test_worker_cannot_update(client, worker_setup, super_jwt):
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-put-worker"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-put-worker"})
     ws_id = r1.json()["id"]
     r = client.put(
         f"/workspaces/{ws_id}",
@@ -415,17 +431,13 @@ def test_worker_cannot_update(client, worker_setup, super_jwt):
 
 
 def test_put_unknown_id_returns_403(client, super_jwt):
-    r = client.put(
-        "/workspaces/999999", headers=auth(super_jwt), json={"name": "pytest-ws-x"}
-    )
+    r = client.put("/workspaces/999999", headers=auth(super_jwt), json={"name": "pytest-ws-x"})
     assert r.status_code == 403
 
 
 def test_put_unique_collision_returns_409(client, super_jwt):
     client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-collision-a"})
-    r2 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-collision-b"}
-    )
+    r2 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-collision-b"})
     ws_id = r2.json()["id"]
     r = client.put(
         f"/workspaces/{ws_id}",
@@ -436,9 +448,7 @@ def test_put_unique_collision_returns_409(client, super_jwt):
 
 
 def test_put_extra_field_returns_422(client, super_jwt):
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-put-extra"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-put-extra"})
     ws_id = r1.json()["id"]
     r = client.put(
         f"/workspaces/{ws_id}",
@@ -452,10 +462,9 @@ def test_put_extra_field_returns_422(client, super_jwt):
 # DELETE /workspaces/{id}
 # ===========================================================================
 
+
 def test_super_deletes_empty_workspace(client, super_jwt):
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-empty"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-empty"})
     ws_id = r1.json()["id"]
     r2 = client.delete(f"/workspaces/{ws_id}", headers=auth(super_jwt))
     assert r2.status_code == 204
@@ -468,19 +477,21 @@ def test_delete_workspace_with_memories_returns_409(client, super_jwt):
     """Un workspace con memorias no se borra: DELETE debe devolver 409.
     #559: antes usaba el workspace 1 dando por hecho sus memorias de producción; en la base de pruebas está vacío
     (204, y lo borraba para los tests siguientes) o no existe (403). Ahora se monta el suyo con una memoria."""
-    ws_id = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-with-mem"}
-    ).json()["id"]
+    ws_id = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-with-mem"}).json()["id"]
 
     async def _add_memory():
         conn = await _aconn()
         try:
             pid = await conn.fetchval(
                 "INSERT INTO projects (workspace_id, name) VALUES ($1, 'pytest-ws-del-with-mem-proj') RETURNING id",
-                ws_id)
+                ws_id,
+            )
             return pid, await conn.fetchval(
                 "INSERT INTO memories (workspace_id, project_id, type, content) "
-                "VALUES ($1, $2, 'observacion', 'pytest-559') RETURNING id", ws_id, pid)
+                "VALUES ($1, $2, 'observacion', 'pytest-559') RETURNING id",
+                ws_id,
+                pid,
+            )
         finally:
             await conn.close()
 
@@ -504,9 +515,7 @@ def test_delete_workspace_with_memories_returns_409(client, super_jwt):
 
 
 def test_worker_cannot_delete(client, worker_setup, super_jwt):
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-worker"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-del-worker"})
     ws_id = r1.json()["id"]
     r = client.delete(f"/workspaces/{ws_id}", headers=auth(worker_setup["jwt"]))
     assert r.status_code == 403
@@ -526,7 +535,8 @@ def test_lead_cannot_delete(client, super_jwt):
             )
             await conn.execute(
                 "INSERT INTO workspace_leads (workspace_id, user_id) VALUES ($1, $2)",
-                ws["id"], user_id,
+                ws["id"],
+                user_id,
             )
             return ws["id"]
         finally:
@@ -548,6 +558,7 @@ def test_delete_unknown_id_returns_403(client, super_jwt):
 # `_user_can_read/modify_workspace` para esos roles son blind spots reales.
 # ===========================================================================
 
+
 def test_lead_can_read_own_workspace(client, super_jwt):
     """Lead asignado a un workspace lo puede leer (200)."""
     user_id, key_plain = _run(_create_user_simple("pytest-ws-lead-read"))
@@ -561,7 +572,8 @@ def test_lead_can_read_own_workspace(client, super_jwt):
             )
             await conn.execute(
                 "INSERT INTO workspace_leads (workspace_id, user_id) VALUES ($1, $2)",
-                ws["id"], user_id,
+                ws["id"],
+                user_id,
             )
             return ws["id"]
         finally:
@@ -587,7 +599,8 @@ def test_lead_can_update_own_workspace(client, super_jwt):
             )
             await conn.execute(
                 "INSERT INTO workspace_leads (workspace_id, user_id) VALUES ($1, $2)",
-                ws["id"], user_id,
+                ws["id"],
+                user_id,
             )
             return ws["id"]
         finally:
@@ -617,11 +630,13 @@ def test_worker_via_project_member_can_read_workspace(client):
             )
             proj = await conn.fetchrow(
                 "INSERT INTO projects (workspace_id, name) VALUES ($1, $2) RETURNING id",
-                ws["id"], "pytest-ws-worker-read-proj",
+                ws["id"],
+                "pytest-ws-worker-read-proj",
             )
             await conn.execute(
                 "INSERT INTO project_members (project_id, user_id) VALUES ($1, $2)",
-                proj["id"], user_id,
+                proj["id"],
+                user_id,
             )
             return ws["id"]
         finally:
@@ -647,11 +662,13 @@ def test_worker_via_project_member_workspace_in_list(client):
             )
             proj = await conn.fetchrow(
                 "INSERT INTO projects (workspace_id, name) VALUES ($1, $2) RETURNING id",
-                ws["id"], "pytest-ws-worker-list-proj",
+                ws["id"],
+                "pytest-ws-worker-list-proj",
             )
             await conn.execute(
                 "INSERT INTO project_members (project_id, user_id) VALUES ($1, $2)",
-                proj["id"], user_id,
+                proj["id"],
+                user_id,
             )
             return ws["id"]
         finally:
@@ -669,6 +686,7 @@ def test_worker_via_project_member_workspace_in_list(client):
 # UA3 (adv-code Loop 1): CEO no puede leer/borrar workspace de otra org.
 # ===========================================================================
 
+
 def test_ceo_cannot_read_foreign_org_workspace(client, ceo_setup):
     """CEO de org-alfa NO puede leer workspace creado en org-beta."""
     other_user, other_org, other_key = _run(_create_ceo("pytest-ws-ceo-gamma", "pytest-ws-org-gamma"))
@@ -678,7 +696,8 @@ def test_ceo_cannot_read_foreign_org_workspace(client, ceo_setup):
         try:
             ws = await conn.fetchrow(
                 "INSERT INTO workspaces (organization_id, name) VALUES ($1, $2) RETURNING id",
-                other_org, "pytest-ws-foreign-read",
+                other_org,
+                "pytest-ws-foreign-read",
             )
             return ws["id"]
         finally:
@@ -691,9 +710,7 @@ def test_ceo_cannot_read_foreign_org_workspace(client, ceo_setup):
 
 def test_delete_workspace_writes_audit_log(client, super_jwt):
     """DELETE workspace exitoso escribe audit_log row con action='delete' resource='workspace' atómico."""
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-audit-target"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-audit-target"})
     ws_id = r1.json()["id"]
     r2 = client.delete(f"/workspaces/{ws_id}", headers=auth(super_jwt))
     assert r2.status_code == 204
@@ -724,15 +741,14 @@ def test_delete_workspace_writes_audit_log(client, super_jwt):
 
 
 # ===========================================================================
-# 
+#
 # ===========================================================================
+
 
 def test_new_workspace_has_auto_project_common(client, super_jwt):
     """
     is_common=true. Workspace nuevo es usable desde día 0."""
-    r1 = client.post(
-        "/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-auto-common"}
-    )
+    r1 = client.post("/workspaces", headers=auth(super_jwt), json={"name": "pytest-ws-auto-common"})
     assert r1.status_code == 201
     ws_id = r1.json()["id"]
 
@@ -751,14 +767,16 @@ def test_workspace_creation_atomic_rollback_on_collision(client, super_jwt, ceo_
     state explícito post-rollback (no solo el HTTP code)."""
     name = "pytest-ws-atomic-test"
     r1 = client.post(
-        "/workspaces", headers=auth(super_jwt),
+        "/workspaces",
+        headers=auth(super_jwt),
         json={"name": name, "organization_id": ceo_setup["org_id"]},
     )
     assert r1.status_code == 201
 
     # Segundo create con mismo name+org → 409.
     r2 = client.post(
-        "/workspaces", headers=auth(super_jwt),
+        "/workspaces",
+        headers=auth(super_jwt),
         json={"name": name, "organization_id": ceo_setup["org_id"]},
     )
     assert r2.status_code == 409
@@ -771,11 +789,13 @@ def test_workspace_creation_atomic_rollback_on_collision(client, super_jwt, ceo_
         try:
             ws_count = await conn.fetchval(
                 "SELECT count(*) FROM workspaces WHERE name = $1 AND organization_id = $2",
-                name, ceo_setup["org_id"],
+                name,
+                ceo_setup["org_id"],
             )
             ws_id = await conn.fetchval(
                 "SELECT id FROM workspaces WHERE name = $1 AND organization_id = $2",
-                name, ceo_setup["org_id"],
+                name,
+                ceo_setup["org_id"],
             )
             general_count = await conn.fetchval(
                 "SELECT count(*) FROM projects WHERE workspace_id = $1 AND name = 'general'",
@@ -791,12 +811,13 @@ def test_workspace_creation_atomic_rollback_on_collision(client, super_jwt, ceo_
 
 
 def test_worker_in_new_workspace_can_use_common_project(client, super_jwt):
-    """Workflow end-to-end 
+    """Workflow end-to-end
     project_member en el general) puede leer/escribir memorias inmediatamente
     sin Lead que cree projects custom."""
     # Crear workspace nuevo (auto-creará 'general').
     r1 = client.post(
-        "/workspaces", headers=auth(super_jwt),
+        "/workspaces",
+        headers=auth(super_jwt),
         json={"name": "pytest-ws-2.6-flow"},
     )
     ws_id = r1.json()["id"]
@@ -814,7 +835,8 @@ def test_worker_in_new_workspace_can_use_common_project(client, super_jwt):
         try:
             await conn.execute(
                 "INSERT INTO project_members (project_id, user_id) VALUES ($1, $2)",
-                common_pid, user_id,
+                common_pid,
+                user_id,
             )
         finally:
             await conn.close()
@@ -836,7 +858,8 @@ def test_ceo_cannot_delete_foreign_org_workspace(client, ceo_setup):
         try:
             ws = await conn.fetchrow(
                 "INSERT INTO workspaces (organization_id, name) VALUES ($1, $2) RETURNING id",
-                other_org, "pytest-ws-foreign-delete",
+                other_org,
+                "pytest-ws-foreign-delete",
             )
             return ws["id"]
         finally:

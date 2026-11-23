@@ -8,6 +8,7 @@ writer never overwrites a vector. Dry run by default: it lists and counts, write
 
 Needs DATABASE_URL and EMBEDDINGS_URL (run it inside the api container: both are set there).
 """
+
 import argparse
 import asyncio
 import os
@@ -42,13 +43,13 @@ async def main(apply: bool) -> int:
                 print(f"  FAILED {r['id']}: {e}")
                 continue
             done = await conn.execute(
-                "UPDATE memories SET embedding = $2::vector WHERE id = $1 AND embedding IS NULL",
-                r["id"], vec)
+                "UPDATE memories SET embedding = $2::vector WHERE id = $1 AND embedding IS NULL", r["id"], vec
+            )
             filled += done.endswith(" 1")
         if apply:
             left = await conn.fetchval(
-                "SELECT count(*) FROM memories WHERE embedding IS NULL AND staleness='active' "
-                "AND content_type='text'")
+                "SELECT count(*) FROM memories WHERE embedding IS NULL AND staleness='active' AND content_type='text'"
+            )
             print(f"filled {filled}, failed {failed}, still without embedding: {left}")
         return 0
     finally:

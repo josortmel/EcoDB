@@ -5,6 +5,7 @@ POST /search (tipos decision y acuerdo), lee las cadenas «superada por» con la
 pregunta y le pasa todo a vigentes.vigentes(). No escribe nada propio ni pide rol de super o CEO:
 cada clave ve lo que ya podía ver. Los topes devuelven un aviso en «avisos», nunca un error.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,8 @@ from embeddings_client import embed_text
 router = APIRouter(prefix="/decisiones", tags=["decisiones"])
 
 MAX_LIMIT = 50
-MAX_LEIDAS = 500          # memorias leídas en total (candidatas + cadenas)
-MAX_POR_BUSQUEDA = 100    # el tope de POST /search
+MAX_LEIDAS = 500  # memorias leídas en total (candidatas + cadenas)
+MAX_POR_BUSQUEDA = 100  # el tope de POST /search
 
 _LEER_SQL = """
 SELECT m.id, m.type, m.content, m.created_at, m.metadata, a.identifier AS agent_identifier
@@ -56,10 +57,30 @@ ORDER BY m.created_at
 # recíproco (RRF), con la misma visibilidad. Diseño sellado antes de medir: Hilo/Documentacion/diseno_1098_vigentes.md.
 RRF_K = 60
 TOPE_LISTA = 50
-SUELO = 0.60     # coseno mínimo para que una fila de EcoDB cuente como relevante (ajuste con el set de desarrollo)
-MARGEN = 0.06    # y no más lejos que esto de la mejor de su mitad
-_VACIAS = {"de", "la", "el", "en", "y", "a", "que", "los", "las", "del", "por", "con", "para", "un", "una",
-           "se", "no", "lo", "al", "es"}
+SUELO = 0.60  # coseno mínimo para que una fila de EcoDB cuente como relevante (ajuste con el set de desarrollo)
+MARGEN = 0.06  # y no más lejos que esto de la mejor de su mitad
+_VACIAS = {
+    "de",
+    "la",
+    "el",
+    "en",
+    "y",
+    "a",
+    "que",
+    "los",
+    "las",
+    "del",
+    "por",
+    "con",
+    "para",
+    "un",
+    "una",
+    "se",
+    "no",
+    "lo",
+    "al",
+    "es",
+}
 
 _CANDIDATAS_SQL = f"""
 WITH vis AS (
@@ -101,6 +122,7 @@ ORDER BY rrf DESC
 
 def _palabras(texto: str) -> set[str]:
     import re
+
     return {w for w in re.findall(r"\w+", (texto or "").lower()) if len(w) > 2 and w not in _VACIAS}
 
 
@@ -130,11 +152,27 @@ async def _candidatas(tema: str, agente: Optional[str], actor: dict) -> list[dic
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            _CANDIDATAS_SQL, vector, int(actor["sub"]), bool(actor.get("is_super")), bool(actor.get("is_ceo")),
-            actor.get("organization_id"), list(actor.get("lead_workspaces") or []), agente, tema,
+            _CANDIDATAS_SQL,
+            vector,
+            int(actor["sub"]),
+            bool(actor.get("is_super")),
+            bool(actor.get("is_ceo")),
+            actor.get("organization_id"),
+            list(actor.get("lead_workspaces") or []),
+            agente,
+            tema,
         )
-    return [{"id": str(r["id"]), "r_vec": r["r_vec"], "r_txt": r["r_txt"], "content": r["content"],
-             "cos": float(r["cos"]) if r["cos"] is not None else None, "rrf": float(r["rrf"])} for r in rows]
+    return [
+        {
+            "id": str(r["id"]),
+            "r_vec": r["r_vec"],
+            "r_txt": r["r_txt"],
+            "content": r["content"],
+            "cos": float(r["cos"]) if r["cos"] is not None else None,
+            "rrf": float(r["rrf"]),
+        }
+        for r in rows
+    ]
 
 
 def _uuid(valor) -> Optional[str]:
@@ -158,8 +196,13 @@ async def _leer(ids: list[str], actor: dict) -> dict[str, dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            _LEER_SQL, [uuid.UUID(i) for i in ids], int(actor["sub"]), bool(actor.get("is_super")),
-            bool(actor.get("is_ceo")), actor.get("organization_id"), list(actor.get("lead_workspaces") or []),
+            _LEER_SQL,
+            [uuid.UUID(i) for i in ids],
+            int(actor["sub"]),
+            bool(actor.get("is_super")),
+            bool(actor.get("is_ceo")),
+            actor.get("organization_id"),
+            list(actor.get("lead_workspaces") or []),
         )
     return {str(r["id"]): _memoria(r) for r in rows}
 
@@ -178,13 +221,18 @@ async def _previas(raices: list[str], conocidas: set[str], actor: dict, presupue
             break
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                _PREVIAS_SQL, frontera, int(actor["sub"]), bool(actor.get("is_super")),
-                bool(actor.get("is_ceo")), actor.get("organization_id"), list(actor.get("lead_workspaces") or []),
+                _PREVIAS_SQL,
+                frontera,
+                int(actor["sub"]),
+                bool(actor.get("is_super")),
+                bool(actor.get("is_ceo")),
+                actor.get("organization_id"),
+                list(actor.get("lead_workspaces") or []),
             )
         frontera = []
         for r in rows:
             m = _memoria(r)
-            if m["id"] in raiz_de:   # ciclo o ya encontrada
+            if m["id"] in raiz_de:  # ciclo o ya encontrada
                 continue
             if presupuesto <= 0:
                 cortado = True
@@ -192,7 +240,7 @@ async def _previas(raices: list[str], conocidas: set[str], actor: dict, presupue
             presupuesto -= 1
             raiz = raiz_de[str(m["metadata"]["superseded_by"])]
             raiz_de[m["id"]] = raiz
-            if m["id"] not in conocidas:   # las del camino de delante ya están; solo abren camino hacia atrás
+            if m["id"] not in conocidas:  # las del camino de delante ya están; solo abren camino hacia atrás
                 previas[raiz].append(m)
             frontera.append(m["id"])
     return previas, cortado
@@ -200,8 +248,9 @@ async def _previas(raices: list[str], conocidas: set[str], actor: dict, presupue
 
 @router.get("/vigentes")
 async def decisiones_vigentes(
-    tema: str = Query(..., min_length=search.MIN_QUERY_LEN, max_length=search.MAX_QUERY_LEN,
-                      description="De qué trata (texto libre)."),
+    tema: str = Query(
+        ..., min_length=search.MIN_QUERY_LEN, max_length=search.MAX_QUERY_LEN, description="De qué trata (texto libre)."
+    ),
     agente: Optional[str] = Query(None, min_length=1, max_length=128, description="Solo las de este agente."),
     incluir_superadas: bool = Query(False, description="Añade «superadas» con por quién y por qué."),
     limit: int = Query(10, description=f"Máximo de vigentes (1-{MAX_LIMIT}; fuera de rango se ajusta con aviso)."),
@@ -216,7 +265,7 @@ async def decisiones_vigentes(
     # #1098: candidatas por el camino propio (vector + texto, sin grafo) y umbral de esta mitad.
     candidatas_puntuadas = _relevantes(await _candidatas(tema, agente, actor), tema)
     puntos = {c["id"]: c for c in candidatas_puntuadas}
-    orden = [c["id"] for c in candidatas_puntuadas][:min(limit * 3, MAX_POR_BUSQUEDA)]
+    orden = [c["id"] for c in candidatas_puntuadas][: min(limit * 3, MAX_POR_BUSQUEDA)]
     if not orden:
         avisos.append("sin decisiones relevantes en EcoDB para este tema")
 
@@ -229,9 +278,11 @@ async def decisiones_vigentes(
         if not nuevas:
             break
         if len(pedidas) + len(nuevas) > MAX_LEIDAS:
-            avisos.append(f"más de {MAX_LEIDAS} memorias que leer: se cortó la lectura; "
-                          "las cadenas sin terminar salen en «errores»")
-            nuevas = nuevas[:MAX_LEIDAS - len(pedidas)]
+            avisos.append(
+                f"más de {MAX_LEIDAS} memorias que leer: se cortó la lectura; "
+                "las cadenas sin terminar salen en «errores»"
+            )
+            nuevas = nuevas[: MAX_LEIDAS - len(pedidas)]
         pedidas.update(nuevas)
         leidas = await _leer(nuevas, actor)
         vistas.update(leidas)
@@ -249,7 +300,7 @@ async def decisiones_vigentes(
     raices = [f["id"] for f in resultado["vigentes"]]
     previas, cortado = await _previas(raices, set(vistas), actor, MAX_LEIDAS - len(pedidas))
     _vig.con_previas(resultado, previas)
-    for fila in resultado["vigentes"]:   # #1098: la puntuación de la candidata que llevó a esta fila
+    for fila in resultado["vigentes"]:  # #1098: la puntuación de la candidata que llevó a esta fila
         origen = next((puntos[i] for i in [fila["id"], *fila.get("sustituye_a", [])] if i in puntos), None)
         if origen is not None:
             fila["puntuacion"] = round(origen["cos"] or 0.0, 3)

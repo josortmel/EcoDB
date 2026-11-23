@@ -4,6 +4,7 @@ Reusable prompt texts for cell workers. Templates are global (not agent-scoped).
 Auth: super-only for write, any authenticated user for read.
 DELETE refuses (409) when a template is referenced by a cell config.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ def _unique_violation_409(exc: asyncpg.UniqueViolationError) -> HTTPException:
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class PromptTemplate(BaseModel):
     id: int
@@ -62,6 +64,7 @@ class TemplateUpdate(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 async def list_templates(
     cell_type: Optional[str] = Query(None, min_length=1, max_length=64),
@@ -72,12 +75,9 @@ async def list_templates(
     pool = await get_pool()
     async with pool.acquire() as conn:
         if cell_type:
-            rows = await conn.fetch(
-                "SELECT * FROM cell_prompt_templates WHERE cell_type = $1 "
-                "ORDER BY name", cell_type)
+            rows = await conn.fetch("SELECT * FROM cell_prompt_templates WHERE cell_type = $1 ORDER BY name", cell_type)
         else:
-            rows = await conn.fetch(
-                "SELECT * FROM cell_prompt_templates ORDER BY name")
+            rows = await conn.fetch("SELECT * FROM cell_prompt_templates ORDER BY name")
     items = [PromptTemplate(**dict(r)) for r in rows]
     return {"items": items, "total": len(items)}
 
@@ -99,16 +99,21 @@ async def create_template(
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING *
                 """,
-                body.name, body.cell_type, body.content, body.is_default,
-                int(actor["sub"]))
+                body.name,
+                body.cell_type,
+                body.content,
+                body.is_default,
+                int(actor["sub"]),
+            )
         except asyncpg.UniqueViolationError as e:
             raise _unique_violation_409(e)
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details)
                VALUES ($1, 'create', 'cell_prompt_template', $2::text, $3::jsonb)""",
-            int(actor["sub"]), str(row["id"]),
-            json.dumps({"name": body.name, "cell_type": body.cell_type,
-                        "is_default": body.is_default}))
+            int(actor["sub"]),
+            str(row["id"]),
+            json.dumps({"name": body.name, "cell_type": body.cell_type, "is_default": body.is_default}),
+        )
     return PromptTemplate(**dict(row))
 
 
@@ -125,8 +130,7 @@ async def update_template(
         raise HTTPException(422, "no fields to update")
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if not await conn.fetchval(
-                "SELECT 1 FROM cell_prompt_templates WHERE id = $1", template_id):
+        if not await conn.fetchval("SELECT 1 FROM cell_prompt_templates WHERE id = $1", template_id):
             raise HTTPException(404, f"template {template_id} not found")
         set_parts: list = []
         params: list = []
@@ -137,16 +141,18 @@ async def update_template(
         params.append(template_id)
         try:
             row = await conn.fetchrow(
-                f"UPDATE cell_prompt_templates SET {', '.join(set_parts)} "
-                f"WHERE id = ${len(params)} RETURNING *",
-                *params)
+                f"UPDATE cell_prompt_templates SET {', '.join(set_parts)} WHERE id = ${len(params)} RETURNING *",
+                *params,
+            )
         except asyncpg.UniqueViolationError as e:
             raise _unique_violation_409(e)
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details)
                VALUES ($1, 'update', 'cell_prompt_template', $2::text, $3::jsonb)""",
-            int(actor["sub"]), str(template_id),
-            json.dumps({"fields_changed": list(fields.keys())}))
+            int(actor["sub"]),
+            str(template_id),
+            json.dumps({"fields_changed": list(fields.keys())}),
+        )
     return PromptTemplate(**dict(row))
 
 
@@ -159,20 +165,19 @@ async def delete_template(
         raise HTTPException(403, "template write requires super access")
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if not await conn.fetchval(
-                "SELECT 1 FROM cell_prompt_templates WHERE id = $1", template_id):
+        if not await conn.fetchval("SELECT 1 FROM cell_prompt_templates WHERE id = $1", template_id):
             raise HTTPException(404, f"template {template_id} not found")
         in_use = await conn.fetchval(
-            "SELECT COUNT(*) FROM cell_task_configs WHERE prompt_template_id = $1",
-            template_id)
+            "SELECT COUNT(*) FROM cell_task_configs WHERE prompt_template_id = $1", template_id
+        )
         if in_use:
             raise HTTPException(409, f"template referenced by {in_use} configs")
-        name = await conn.fetchval(
-            "SELECT name FROM cell_prompt_templates WHERE id = $1", template_id)
-        await conn.execute(
-            "DELETE FROM cell_prompt_templates WHERE id = $1", template_id)
+        name = await conn.fetchval("SELECT name FROM cell_prompt_templates WHERE id = $1", template_id)
+        await conn.execute("DELETE FROM cell_prompt_templates WHERE id = $1", template_id)
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details)
                VALUES ($1, 'delete', 'cell_prompt_template', $2::text, $3::jsonb)""",
-            int(actor["sub"]), str(template_id),
-            json.dumps({"name": name}))
+            int(actor["sub"]),
+            str(template_id),
+            json.dumps({"name": name}),
+        )

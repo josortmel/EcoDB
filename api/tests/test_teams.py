@@ -3,6 +3,7 @@
 Cubre los 9 endpoints + cascada (super only para gestión + member para read)
 + anti-IDOR + audit log atómico DELETE + idempotencia members/resources.
 """
+
 import asyncio
 import json
 import os
@@ -14,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -67,14 +69,22 @@ def super_jwt(client):
                   AND (user_id = 1 OR user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-teams-%'))
                 """
             )
-            await conn.execute("DELETE FROM team_resources WHERE team_id IN (SELECT id FROM teams WHERE name LIKE 'pytest-teams-%')")
-            await conn.execute("DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE name LIKE 'pytest-teams-%')")
+            await conn.execute(
+                "DELETE FROM team_resources WHERE team_id IN (SELECT id FROM teams WHERE name LIKE 'pytest-teams-%')"
+            )
+            await conn.execute(
+                "DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE name LIKE 'pytest-teams-%')"
+            )
             await conn.execute("DELETE FROM teams WHERE name LIKE 'pytest-teams-%'")
-            await conn.execute("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-teams-%')")
+            await conn.execute(
+                "DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-teams-%')"
+            )
             await conn.execute("DELETE FROM projects WHERE name LIKE 'pytest-teams-%'")
             await conn.execute("DELETE FROM workspaces WHERE name LIKE 'pytest-teams-%'")
             await conn.execute("DELETE FROM api_keys WHERE name LIKE 'pytest-teams-%'")
-            await conn.execute("DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-teams-%')")
+            await conn.execute(
+                "DELETE FROM user_emails WHERE user_id IN (SELECT id FROM users WHERE name LIKE 'pytest-teams-%')"
+            )
             await conn.execute("DELETE FROM users WHERE name LIKE 'pytest-teams-%'")
         finally:
             await conn.close()
@@ -88,18 +98,19 @@ def super_jwt(client):
 async def _create_user_simple(name: str) -> tuple[int, str]:
     conn = await _aconn()
     try:
-        u = await conn.fetchrow(
-            "INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name
-        )
+        u = await conn.fetchrow("INSERT INTO users (name, active) VALUES ($1, true) RETURNING id", name)
         user_id = u["id"]
         await conn.execute(
             "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-            user_id, f"{name}@pytest.local",
+            user_id,
+            f"{name}@pytest.local",
         )
         key_plain, key_hash = generate_api_key()
         await conn.execute(
             "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, $2, $3, true)",
-            key_hash, f"pytest-teams-user-{name}", user_id,
+            key_hash,
+            f"pytest-teams-user-{name}",
+            user_id,
         )
         return user_id, key_plain
     finally:
@@ -128,6 +139,7 @@ def auth(jwt):
 # POST /teams — solo super
 # ===========================================================================
 
+
 def test_super_creates_team(client, super_jwt):
     r = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-alfa"})
     assert r.status_code == 201
@@ -153,7 +165,8 @@ def test_create_team_blank_name_returns_422(client, super_jwt):
 
 def test_create_team_extra_field_returns_422(client, super_jwt):
     r = client.post(
-        "/teams", headers=auth(super_jwt),
+        "/teams",
+        headers=auth(super_jwt),
         json={"name": "pytest-teams-extra", "rogue": 1},
     )
     assert r.status_code == 422
@@ -162,6 +175,7 @@ def test_create_team_extra_field_returns_422(client, super_jwt):
 # ===========================================================================
 # GET /teams — super ve todos, member ve los suyos, outsider ve [].
 # ===========================================================================
+
 
 def test_super_lists_all_teams(client, super_jwt):
     r = client.get("/teams", headers=auth(super_jwt))
@@ -181,7 +195,8 @@ def test_member_sees_only_own_teams(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-with-member"})
     team_id = r1.json()["id"]
     r2 = client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     assert r2.status_code == 201
@@ -196,11 +211,13 @@ def test_member_sees_only_own_teams(client, super_jwt, member_setup):
 # GET /teams/{id}
 # ===========================================================================
 
+
 def test_super_reads_any_team_with_members_resources(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-detail"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     r = client.get(f"/teams/{team_id}", headers=auth(super_jwt))
@@ -215,7 +232,8 @@ def test_member_reads_own_team(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-member-read"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     r = client.get(f"/teams/{team_id}", headers=auth(member_setup["jwt"]))
@@ -239,11 +257,13 @@ def test_get_unknown_team_returns_403(client, super_jwt):
 # PUT /teams/{id} — solo super
 # ===========================================================================
 
+
 def test_super_renames_team(client, super_jwt):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-rename-orig"})
     team_id = r1.json()["id"]
     r2 = client.put(
-        f"/teams/{team_id}", headers=auth(super_jwt),
+        f"/teams/{team_id}",
+        headers=auth(super_jwt),
         json={"name": "pytest-teams-rename-new"},
     )
     assert r2.status_code == 200
@@ -254,11 +274,13 @@ def test_member_cannot_rename_team(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-no-rename"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     r = client.put(
-        f"/teams/{team_id}", headers=auth(member_setup["jwt"]),
+        f"/teams/{team_id}",
+        headers=auth(member_setup["jwt"]),
         json={"name": "pytest-teams-hacked"},
     )
     assert r.status_code == 403
@@ -266,7 +288,8 @@ def test_member_cannot_rename_team(client, super_jwt, member_setup):
 
 def test_put_unknown_team_returns_403(client, super_jwt):
     r = client.put(
-        "/teams/999999", headers=auth(super_jwt),
+        "/teams/999999",
+        headers=auth(super_jwt),
         json={"name": "pytest-teams-x"},
     )
     assert r.status_code == 403
@@ -276,12 +299,14 @@ def test_put_unknown_team_returns_403(client, super_jwt):
 # DELETE /teams/{id} — solo super + audit_log + CASCADE
 # ===========================================================================
 
+
 def test_super_deletes_team_with_audit_log(client, super_jwt, member_setup):
     """DELETE team CASCADE elimina team_members. Audit log atómico."""
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-delete-target"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     r2 = client.delete(f"/teams/{team_id}", headers=auth(super_jwt))
@@ -291,9 +316,7 @@ def test_super_deletes_team_with_audit_log(client, super_jwt, member_setup):
     async def _check():
         conn = await _aconn()
         try:
-            tm = await conn.fetchval(
-                "SELECT count(*) FROM team_members WHERE team_id = $1", team_id
-            )
+            tm = await conn.fetchval("SELECT count(*) FROM team_members WHERE team_id = $1", team_id)
             audit = await conn.fetchrow(
                 """
                 SELECT user_id, action, resource, resource_id, details
@@ -320,7 +343,8 @@ def test_member_cannot_delete_team(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-no-delete"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     r = client.delete(f"/teams/{team_id}", headers=auth(member_setup["jwt"]))
@@ -336,17 +360,20 @@ def test_delete_unknown_team_returns_403(client, super_jwt):
 # POST /teams/{id}/members
 # ===========================================================================
 
+
 def test_add_member_idempotent(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-idempotent-m"})
     team_id = r1.json()["id"]
     r2 = client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     assert r2.status_code == 201
     # Mismo INSERT otra vez → 201, no 409 (ON CONFLICT DO NOTHING).
     r3 = client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     assert r3.status_code == 201
@@ -356,7 +383,8 @@ def test_add_member_unknown_user_returns_422(client, super_jwt):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-bad-user"})
     team_id = r1.json()["id"]
     r2 = client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": 999999},
     )
     assert r2.status_code == 422
@@ -364,7 +392,8 @@ def test_add_member_unknown_user_returns_422(client, super_jwt):
 
 def test_add_member_to_unknown_team_returns_403(client, super_jwt, member_setup):
     r = client.post(
-        "/teams/999999/members", headers=auth(super_jwt),
+        "/teams/999999/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     assert r.status_code == 403
@@ -374,7 +403,8 @@ def test_remove_member(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-remove-m"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     r2 = client.delete(
@@ -388,17 +418,20 @@ def test_remove_member(client, super_jwt, member_setup):
 # POST /teams/{id}/resources
 # ===========================================================================
 
+
 def test_add_resource_idempotent(client, super_jwt):
     """Vincular project=1 (default) al team. Idempotente."""
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-res-team"})
     team_id = r1.json()["id"]
     r2 = client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": 1},
     )
     assert r2.status_code == 201
     r3 = client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": 1},
     )
     assert r3.status_code == 201
@@ -408,7 +441,8 @@ def test_add_resource_unknown_project_returns_422(client, super_jwt):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-bad-proj"})
     team_id = r1.json()["id"]
     r2 = client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": 999999},
     )
     assert r2.status_code == 422
@@ -436,12 +470,11 @@ def test_remove_resource_from_unknown_team_returns_403(client, super_jwt):
 
 def test_put_team_duplicate_name_returns_409(client, super_jwt):
     client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-put-collision-a"})
-    r2 = client.post(
-        "/teams", headers=auth(super_jwt), json={"name": "pytest-teams-put-collision-b"}
-    )
+    r2 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-put-collision-b"})
     team_id = r2.json()["id"]
     r3 = client.put(
-        f"/teams/{team_id}", headers=auth(super_jwt),
+        f"/teams/{team_id}",
+        headers=auth(super_jwt),
         json={"name": "pytest-teams-put-collision-a"},
     )
     assert r3.status_code == 409
@@ -452,7 +485,8 @@ def test_audit_log_for_add_member(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-audit-add-mem"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
 
@@ -483,7 +517,8 @@ def test_audit_log_for_remove_member(client, super_jwt, member_setup):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-audit-rm-mem"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/members", headers=auth(super_jwt),
+        f"/teams/{team_id}/members",
+        headers=auth(super_jwt),
         json={"user_id": member_setup["user_id"]},
     )
     client.delete(
@@ -516,7 +551,8 @@ def test_audit_log_for_add_resource(client, super_jwt):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-audit-add-res"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": 1},
     )
 
@@ -545,7 +581,8 @@ def test_audit_log_for_remove_resource(client, super_jwt):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-audit-rm-res"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": 1},
     )
     client.delete(f"/teams/{team_id}/resources/1", headers=auth(super_jwt))
@@ -574,7 +611,8 @@ def test_remove_resource(client, super_jwt):
     r1 = client.post("/teams", headers=auth(super_jwt), json={"name": "pytest-teams-rem-res"})
     team_id = r1.json()["id"]
     client.post(
-        f"/teams/{team_id}/resources", headers=auth(super_jwt),
+        f"/teams/{team_id}/resources",
+        headers=auth(super_jwt),
         json={"project_id": 1},
     )
     r2 = client.delete(

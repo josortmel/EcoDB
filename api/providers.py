@@ -4,6 +4,7 @@ API keys for LLM providers, encrypted at rest with Fernet. Plaintext keys are
 never returned: GET masks as "sk-****...last4". Cell worker decrypts on read.
 Auth: super-only for all operations.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/providers", tags=["providers"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class ProviderKeySummary(BaseModel):
     id: int
@@ -52,6 +54,7 @@ class ProviderUpdate(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _mask(plain: str) -> str:
     if len(plain) <= 4:
         return "****"
@@ -63,8 +66,8 @@ def _to_summary(row) -> ProviderKeySummary:
         masked = _mask(crypto.decrypt(row["api_key_encrypted"]))
     except Exception as _dec_err:
         import logging
-        logging.getLogger("ecodb.providers").warning(
-            "failed to decrypt provider %s: %s", row["provider"], _dec_err)
+
+        logging.getLogger("ecodb.providers").warning("failed to decrypt provider %s: %s", row["provider"], _dec_err)
         masked = "****"
     return ProviderKeySummary(
         id=row["id"],
@@ -85,13 +88,13 @@ def _require_super(actor: dict) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 async def list_providers(actor: dict = Depends(get_current_user)) -> dict:
     _require_super(actor)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM llm_provider_keys ORDER BY provider")
+        rows = await conn.fetch("SELECT * FROM llm_provider_keys ORDER BY provider")
     items = [_to_summary(r) for r in rows]
     return {"items": items, "total": len(items)}
 
@@ -113,8 +116,12 @@ async def create_provider(
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING *
                 """,
-                body.provider, encrypted, body.model_default,
-                body.display_name, int(actor["sub"]))
+                body.provider,
+                encrypted,
+                body.model_default,
+                body.display_name,
+                int(actor["sub"]),
+            )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, f"provider {body.provider!r} already exists")
     return _to_summary(row)
@@ -134,8 +141,7 @@ async def update_provider(
         fields["api_key_encrypted"] = crypto.encrypt(fields.pop("api_key"))
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if not await conn.fetchval(
-                "SELECT 1 FROM llm_provider_keys WHERE id = $1", provider_id):
+        if not await conn.fetchval("SELECT 1 FROM llm_provider_keys WHERE id = $1", provider_id):
             raise HTTPException(404, f"provider {provider_id} not found")
         set_parts: list = []
         params: list = []
@@ -145,9 +151,8 @@ async def update_provider(
         set_parts.append("updated_at = NOW()")
         params.append(provider_id)
         row = await conn.fetchrow(
-            f"UPDATE llm_provider_keys SET {', '.join(set_parts)} "
-            f"WHERE id = ${len(params)} RETURNING *",
-            *params)
+            f"UPDATE llm_provider_keys SET {', '.join(set_parts)} WHERE id = ${len(params)} RETURNING *", *params
+        )
     return _to_summary(row)
 
 
@@ -159,14 +164,10 @@ async def delete_provider(
     _require_super(actor)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT provider FROM llm_provider_keys WHERE id = $1", provider_id)
+        row = await conn.fetchrow("SELECT provider FROM llm_provider_keys WHERE id = $1", provider_id)
         if row is None:
             raise HTTPException(404, f"provider {provider_id} not found")
-        in_use = await conn.fetchval(
-            "SELECT COUNT(*) FROM cell_task_configs WHERE provider = $1",
-            row["provider"])
+        in_use = await conn.fetchval("SELECT COUNT(*) FROM cell_task_configs WHERE provider = $1", row["provider"])
         if in_use:
             raise HTTPException(409, f"provider in use by {in_use} cell configs")
-        await conn.execute(
-            "DELETE FROM llm_provider_keys WHERE id = $1", provider_id)
+        await conn.execute("DELETE FROM llm_provider_keys WHERE id = $1", provider_id)

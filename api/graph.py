@@ -26,6 +26,7 @@ Permisos en este sprint:
 - Scoping por workspace/org del grafo viene en Tarea 2.x cuando se decida si
   hay un grafo por org o uno global.
 """
+
 from __future__ import annotations
 
 import json
@@ -54,6 +55,7 @@ _MAX_MERGE_CHAIN_DEPTH = 50
 # agtype helpers
 # ---------------------------------------------------------------------------
 
+
 def _strip_agtype(value: str) -> str:
     """agtype literales vienen como `"text"`, `123`, `{...}::vertex`, `{...}::edge`.
     Strip comillas y sufijos `::type` si aparecen.
@@ -81,6 +83,7 @@ def _strip_agtype(value: str) -> str:
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class TripleCreate(BaseModel):
     subject: str = Field(..., min_length=1, max_length=MAX_NODE_NAME_LEN)
@@ -152,6 +155,7 @@ class GraphStats(BaseModel):
 # Internal helpers — SQL + AGE atomic
 # ---------------------------------------------------------------------------
 
+
 async def _ensure_node(conn, name: str) -> int:
     """Devuelve el `nodes.id` SQL del nodo, creandolo si no existe.
 
@@ -161,6 +165,7 @@ async def _ensure_node(conn, name: str) -> int:
     realmente nuevo (RETURNING devolvio fila); si la fila ya existia (otro
     proceso la creo entre el SELECT y el INSERT), saltamos el AGE create.
     """
+
     async def _age_create(n: str, sid: int) -> None:
         params = json.dumps({"name": n, "sql_id": sid})
         await conn.execute(
@@ -189,9 +194,7 @@ async def _ensure_node(conn, name: str) -> int:
         name,
     )
     if inserted is None:
-        existing = await conn.fetchrow(
-            "SELECT id FROM nodes WHERE name_canonical = lower($1)", name
-        )
+        existing = await conn.fetchrow("SELECT id FROM nodes WHERE name_canonical = lower($1)", name)
         if existing is None:
             raise RuntimeError(f"node {name!r} disappeared during concurrent operation")
         sql_id = existing["id"]
@@ -239,7 +242,8 @@ async def _flag_accent_twin(conn, name: str, sql_id: int) -> None:
                   AND f_unaccent(lower(name)) = f_unaccent(lower($1))
                   AND lower(name) <> lower($1)
                 """,
-                name, sql_id,
+                name,
+                sql_id,
             )
             for twin in twins:
                 await conn.execute(
@@ -251,7 +255,8 @@ async def _flag_accent_twin(conn, name: str, sql_id: int) -> None:
                         SELECT 1 FROM entity_alias_candidates
                         WHERE source_name = $1 AND target_node_id = $2 AND status = 'pending')
                     """,
-                    name, twin["id"],
+                    name,
+                    twin["id"],
                 )
     except Exception as exc:
         logging.getLogger("ecodb.graph").warning(
@@ -280,6 +285,7 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
     # — facilita testing y desacoplamiento.
     from gliner_service import extract_entities, detect_alias_candidates
     import logging
+
     _log = logging.getLogger("ecodb.gliner_link")
 
     try:
@@ -300,6 +306,7 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
     # (extract_entities_from_chunks). Stored values are re-normalized because rows
     # written before #478 kept their accents.
     from gliner_service import filter_stop_entities, normalize_name
+
     stop_rows = await conn.fetch("SELECT name_normalized FROM stop_entities")
     entities = filter_stop_entities(entities, {normalize_name(r["name_normalized"]) for r in stop_rows})
     if not entities:
@@ -322,7 +329,11 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
             # terminan en nodos AGE con nombres descomunales — inconsistencia
             # de schema + DoS parcial.
             if len(name) > MAX_NODE_NAME_LEN:
-                _log.warning("link_entities_from_content: skipping entity name >%d chars (memory=%s)", MAX_NODE_NAME_LEN, memory_id)
+                _log.warning(
+                    "link_entities_from_content: skipping entity name >%d chars (memory=%s)",
+                    MAX_NODE_NAME_LEN,
+                    memory_id,
+                )
                 continue
             node_sql_id = await _ensure_node(conn, name)
             await conn.execute(
@@ -331,7 +342,8 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
                 VALUES ($1, $2)
                 ON CONFLICT (memory_id, entity_node_id) DO NOTHING
                 """,
-                memory_id, node_sql_id,
+                memory_id,
+                node_sql_id,
             )
             count += 1
 
@@ -369,26 +381,36 @@ async def update_cooccurrence_triples(conn, entity_node_ids: list[int]) -> int:
 
     created = 0
     for i, eid_a in enumerate(entity_node_ids):
-        for eid_b in entity_node_ids[i + 1:]:
+        for eid_b in entity_node_ids[i + 1 :]:
             a, b = min(eid_a, eid_b), max(eid_a, eid_b)
-            co_count = await conn.fetchval("""
+            co_count = await conn.fetchval(
+                """
                 SELECT count(*) FROM (
                     SELECT mel1.memory_id
                     FROM memory_entity_links mel1
                     JOIN memory_entity_links mel2 ON mel1.memory_id = mel2.memory_id
                     WHERE mel1.entity_node_id = $1 AND mel2.entity_node_id = $2
                 ) sub
-            """, a, b)
+            """,
+                a,
+                b,
+            )
 
             if co_count < COOCCURRENCE_THRESHOLD:
                 continue
 
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 INSERT INTO triples (subject_id, predicate, object_id, author)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (subject_id, predicate, object_id) DO NOTHING
                 RETURNING id
-            """, a, COOCCURRENCE_PREDICATE, b, COOCCURRENCE_AUTHOR)
+            """,
+                a,
+                COOCCURRENCE_PREDICATE,
+                b,
+                COOCCURRENCE_AUTHOR,
+            )
 
             if row is not None:
                 await _create_age_edge(conn, a, COOCCURRENCE_PREDICATE, b)
@@ -407,6 +429,7 @@ class GraphSyncError(RuntimeError):
 # Measured 2026-09-25: all 581 SQL triples missing from AGE touched a merged node — merge
 # DETACH-DELETEs the source vertex (trigger) and nothing re-projected its edges; and
 # _create_age_edge was a silent no-op when a vertex was missing.
+
 
 async def _canonical_map(conn) -> tuple[dict[int, int], set[int]]:
     """node id -> canonical active id (chains followed), and the set of active ids."""
@@ -452,7 +475,8 @@ async def _age_merge_edge(conn, subject_sql_id: int, predicate: str, object_sql_
     )
     if row is None:
         raise GraphSyncError(
-            f"AGE edge not written: vertex missing for sql_id {subject_sql_id} or {object_sql_id} ({predicate!r})")
+            f"AGE edge not written: vertex missing for sql_id {subject_sql_id} or {object_sql_id} ({predicate!r})"
+        )
 
 
 async def _create_age_edge(conn, subject_sql_id: int, predicate: str, object_sql_id: int) -> None:
@@ -478,8 +502,10 @@ async def reconcile_age(conn, node_ids: Optional[set[int]] = None, dry_run: bool
     Must run inside the caller's transaction.
     """
     canon, active = await _canonical_map(conn)
-    names = {r["id"]: r["name"] for r in await conn.fetch(
-        "SELECT id, name FROM nodes WHERE status IS NULL OR status = 'active'")}
+    names = {
+        r["id"]: r["name"]
+        for r in await conn.fetch("SELECT id, name FROM nodes WHERE status IS NULL OR status = 'active'")
+    }
     scope = None if node_ids is None else {canon.get(n, n) for n in node_ids}
 
     # --- expected edges (projection)
@@ -499,10 +525,12 @@ async def reconcile_age(conn, node_ids: Optional[set[int]] = None, dry_run: bool
     by_sid: dict[int, list[str]] = {}
     for r in vrows:
         by_sid.setdefault(int(str(r["sid"])), []).append(str(r["vid"]))
-    stale_vertices = [sid for sid in by_sid if sid not in active
-                      and (scope is None or sid in scope or canon.get(sid) in scope)]
-    dup_vertices = [sid for sid, v in by_sid.items() if len(v) > 1 and sid in active
-                    and (scope is None or sid in scope)]
+    stale_vertices = [
+        sid for sid in by_sid if sid not in active and (scope is None or sid in scope or canon.get(sid) in scope)
+    ]
+    dup_vertices = [
+        sid for sid, v in by_sid.items() if len(v) > 1 and sid in active and (scope is None or sid in scope)
+    ]
     missing_vertices = [sid for sid in active if sid not in by_sid and (scope is None or sid in scope)]
 
     # --- current AGE edges
@@ -535,23 +563,32 @@ async def reconcile_age(conn, node_ids: Optional[set[int]] = None, dry_run: bool
         return report
 
     for sid in stale_vertices + dup_vertices:
-        await conn.execute(f"""
+        await conn.execute(
+            f"""
             SELECT * FROM cypher('{GRAPH_NAME}', $$ MATCH (n:Entity {{sql_id: $sid}}) DETACH DELETE n $$,
-            $1::agtype) AS (d agtype)""", json.dumps({"sid": sid}))
+            $1::agtype) AS (d agtype)""",
+            json.dumps({"sid": sid}),
+        )
     for sid in dup_vertices + missing_vertices:
-        await conn.execute(f"""
+        await conn.execute(
+            f"""
             SELECT * FROM cypher('{GRAPH_NAME}', $$ CREATE (n:Entity {{name: $name, sql_id: $sid}}) RETURN id(n) $$,
-            $1::agtype) AS (v agtype)""", json.dumps({"sid": sid, "name": names.get(sid, f"entity_{sid}")}))
-    for (s, p, o) in extra_edges + dup_edges:
-        await conn.execute(f"""
+            $1::agtype) AS (v agtype)""",
+            json.dumps({"sid": sid, "name": names.get(sid, f"entity_{sid}")}),
+        )
+    for s, p, o in extra_edges + dup_edges:
+        await conn.execute(
+            f"""
             SELECT * FROM cypher('{GRAPH_NAME}', $$
                 MATCH (a:Entity {{sql_id: $s}})-[r:RELATES_TO {{predicate: $p}}]->(b:Entity {{sql_id: $o}}) DELETE r
-            $$, $1::agtype) AS (d agtype)""", json.dumps({"s": s, "p": p, "o": o}))
+            $$, $1::agtype) AS (d agtype)""",
+            json.dumps({"s": s, "p": p, "o": o}),
+        )
     # re-create: missing edges, duplicates (deleted above, one copy back), and every expected edge
     # of a vertex that was just recreated (DETACH DELETE took them).
     recreated = set(dup_vertices)
     todo = set(missing_edges) | set(dup_edges) | {k for k in expected if k[0] in recreated or k[2] in recreated}
-    for (s, p, o) in sorted(todo):
+    for s, p, o in sorted(todo):
         await _age_merge_edge(conn, s, p, o)
     return report
 
@@ -566,13 +603,17 @@ async def age_drift(conn) -> dict:
             expected.add((s, t["predicate"], o))
     age_edges = await conn.fetchval(f"""
         SELECT count(*) FROM cypher('{GRAPH_NAME}', $$ MATCH ()-[r:RELATES_TO]->() RETURN id(r) $$) AS (e agtype)""")
-    return {"age_edges": int(age_edges), "age_edges_expected": len(expected),
-            "age_drift": int(age_edges) - len(expected)}
+    return {
+        "age_edges": int(age_edges),
+        "age_edges_expected": len(expected),
+        "age_drift": int(age_edges) - len(expected),
+    }
 
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/triples", response_model=TripleResponse, status_code=201)
 async def create_triple(body: TripleCreate, actor: dict = Depends(get_current_user)) -> TripleResponse:
@@ -591,8 +632,13 @@ async def create_triple(body: TripleCreate, actor: dict = Depends(get_current_us
                 ON CONFLICT (subject_id, predicate, object_id) DO NOTHING
                 RETURNING id
                 """,
-                subj_id, body.predicate, obj_id, body.author,
-                body.original_predicate, body.mapper_confidence, body.needs_review,
+                subj_id,
+                body.predicate,
+                obj_id,
+                body.author,
+                body.original_predicate,
+                body.mapper_confidence,
+                body.needs_review,
             )
             if row is None:
                 raise HTTPException(409, "triple already exists")
@@ -601,7 +647,8 @@ async def create_triple(body: TripleCreate, actor: dict = Depends(get_current_us
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'save_triple', 'triple', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(triple_id),
+                int(actor["sub"]),
+                str(triple_id),
                 json.dumps({"subject": body.subject, "predicate": body.predicate, "object": body.object}),
                 actor.get("organization_id"),
             )
@@ -636,28 +683,38 @@ async def create_triples_batch(body: TripleBatch, actor: dict = Depends(get_curr
                     ON CONFLICT (subject_id, predicate, object_id) DO NOTHING
                     RETURNING id
                     """,
-                    subj_id, triple.predicate, obj_id, triple.author,
-                    triple.original_predicate, triple.mapper_confidence, triple.needs_review,
+                    subj_id,
+                    triple.predicate,
+                    obj_id,
+                    triple.author,
+                    triple.original_predicate,
+                    triple.mapper_confidence,
+                    triple.needs_review,
                 )
                 if row is None:
                     skipped += 1
                     continue
                 await _create_age_edge(conn, subj_id, triple.predicate, obj_id)
-                created.append(TripleResponse(
-                    id=row["id"],
-                    subject_id=subj_id,
-                    subject_name=triple.subject,
-                    predicate=triple.predicate,
-                    object_id=obj_id,
-                    object_name=triple.object,
-                    author=triple.author,
-                    original_predicate=triple.original_predicate,
-                ))
+                created.append(
+                    TripleResponse(
+                        id=row["id"],
+                        subject_id=subj_id,
+                        subject_name=triple.subject,
+                        predicate=triple.predicate,
+                        object_id=obj_id,
+                        object_name=triple.object,
+                        author=triple.author,
+                        original_predicate=triple.original_predicate,
+                    )
+                )
         await conn.execute(
             """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
             VALUES ($1, 'save_triples_batch', 'triple', $2, $3::jsonb, $4)""",
-            int(actor["sub"]), str(uuid.uuid4()),
-            json.dumps({"created_count": len(created), "skipped_count": skipped, "triple_ids": [t.id for t in created]}),
+            int(actor["sub"]),
+            str(uuid.uuid4()),
+            json.dumps(
+                {"created_count": len(created), "skipped_count": skipped, "triple_ids": [t.id for t in created]}
+            ),
             actor.get("organization_id"),
         )
     return TripleBatchResponse(created=created, skipped_duplicates=skipped)
@@ -785,7 +842,9 @@ async def search_nodes(
             ORDER BY sim DESC, length(name) ASC
             LIMIT $3
             """,
-            q, pattern, limit,
+            q,
+            pattern,
+            limit,
         )
     matches = [{"id": r["id"], "name": r["name"], "similarity": float(r["sim"])} for r in rows]
     return GraphSearchResponse(query=q, matches=matches)
@@ -826,7 +885,8 @@ async def delete_triple(triple_id: int, actor: dict = Depends(get_current_user))
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'delete_triple', 'triple', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(triple_id),
+                int(actor["sub"]),
+                str(triple_id),
                 json.dumps({"predicate": row["predicate"]}),
                 actor.get("organization_id"),
             )
@@ -854,8 +914,10 @@ async def reconcile_graph(
             await conn.execute(
                 """INSERT INTO audit_log (user_id, action, resource, resource_id, details, organization_id)
                 VALUES ($1, 'graph_reconcile', 'graph', $2, $3::jsonb, $4)""",
-                int(actor["sub"]), str(uuid.uuid4()),
-                json.dumps({"before": before, "after": after, "report": report}), actor.get("organization_id"),
+                int(actor["sub"]),
+                str(uuid.uuid4()),
+                json.dumps({"before": before, "after": after, "report": report}),
+                actor.get("organization_id"),
             )
     return {"before": before, "after": after, "report": report}
 
@@ -884,16 +946,19 @@ async def graph_stats(actor: dict = Depends(get_current_user)) -> GraphStats:
 # Fase 3b — Predicate governance endpoints
 # ---------------------------------------------------------------------------
 
+
 class PredicateResolveResponse(BaseModel):
     canonical: Optional[str] = None
     confidence: float = 0.0
     method: str = "none"
     original: str = ""
 
+
 class AliasEntry(BaseModel):
     alias: str
     canonical: str
     domain: Optional[str] = None
+
 
 class AliasListResponse(BaseModel):
     aliases: list[AliasEntry]
@@ -930,21 +995,29 @@ async def resolve_predicate(
                WHERE alias = $1 AND (domain = '' OR domain = $2 OR domain = $3)
                ORDER BY CASE WHEN domain = '' THEN 1 ELSE 0 END
                LIMIT 1""",
-            lexeme, subject_type, object_type,
+            lexeme,
+            subject_type,
+            object_type,
         )
         if alias_row:
-            return PredicateResolveResponse(canonical=alias_row["canonical"], confidence=1.0, method="alias", original=predicate)
+            return PredicateResolveResponse(
+                canonical=alias_row["canonical"], confidence=1.0, method="alias", original=predicate
+            )
 
         # Stage 3: embedding similarity
         # Get embedding for the input predicate
         from embeddings_client import embed_text
+
         try:
             embedding_str = await embed_text(lexeme, prompt_name="query")
         except Exception:
-            return PredicateResolveResponse(canonical=None, confidence=0.0, method="embedding_failed", original=predicate)
+            return PredicateResolveResponse(
+                canonical=None, confidence=0.0, method="embedding_failed", original=predicate
+            )
 
         # Parse embedding vector
         import json as _json
+
         vec = _json.loads(embedding_str) if isinstance(embedding_str, str) else embedding_str
 
         # ANN search against predicates_canonical embeddings
@@ -976,7 +1049,9 @@ async def list_aliases(actor: dict = Depends(get_current_user)) -> AliasListResp
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT alias, canonical, domain FROM predicate_aliases ORDER BY alias")
-    return AliasListResponse(aliases=[AliasEntry(alias=r["alias"], canonical=r["canonical"], domain=r["domain"]) for r in rows])
+    return AliasListResponse(
+        aliases=[AliasEntry(alias=r["alias"], canonical=r["canonical"], domain=r["domain"]) for r in rows]
+    )
 
 
 @router.get("/all")
@@ -988,7 +1063,8 @@ async def get_full_graph(
     """Full graph — all active nodes + edges between them. Paginated, ordered by degree."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        node_rows = await conn.fetch("""
+        node_rows = await conn.fetch(
+            """
             WITH degree_counts AS (
                 SELECT node_id, COUNT(*) AS degree FROM (
                     SELECT subject_id AS node_id FROM triples
@@ -1003,14 +1079,24 @@ async def get_full_graph(
             WHERE n.status = 'active'
             ORDER BY COALESCE(dc.degree, 0) DESC, n.name
             LIMIT $1 OFFSET $2
-        """, limit, offset)
+        """,
+            limit,
+            offset,
+        )
 
         node_ids = [r["id"] for r in node_rows]
-        edge_rows = await conn.fetch("""
+        edge_rows = (
+            await conn.fetch(
+                """
             SELECT subject_id AS source, object_id AS target, predicate
             FROM triples
             WHERE subject_id = ANY($1::int[]) AND object_id = ANY($1::int[])
-        """, node_ids) if node_ids else []
+        """,
+                node_ids,
+            )
+            if node_ids
+            else []
+        )
 
         cluster_info = {}
         cr_map: dict[int, int] = {}
@@ -1081,13 +1167,16 @@ async def get_subgraph(
 
         # Cypher: traversal hasta depth hops desde center
         try:
-            edge_rows = await conn.fetch(f"""
+            edge_rows = await conn.fetch(
+                f"""
                 SELECT * FROM cypher('{GRAPH_NAME}', $$
                     MATCH path = (c:Entity {{name: $center_name}})-[*1..{depth}]-(n:Entity)
                     UNWIND relationships(path) AS r
                     RETURN startNode(r).name AS src, endNode(r).name AS tgt, r.predicate AS pred
                 $$, $1::agtype) AS (src agtype, tgt agtype, pred agtype)
-            """, params)
+            """,
+                params,
+            )
         except Exception as _cypher_err:
             logging.getLogger("ecodb.graph").warning("subgraph Cypher failed: %r", _cypher_err)
             edge_rows = []
@@ -1104,7 +1193,8 @@ async def get_subgraph(
             edges_raw.append((src, tgt, pred))
 
         # Fetch SQL node data for all names (id, type, degree)
-        node_rows = await conn.fetch("""
+        node_rows = await conn.fetch(
+            """
             WITH degree_counts AS (
                 SELECT node_id, COUNT(*) AS degree FROM (
                     SELECT subject_id AS node_id FROM triples
@@ -1117,7 +1207,9 @@ async def get_subgraph(
             FROM nodes n
             LEFT JOIN degree_counts dc ON dc.node_id = n.id
             WHERE n.name = ANY($1::text[])
-        """, list(all_names))
+        """,
+            list(all_names),
+        )
 
     name_to_id = {r["name"]: r["id"] for r in node_rows}
     nodes = [
@@ -1163,9 +1255,13 @@ async def get_subgraph(
             n["cluster_id"] = cr_map.get(n["id"])
         filtered_edges = [e for e in edges if e["source"] in top_ids and e["target"] in top_ids]
         return {
-            "center": center, "depth": depth,
-            "nodes": top_nodes, "edges": filtered_edges,
-            "truncated": True, "total_nodes": len(nodes), "shown_nodes": len(top_nodes),
+            "center": center,
+            "depth": depth,
+            "nodes": top_nodes,
+            "edges": filtered_edges,
+            "truncated": True,
+            "total_nodes": len(nodes),
+            "shown_nodes": len(top_nodes),
             "clusters": list(cluster_info.values()),
         }
 
@@ -1176,6 +1272,7 @@ async def get_subgraph(
 # Fase 5 — Entity merge helpers (Tasks 5.10-5.11)
 # ---------------------------------------------------------------------------
 
+
 async def _resolve_canonical(conn, node_id: int) -> int:
     """Follow merged_into chain to canonical active node.
 
@@ -1185,9 +1282,7 @@ async def _resolve_canonical(conn, node_id: int) -> int:
     path: list[int] = [node_id]
     current = node_id
     for _ in range(_MAX_MERGE_CHAIN_DEPTH):  # depth guard — prevents infinite loop on corrupt chains
-        row = await conn.fetchrow(
-            "SELECT merged_into FROM nodes WHERE id = $1", current
-        )
+        row = await conn.fetchrow("SELECT merged_into FROM nodes WHERE id = $1", current)
         if row is None or row["merged_into"] is None:
             canonical = current
             break
@@ -1200,7 +1295,8 @@ async def _resolve_canonical(conn, node_id: int) -> int:
         if intermediate != canonical:
             await conn.execute(
                 "UPDATE nodes SET merged_into = $1 WHERE id = $2 AND (merged_into IS NULL OR merged_into != $1)",
-                canonical, intermediate,
+                canonical,
+                intermediate,
             )
     return canonical
 
@@ -1238,7 +1334,8 @@ async def merge_entities(
         async with conn.transaction():
             await conn.execute(
                 "UPDATE nodes SET status = 'merged', merged_into = $1 WHERE id = $2",
-                canonical_id, source_id,
+                canonical_id,
+                source_id,
             )
             await conn.execute("DELETE FROM graph_clusters WHERE node_id = $1", source_id)
             # #337: the trigger DETACH-DELETEd the source vertex; project its triples onto the canonical.
@@ -1250,7 +1347,11 @@ async def merge_entities(
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING id, merged_at
                 """,
-                source_id, canonical_id, target_id, merged_by, reason,
+                source_id,
+                canonical_id,
+                target_id,
+                merged_by,
+                reason,
             )
     return {
         "merge_log_id": log_row["id"],
@@ -1285,7 +1386,8 @@ async def undo_merge(source_node_id: int, pool) -> dict:
             # Repoint nodes that were compressed through this source
             await conn.execute(
                 "UPDATE nodes SET merged_into = $1 WHERE merged_into = $2 AND status = 'merged' AND id != $2",
-                log_row["target_original_id"], source_node_id,
+                log_row["target_original_id"],
+                source_node_id,
             )
             await conn.execute(
                 "UPDATE entity_merge_log SET undone_at = now() WHERE id = $1",
@@ -1294,7 +1396,8 @@ async def undo_merge(source_node_id: int, pool) -> dict:
             # #337: the reactivation trigger recreated a bare vertex; give the source its edges back
             # and take off the canonical the edges that were only projected from the source.
             _canon_before = await conn.fetchval(
-                "SELECT target_node_id FROM entity_merge_log WHERE id = $1", log_row["id"])
+                "SELECT target_node_id FROM entity_merge_log WHERE id = $1", log_row["id"]
+            )
             await reconcile_age(conn, {source_node_id, log_row["target_original_id"], _canon_before})
     return {
         "merge_log_id": log_row["id"],
@@ -1311,14 +1414,18 @@ async def get_graph_clusters(
 ) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(
+            """
             SELECT gc.node_id, n.name, gc.cluster_id, gc.computed_at
             FROM graph_clusters gc
             JOIN nodes n ON n.id = gc.node_id
             WHERE n.status = 'active'
             ORDER BY gc.cluster_id, n.name
             LIMIT $1 OFFSET $2
-        """, limit, offset)
+        """,
+            limit,
+            offset,
+        )
     grouped: dict[int, dict] = {}
     last_computed = None
     for r in rows:
@@ -1345,7 +1452,8 @@ async def list_needs_review(
     """List triples pending human review (needs_review=true)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(
+            """
             SELECT t.id, s.name AS subject, t.predicate, o.name AS object,
                    t.original_predicate, t.mapper_confidence, t.source_agent, t.created_at
             FROM triples t
@@ -1354,7 +1462,9 @@ async def list_needs_review(
             WHERE t.needs_review = true
             ORDER BY t.created_at DESC
             LIMIT $1
-        """, limit)
+        """,
+            limit,
+        )
     items = []
     for r in rows:
         item = dict(r)

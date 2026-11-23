@@ -3,6 +3,7 @@
 Per-agent, per-cell-type, per-level configuration for the metacognition cells.
 Auth: super-only for write (POST/PUT/DELETE), super-or-owner for read (GET).
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ _LEVEL_PATTERN = "^(weekly|monthly|quarterly|yearly)$"
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class CellTaskConfig(BaseModel):
     id: int
@@ -75,6 +77,7 @@ class CellConfigUpdate(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_jsonb(val):
     if val is None:
         return {}
@@ -91,6 +94,7 @@ def _validate_cron(expr: Optional[str]) -> None:
         return
     from datetime import datetime, timedelta, timezone
     from croniter import croniter
+
     if not croniter.is_valid(expr):
         raise HTTPException(422, f"invalid cron expression: {expr!r}")
     # Floor on frequency: prevent accidental cell storms (e.g. "* * * * *") that
@@ -101,8 +105,10 @@ def _validate_cron(expr: Optional[str]) -> None:
     t2 = itr.get_next(datetime)
     if t2 - t1 < timedelta(minutes=_MIN_CRON_INTERVAL_MINUTES):
         raise HTTPException(
-            422, f"cron fires more often than every {_MIN_CRON_INTERVAL_MINUTES} minutes — "
-                 f"too frequent for a cell task (would saturate the LLM/DB pool)")
+            422,
+            f"cron fires more often than every {_MIN_CRON_INTERVAL_MINUTES} minutes — "
+            f"too frequent for a cell task (would saturate the LLM/DB pool)",
+        )
 
 
 def _to_config(row) -> CellTaskConfig:
@@ -155,6 +161,7 @@ async def _fetch_config(conn, config_id: int) -> CellTaskConfig:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 async def list_configs(
     agent_identifier: Optional[str] = Query(None, min_length=1, max_length=200),
@@ -180,9 +187,7 @@ async def list_configs(
             params.append(enabled)
             conditions.append(f"ctc.enabled = ${len(params)}")
         where = " AND ".join(conditions)
-        rows = await conn.fetch(
-            _SELECT + f" WHERE {where} ORDER BY a.identifier, ctc.cell_type, ctc.level",
-            *params)
+        rows = await conn.fetch(_SELECT + f" WHERE {where} ORDER BY a.identifier, ctc.cell_type, ctc.level", *params)
     items = [_to_config(r) for r in rows]
     return {"items": items, "total": len(items)}
 
@@ -207,18 +212,24 @@ async def create_config(
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
                 RETURNING id
                 """,
-                agent["id"], body.cell_type, body.enabled, body.model,
-                body.provider, body.prompt_template_id, body.schedule_cron,
-                body.level, json.dumps(body.config),
+                agent["id"],
+                body.cell_type,
+                body.enabled,
+                body.model,
+                body.provider,
+                body.prompt_template_id,
+                body.schedule_cron,
+                body.level,
+                json.dumps(body.config),
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(
                 409,
                 f"config already exists for agent={body.agent_identifier} "
-                f"cell_type={body.cell_type} level={body.level}")
+                f"cell_type={body.cell_type} level={body.level}",
+            )
         except asyncpg.ForeignKeyViolationError:
-            raise HTTPException(
-                422, f"prompt_template_id {body.prompt_template_id} not found")
+            raise HTTPException(422, f"prompt_template_id {body.prompt_template_id} not found")
         result = await _fetch_config(conn, new_id)
     return result
 
@@ -238,8 +249,7 @@ async def update_config(
         _validate_cron(fields["schedule_cron"])
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if not await conn.fetchval(
-                "SELECT 1 FROM cell_task_configs WHERE id = $1", config_id):
+        if not await conn.fetchval("SELECT 1 FROM cell_task_configs WHERE id = $1", config_id):
             raise HTTPException(404, f"config {config_id} not found")
         set_parts: list = []
         params: list = []
@@ -251,12 +261,10 @@ async def update_config(
         params.append(config_id)
         try:
             await conn.execute(
-                f"UPDATE cell_task_configs SET {', '.join(set_parts)} "
-                f"WHERE id = ${len(params)}",
-                *params)
+                f"UPDATE cell_task_configs SET {', '.join(set_parts)} WHERE id = ${len(params)}", *params
+            )
         except asyncpg.UniqueViolationError:
-            raise HTTPException(409, "config update violates uniqueness "
-                                     "(agent+cell_type+level)")
+            raise HTTPException(409, "config update violates uniqueness (agent+cell_type+level)")
         except asyncpg.ForeignKeyViolationError:
             raise HTTPException(422, "prompt_template_id not found")
         result = await _fetch_config(conn, config_id)
@@ -272,7 +280,6 @@ async def delete_config(
         raise HTTPException(403, "cell config write requires super access")
     pool = await get_pool()
     async with pool.acquire() as conn:
-        deleted = await conn.fetchval(
-            "DELETE FROM cell_task_configs WHERE id = $1 RETURNING id", config_id)
+        deleted = await conn.fetchval("DELETE FROM cell_task_configs WHERE id = $1 RETURNING id", config_id)
     if deleted is None:
         raise HTTPException(404, f"config {config_id} not found")

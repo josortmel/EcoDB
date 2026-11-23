@@ -1,4 +1,5 @@
 """Injection telemetry — NER-based use detection without LLM."""
+
 import hashlib
 import html
 import logging
@@ -10,11 +11,33 @@ log = logging.getLogger("ecodb.telemetry")
 
 def _extract_keywords(text: str, top_n: int = 15) -> set[str]:
     """Extract top-n keywords by frequency (simple TF approach)."""
-    words = re.findall(r'\b[a-záéíóúñü]{4,}\b', text.lower())
+    words = re.findall(r"\b[a-záéíóúñü]{4,}\b", text.lower())
     counts = Counter(words)
-    stops = {"para", "como", "este", "esta", "pero", "cuando", "donde", "tiene",
-             "hacer", "puede", "cada", "desde", "entre", "sobre", "después",
-             "también", "todo", "todos", "otra", "otro", "sido", "está", "están"}
+    stops = {
+        "para",
+        "como",
+        "este",
+        "esta",
+        "pero",
+        "cuando",
+        "donde",
+        "tiene",
+        "hacer",
+        "puede",
+        "cada",
+        "desde",
+        "entre",
+        "sobre",
+        "después",
+        "también",
+        "todo",
+        "todos",
+        "otra",
+        "otro",
+        "sido",
+        "está",
+        "están",
+    }
     return set(list({w for w, _ in counts.most_common(top_n + len(stops)) if w not in stops})[:top_n])
 
 
@@ -36,7 +59,9 @@ def compute_use_score(
     novel = []
     for entity in injection_entity_names:
         e_lower = entity.lower()
-        if re.search(r'\b' + re.escape(e_lower) + r'\b', response_lower) and not re.search(r'\b' + re.escape(e_lower) + r'\b', prompt_lower):
+        if re.search(r"\b" + re.escape(e_lower) + r"\b", response_lower) and not re.search(
+            r"\b" + re.escape(e_lower) + r"\b", prompt_lower
+        ):
             novel.append(entity)
     entity_score = min(len(novel) / max(len(injection_entity_names), 1), 1.0)
 
@@ -61,6 +86,7 @@ async def compute_use_score_llm(injection_text: str, response_text: str) -> dict
     """
     import json as _json
     from llm_provider import get_llm_provider
+
     provider = get_llm_provider()
     if not provider:
         return None
@@ -91,15 +117,26 @@ async def compute_use_score_llm(injection_text: str, response_text: str) -> dict
         return None
 
 
-async def record_injection(pool, injection_id: str, memory_ids: list, scores: list[float],
-                           agent_identifier: str = None, prompt_text: str = None):
+async def record_injection(
+    pool,
+    injection_id: str,
+    memory_ids: list,
+    scores: list[float],
+    agent_identifier: str = None,
+    prompt_text: str = None,
+):
     """Record that an injection happened."""
     prompt_hash = hashlib.md5(prompt_text.encode()).hexdigest()[:12] if prompt_text else None
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO injection_telemetry (injection_id, memory_ids, scores, agent_identifier, prompt_hash) "
             "VALUES ($1, $2, $3, $4, $5) ON CONFLICT (injection_id) DO NOTHING",
-            injection_id, memory_ids, scores, agent_identifier, prompt_hash)
+            injection_id,
+            memory_ids,
+            scores,
+            agent_identifier,
+            prompt_hash,
+        )
 
 
 async def evaluate_injection(pool, injection_id: str, use_score: float, novel_entities: list[str]):
@@ -109,4 +146,8 @@ async def evaluate_injection(pool, injection_id: str, use_score: float, novel_en
         await conn.execute(
             "UPDATE injection_telemetry SET status=$1, use_score=$2, novel_entities=$3, evaluated_at=now() "
             "WHERE injection_id=$4",
-            status, use_score, novel_entities, injection_id)
+            status,
+            use_score,
+            novel_entities,
+            injection_id,
+        )

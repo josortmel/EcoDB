@@ -1,4 +1,5 @@
 """Test that compute_composite_score reads weights from GAMR_WEIGHTS_BM25 dict."""
+
 import pytest
 
 

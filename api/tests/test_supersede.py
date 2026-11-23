@@ -4,6 +4,7 @@ La marca va en metadata de la memoria VIEJA (superseded_by, supersede_kind, supe
 marked_by) y la escribe la API con el usuario que guarda. La nueva lleva valid_until y decidido_por.
 Contra la Postgres de pruebas (5436); embeddings sustituidos.
 """
+
 import asyncio
 import json
 import os
@@ -16,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -40,6 +42,7 @@ def _sql(q, *args):
             return await conn.fetch(q, *args)
         finally:
             await conn.close()
+
     return asyncio.run(run())
 
 
@@ -52,8 +55,10 @@ def client():
 @pytest.fixture(scope="module")
 def jwt(client):
     key_plain, key_hash = generate_api_key()
-    key_id = _sql("INSERT INTO api_keys (key_hash, name, user_id, active) "
-                  "VALUES ($1, 'pytest-supersede', 1, true) RETURNING id", key_hash)[0]["id"]
+    key_id = _sql(
+        "INSERT INTO api_keys (key_hash, name, user_id, active) VALUES ($1, 'pytest-supersede', 1, true) RETURNING id",
+        key_hash,
+    )[0]["id"]
     token = client.post("/auth/token", json={"api_key": key_plain}).json()["access_token"]
     yield token
     _sql("DELETE FROM api_keys WHERE id = $1", key_id)
@@ -75,8 +80,7 @@ def _embed(monkeypatch):
 
 
 def _post(client, jwt, **extra):
-    body = {"type": "decision", "content": PREFIX + uuid.uuid4().hex,
-            "workspace_id": 1, "project_id": 1, **extra}
+    body = {"type": "decision", "content": PREFIX + uuid.uuid4().hex, "workspace_id": 1, "project_id": 1, **extra}
     return client.post("/memories", headers={"Authorization": f"Bearer {jwt}"}, json=body)
 
 
@@ -103,8 +107,7 @@ def test_supersedes_marca_la_vieja_con_quien_y_cuando(client, jwt, agentes):
 
 
 def test_la_nueva_guarda_valid_until_y_decidido_por(client, jwt):
-    r = _post(client, jwt, valid_until="2026-12-31",
-              decidido_por={"tipo": "humano", "quien": "Pepe"})
+    r = _post(client, jwt, valid_until="2026-12-31", decidido_por={"tipo": "humano", "quien": "Pepe"})
     assert r.status_code == 201, r.text
     m = _meta(r.json()["id"])
     assert m["valid_until"] == "2026-12-31"

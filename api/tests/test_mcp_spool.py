@@ -1,6 +1,7 @@
 """#547 (L14): a save_memory during an embeddings/API outage is queued on disk with its final id
 and time, sent later, and a send that fails for any other reason stays visible in failed/.
 Offline: httpx with respx, a temporary spool dir, no API and no database."""
+
 import importlib.util
 import json
 import os
@@ -36,8 +37,12 @@ def api():
 
 def _created(req):
     body = json.loads(req.content)
-    return {"id": body.get("client_id") or "00000000-0000-0000-0000-000000000001",
-            "type": body["type"], "tags": [], "created_at": body.get("occurred_at")}
+    return {
+        "id": body.get("client_id") or "00000000-0000-0000-0000-000000000001",
+        "type": body["type"],
+        "tags": [],
+        "created_at": body.get("occurred_at"),
+    }
 
 
 def _posts(api):
@@ -100,6 +105,7 @@ def test_a_timeout_after_the_server_saved_is_resent_with_the_same_id(mod, api):
     save with a NEW id, so the API made a twin. Now both sends carry one id (the API's replay
     check turns the second into a no-op)."""
     import httpx
+
     route = api.post("/memories")
     route.side_effect = httpx.ReadTimeout("timed out")
     r = mod.save_memory(content="pytest slow", type="observacion")
@@ -153,8 +159,8 @@ def test_a_file_another_session_already_sent_is_not_a_failure(mod, api):
     assert not (mod.SPOOL_DIR / "failed").exists() and not f.with_suffix(".lock").exists()
 
 
-
 # ---- #1114: un 429 no es un fallo, y la cola no se vacía de golpe ----
+
 
 def _queue(mod, api, n=1):
     route = api.post("/memories")
@@ -165,12 +171,16 @@ def _queue(mod, api, n=1):
 
 def test_1114_429_429_201_la_memoria_se_guarda_y_no_va_a_failed(mod, api):
     route, (mid,) = _queue(mod, api)
-    respuestas = iter([respx.MockResponse(429, json={"detail": "rate"}, headers={"Retry-After": "1"}),
-                       respx.MockResponse(429, json={"detail": "rate"}, headers={"Retry-After": "1"})])
+    respuestas = iter(
+        [
+            respx.MockResponse(429, json={"detail": "rate"}, headers={"Retry-After": "1"}),
+            respx.MockResponse(429, json={"detail": "rate"}, headers={"Retry-After": "1"}),
+        ]
+    )
     route.side_effect = lambda req: next(respuestas, None) or respx.MockResponse(201, json=_created(req))
     for _ in range(2):
         assert mod._spool_flush() == {"sent": 0, "kept": 1, "failed": 0}
-        mod._spool_pause_until = 0.0          # en la vida real, lo que diga Retry-After
+        mod._spool_pause_until = 0.0  # en la vida real, lo que diga Retry-After
     assert mod._spool_flush() == {"sent": 1, "kept": 0, "failed": 0}
     assert _posts(api)[-1]["client_id"] == mid
     assert not (mod.SPOOL_DIR / "failed").exists() or not list((mod.SPOOL_DIR / "failed").glob("*"))
@@ -183,19 +193,21 @@ def test_1114_un_429_para_la_pasada_y_respeta_el_retry_after(mod, api):
     route.respond(429, json={"detail": "rate"}, headers={"Retry-After": "120"})
     antes = len(_posts(api))
     assert mod._spool_flush() == {"sent": 0, "kept": 3, "failed": 0}
-    assert len(_posts(api)) == antes + 1             # paró en el primer 429, no insistió con las otras dos
+    assert len(_posts(api)) == antes + 1  # paró en el primer 429, no insistió con las otras dos
     assert mod._spool_pause_until - time.time() > 100
     route.side_effect = lambda req: respx.MockResponse(201, json=_created(req))
-    assert mod._spool_flush() == {"sent": 0, "kept": 3, "failed": 0}   # en pausa: ni lo intenta
+    assert mod._spool_flush() == {"sent": 0, "kept": 3, "failed": 0}  # en pausa: ni lo intenta
     assert len(_posts(api)) == antes + 1
 
 
 def test_1114_con_varias_en_cola_no_salen_en_el_mismo_segundo(mod, api):
     route, ids = _queue(mod, api, n=3)
     momentos = []
+
     def guardar(req):
         momentos.append(time.monotonic())
         return respx.MockResponse(201, json=_created(req))
+
     route.side_effect = guardar
     mod.SPOOL_SEND_GAP = 0.3
     assert mod._spool_flush() == {"sent": 3, "kept": 0, "failed": 0}

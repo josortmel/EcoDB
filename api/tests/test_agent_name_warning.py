@@ -2,6 +2,7 @@
 and no agent_identifier filter was passed, but results include other agents'
 memories, say so in `warnings`. Labels only — ranking untouched. Pure test.
 """
+
 import sys
 from pathlib import Path
 
@@ -18,8 +19,10 @@ def mem(agent):
 
 def test_warns_when_named_agent_results_are_mixed():
     w = agent_name_warning("fotos de Eco", None, IDS, [mem("Eco"), mem("Prima"), mem("Prima")])
-    assert w == ("query names agent 'Eco' but results include other agents' memories (2 of 3); "
-                 "pass agent_identifier=\"Eco\" to restrict")
+    assert w == (
+        "query names agent 'Eco' but results include other agents' memories (2 of 3); "
+        'pass agent_identifier="Eco" to restrict'
+    )
 
 
 def test_case_insensitive_whole_word():

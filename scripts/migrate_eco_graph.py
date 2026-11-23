@@ -23,6 +23,7 @@ Pre-requisitos:
 
 Rollback: si falla, TRUNCATE EcoDB tables + DROP graph + recreate. Origen NO se toca.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -80,9 +81,14 @@ async def create_age_node(conn, name: str, sql_id: int) -> None:
 
 async def create_age_edge(conn, sid: int, oid: int, predicate: str, sql_triple_id: int) -> None:
     """Patron de api/graph.py:_create_age_edge ampliado con sql_triple_id."""
-    params = json.dumps({
-        "sid": sid, "oid": oid, "pred": predicate, "tid": sql_triple_id,
-    })
+    params = json.dumps(
+        {
+            "sid": sid,
+            "oid": oid,
+            "pred": predicate,
+            "tid": sql_triple_id,
+        }
+    )
     await conn.execute(
         f"""
         SELECT * FROM cypher('{GRAPH_NAME}', $$
@@ -113,9 +119,7 @@ async def main(dry_run: bool) -> int:
         WHERE objeto_literal IS NOT NULL AND objeto_id IS NULL
     """)
     n_predicados = await orig.fetchval("SELECT COUNT(DISTINCT predicado) FROM tripletas")
-    n_autores_vacios = await orig.fetchval(
-        "SELECT COUNT(*) FROM tripletas WHERE autor IS NULL OR autor = ''"
-    )
+    n_autores_vacios = await orig.fetchval("SELECT COUNT(*) FROM tripletas WHERE autor IS NULL OR autor = ''")
 
     n_dest_nodes = await dest.fetchval("SELECT COUNT(*) FROM nodes")
     n_dest_triples = await dest.fetchval("SELECT COUNT(*) FROM triples")
@@ -173,18 +177,18 @@ async def main(dry_run: bool) -> int:
     # === EXECUTE ===
     t_start = time.time()
     async with httpx.AsyncClient() as client:
-
         # FASE 1 — Migrar nodos reales
         print(f"=== FASE 1 — migrar {n_nodos} nodos reales ===")
         node_id_map: dict[int, int] = {}
-        nodos = await orig.fetch(
-            "SELECT id, nombre, tipo, descripcion, created_at FROM nodos ORDER BY id"
-        )
+        nodos = await orig.fetch("SELECT id, nombre, tipo, descripcion, created_at FROM nodos ORDER BY id")
         for nodo in nodos:
             new_id = await dest.fetchval(
                 """INSERT INTO nodes (name, type, description, created_at)
                    VALUES ($1, $2, $3, $4) RETURNING id""",
-                nodo["nombre"], nodo["tipo"], nodo["descripcion"], nodo["created_at"],
+                nodo["nombre"],
+                nodo["tipo"],
+                nodo["descripcion"],
+                nodo["created_at"],
             )
             node_id_map[nodo["id"]] = new_id
         print(f"  insertados: {len(node_id_map)} (en {time.time() - t_start:.1f}s)")
@@ -201,7 +205,8 @@ async def main(dry_run: bool) -> int:
             try:
                 new_id = await dest.fetchval(
                     """INSERT INTO nodes (name, type, description) VALUES ($1, 'literal', NULL)
-                       RETURNING id""", txt
+                       RETURNING id""",
+                    txt,
                 )
             except asyncpg.UniqueViolationError:
                 # Por si el literal coincide con name de un nodo real existente
@@ -215,20 +220,20 @@ async def main(dry_run: bool) -> int:
         print(f"\n=== FASE 3 — re-embed {len(all_nodes)} nodos (batches de {EMB_BATCH_SIZE}) ===")
         t_emb = time.time()
         for i in range(0, len(all_nodes), EMB_BATCH_SIZE):
-            batch = all_nodes[i:i + EMB_BATCH_SIZE]
-            texts = [
-                f"{n['name']}. {n['description']}" if n["description"] else n["name"]
-                for n in batch
-            ]
+            batch = all_nodes[i : i + EMB_BATCH_SIZE]
+            texts = [f"{n['name']}. {n['description']}" if n["description"] else n["name"] for n in batch]
             embeddings = await embed_batch(client, texts)
             for n, emb in zip(batch, embeddings):
                 literal = vec_to_pgvector(emb)
                 await dest.execute(
                     "UPDATE nodes SET embedding = $1::vector WHERE id = $2",
-                    literal, n["id"],
+                    literal,
+                    n["id"],
                 )
             if (i // EMB_BATCH_SIZE) % 20 == 0:
-                print(f"  embedded {min(i + EMB_BATCH_SIZE, len(all_nodes))} / {len(all_nodes)} ({time.time() - t_emb:.1f}s)")
+                print(
+                    f"  embedded {min(i + EMB_BATCH_SIZE, len(all_nodes))} / {len(all_nodes)} ({time.time() - t_emb:.1f}s)"
+                )
         print(f"  done en {time.time() - t_emb:.1f}s")
 
         # FASE 4 — Crear nodos AGE
@@ -295,8 +300,14 @@ async def main(dry_run: bool) -> int:
                     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
                     RETURNING id
                     """,
-                    subject_new, t["predicado"], object_new, author,
-                    t["fecha"], t["origen"], metadata_json, t["created_at"],
+                    subject_new,
+                    t["predicado"],
+                    object_new,
+                    author,
+                    t["fecha"],
+                    t["origen"],
+                    metadata_json,
+                    t["created_at"],
                 )
             except asyncpg.UniqueViolationError:
                 # Tripleta duplicada (mismo s, p, o ya existe). Skip silencioso.
@@ -319,7 +330,7 @@ async def main(dry_run: bool) -> int:
         preds = await orig.fetch("SELECT DISTINCT predicado FROM tripletas WHERE predicado IS NOT NULL")
         pred_list = [p["predicado"] for p in preds]
         for i in range(0, len(pred_list), EMB_BATCH_SIZE):
-            batch = pred_list[i:i + EMB_BATCH_SIZE]
+            batch = pred_list[i : i + EMB_BATCH_SIZE]
             embeddings = await embed_batch(client, batch)
             for predicate, emb in zip(batch, embeddings):
                 literal = vec_to_pgvector(emb)
@@ -329,12 +340,15 @@ async def main(dry_run: bool) -> int:
                            VALUES ($1, $2::vector)
                            ON CONFLICT (predicate) DO UPDATE SET
                              embedding = EXCLUDED.embedding, updated_at = now()""",
-                        predicate, literal,
+                        predicate,
+                        literal,
                     )
                 except Exception as e:
                     print(f"  WARN predicado {predicate!r}: {e}")
             if (i // EMB_BATCH_SIZE) % 10 == 0:
-                print(f"  embedded predicados {min(i + EMB_BATCH_SIZE, len(pred_list))} / {len(pred_list)} ({time.time() - t_pred:.1f}s)")
+                print(
+                    f"  embedded predicados {min(i + EMB_BATCH_SIZE, len(pred_list))} / {len(pred_list)} ({time.time() - t_pred:.1f}s)"
+                )
         print(f"  done en {time.time() - t_pred:.1f}s")
 
     # === Verificacion final ===
@@ -351,9 +365,7 @@ async def main(dry_run: bool) -> int:
         f"""SELECT * FROM cypher('{GRAPH_NAME}', $$ MATCH ()-[r:RELATES_TO]->() RETURN COUNT(r) $$)
             AS (c agtype)"""
     )
-    n_migration_author = await dest.fetchval(
-        "SELECT COUNT(*) FROM triples WHERE author = $1", MIGRATION_AUTHOR
-    )
+    n_migration_author = await dest.fetchval("SELECT COUNT(*) FROM triples WHERE author = $1", MIGRATION_AUTHOR)
 
     print(f"  nodes EcoDB: {n_nodes_final} (esperado {n_nodos + n_literales} = {n_nodos} + {n_literales})")
     print(f"  triples EcoDB: {n_triples_final} (esperado <= {n_tripletas}, skipped: {skipped})")
@@ -361,7 +373,9 @@ async def main(dry_run: bool) -> int:
     print(f"  nodes con embedding: {n_nodes_final - n_emb_null} / {n_nodes_final} (NULL: {n_emb_null})")
     print(f"  AGE nodos :Entity: {str(n_age_nodes_final['c']).strip()}")
     print(f"  AGE aristas :RELATES_TO: {str(n_age_edges_final['c']).strip()}")
-    print(f"  triples con author=MIGRATION: {n_migration_author} (esperado {n_autores_vacios - skipped if skipped < n_autores_vacios else 'aprox'})")
+    print(
+        f"  triples con author=MIGRATION: {n_migration_author} (esperado {n_autores_vacios - skipped if skipped < n_autores_vacios else 'aprox'})"
+    )
     print(f"\nTOTAL elapsed: {time.time() - t_start:.1f}s")
 
     await orig.close()

@@ -108,48 +108,52 @@ PREDICATES = [
 
 APPROVED_NAMES = [p[0] for p in PREDICATES]
 
+
 async def sync():
-    pool = await asyncpg.create_pool(os.environ['DATABASE_URL'])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     async with pool.acquire() as conn:
-        before_total = await conn.fetchval('SELECT COUNT(*) FROM predicates_canonical')
+        before_total = await conn.fetchval("SELECT COUNT(*) FROM predicates_canonical")
         before_approved = await conn.fetchval("SELECT COUNT(*) FROM predicates_canonical WHERE state='approved'")
         before_deprecated = await conn.fetchval("SELECT COUNT(*) FROM predicates_canonical WHERE state='deprecated'")
-        print(f'BEFORE: total={before_total}, approved={before_approved}, deprecated={before_deprecated}')
+        print(f"BEFORE: total={before_total}, approved={before_approved}, deprecated={before_deprecated}")
 
         inserted = 0
         updated = 0
         async with conn.transaction():
             for name, cluster, desc in PREDICATES:
-                existing = await conn.fetchrow(
-                    'SELECT name FROM predicates_canonical WHERE name=$1', name
-                )
+                existing = await conn.fetchrow("SELECT name FROM predicates_canonical WHERE name=$1", name)
                 if existing is None:
                     await conn.execute(
                         "INSERT INTO predicates_canonical (name, state, cluster, ontology_layer, description) VALUES ($1,'approved',$2,'domain',$3)",
-                        name, cluster, desc
+                        name,
+                        cluster,
+                        desc,
                     )
                     inserted += 1
                 else:
                     await conn.execute(
                         "UPDATE predicates_canonical SET state='approved', cluster=$2, description=$3 WHERE name=$1",
-                        name, cluster, desc
+                        name,
+                        cluster,
+                        desc,
                     )
                     updated += 1
 
             # Deprecate all others
             dep_result = await conn.execute(
                 "UPDATE predicates_canonical SET state='deprecated' WHERE name != ALL($1::text[]) AND state != 'deprecated'",
-                APPROVED_NAMES
+                APPROVED_NAMES,
             )
             deprecated = int(dep_result.split()[-1])
 
-        after_total = await conn.fetchval('SELECT COUNT(*) FROM predicates_canonical')
+        after_total = await conn.fetchval("SELECT COUNT(*) FROM predicates_canonical")
         after_approved = await conn.fetchval("SELECT COUNT(*) FROM predicates_canonical WHERE state='approved'")
         after_deprecated = await conn.fetchval("SELECT COUNT(*) FROM predicates_canonical WHERE state='deprecated'")
-        print(f'Inserted (new): {inserted}')
-        print(f'Updated (already existed): {updated}')
-        print(f'Deprecated: {deprecated}')
-        print(f'AFTER: total={after_total}, approved={after_approved}, deprecated={after_deprecated}')
+        print(f"Inserted (new): {inserted}")
+        print(f"Updated (already existed): {updated}")
+        print(f"Deprecated: {deprecated}")
+        print(f"AFTER: total={after_total}, approved={after_approved}, deprecated={after_deprecated}")
     await pool.close()
+
 
 asyncio.run(sync())

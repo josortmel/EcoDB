@@ -3,6 +3,7 @@ a narrar un mensual o un trimestral: los que escribe la propia célula son mucho
 28-oct en producción: mensual hasta 13 463 caracteres, trimestral hasta 22 256). Prima tuvo que rehacer
 una narrativa por SQL. El tope pasa a 32 000, el mismo que el de las plantillas de la célula.
 Offline: el modelo de entrada, sin API ni base."""
+
 import sys
 from pathlib import Path
 

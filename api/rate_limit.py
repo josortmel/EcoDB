@@ -1,4 +1,5 @@
 """Rate limiting middleware — per-user sliding window."""
+
 from __future__ import annotations
 
 import os
@@ -30,10 +31,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if token.startswith(settings.API_KEY_PREFIX):
             from auth import hash_api_key
+
             actor_id = f"key:{hash_api_key(token)[:16]}"
         elif token and auth.lower().startswith("bearer "):
             try:
                 import jwt
+
                 payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
                 actor_id = str(payload.get("sub", "anon"))
             except Exception:

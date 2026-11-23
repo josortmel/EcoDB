@@ -2,6 +2,7 @@
 filter, image/audio modality), the document chunks carried in graph_context
 must be dropped too. Pure test — no DB.
 """
+
 import sys
 from pathlib import Path
 

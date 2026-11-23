@@ -1,8 +1,10 @@
 import asyncio, asyncpg, os, sys, time
-sys.path.insert(0, '/app')
+
+sys.path.insert(0, "/app")
+
 
 async def reindex():
-    url = os.environ.get('DATABASE_URL')
+    url = os.environ.get("DATABASE_URL")
     pool = await asyncpg.create_pool(url)
 
     # Load dictionary cache first
@@ -15,8 +17,7 @@ async def reindex():
     # Get all active non-dormant memories
     async with pool.acquire() as conn:
         memories = await conn.fetch(
-            "SELECT id, content FROM memories "
-            "WHERE staleness IS NULL OR staleness NOT IN ('dormant', 'archived')"
+            "SELECT id, content FROM memories WHERE staleness IS NULL OR staleness NOT IN ('dormant', 'archived')"
         )
         links_before = await conn.fetchval("SELECT count(*) FROM memory_entity_links")
 
@@ -37,14 +38,14 @@ async def reindex():
                 for name_norm in unique_names:
                     # Find node by normalized name
                     node = await conn.fetchrow(
-                        "SELECT id FROM nodes WHERE lower(name) = $1 AND status = 'active' LIMIT 1",
-                        name_norm
+                        "SELECT id FROM nodes WHERE lower(name) = $1 AND status = 'active' LIMIT 1", name_norm
                     )
                     if node:
                         result = await conn.execute(
                             "INSERT INTO memory_entity_links (memory_id, entity_node_id) "
                             "VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                            mem["id"], node["id"],
+                            mem["id"],
+                            node["id"],
                         )
                         if "INSERT 0 1" in result:
                             new_links += 1
@@ -64,5 +65,6 @@ async def reindex():
     print(f"Errors: {errors}")
 
     await pool.close()
+
 
 asyncio.run(reindex())

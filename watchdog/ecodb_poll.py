@@ -14,6 +14,7 @@ Config via environment variables — same as ecodb_watcher.py:
   ECODB_DEFAULT_PROJECT_ID project_id for new documents (default: 1)
   ECODB_WATCHER_STATE      path to state JSON file (default: watcher_state.json)
 """
+
 import logging
 import sys
 
@@ -26,8 +27,7 @@ if __name__ == "__main__":
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     log = logging.getLogger("ecodb.poll")
-    log.info("One-shot poll. Dirs: %s | Extensions: %s | State: %s",
-             WATCH_DIRS, sorted(WATCH_EXTENSIONS), STATE_FILE)
+    log.info("One-shot poll. Dirs: %s | Extensions: %s | State: %s", WATCH_DIRS, sorted(WATCH_EXTENSIONS), STATE_FILE)
     try:
         poll_and_sync()
         log.info("Poll complete.")

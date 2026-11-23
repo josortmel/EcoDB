@@ -33,6 +33,7 @@ Prerequisites:
 
 Rollback if failed: TRUNCATE memories + agent_identity in EcoDB. ChromaDB is never modified.
 """
+
 from __future__ import annotations
 
 import os
@@ -213,7 +214,7 @@ async def main(dry_run: bool) -> int:
             m = sample["metadatas"][i]
             d = sample["documents"][i]
             a = resolve_author(m.get("autor"))
-            print(f"  Sample {i+1}: id={sample['ids'][i][:8]}... raw_author={m.get('autor')!r} → {a}", flush=True)
+            print(f"  Sample {i + 1}: id={sample['ids'][i][:8]}... raw_author={m.get('autor')!r} → {a}", flush=True)
             print(f"    document ({len(d)} chars): {d[:100]!r}...", flush=True)
             print(f"    summary: {m.get('summary', '')[:80]!r}", flush=True)
             print(f"    tags raw: {m.get('tags', '')!r} → parsed: {parse_tags(m.get('tags'))}", flush=True)
@@ -227,7 +228,10 @@ async def main(dry_run: bool) -> int:
         for i in range(len(idy["ids"])):
             m = idy["metadatas"][i]
             a = resolve_author(m.get("autor"))
-            print(f"  id={idy['ids'][i][:8]}... raw_author={m.get('autor')!r} → {a} orden={m.get('orden')} content_len={len(idy['documents'][i])}", flush=True)
+            print(
+                f"  id={idy['ids'][i][:8]}... raw_author={m.get('autor')!r} → {a} orden={m.get('orden')} content_len={len(idy['documents'][i])}",
+                flush=True,
+            )
 
         await dest.close()
         return 0
@@ -235,7 +239,6 @@ async def main(dry_run: bool) -> int:
     # === EXECUTE ===
     t_start = time.time()
     async with httpx.AsyncClient() as client:
-
         # FASE 1 — Migrar 939 recuerdos eco_memory
         print(f"=== FASE 1 — migrar {n_memory} recuerdos ===", flush=True)
         all_data = col_memory.get(include=["metadatas", "documents"])
@@ -277,10 +280,18 @@ async def main(dry_run: bool) -> int:
                                 $8, $8, $9, $10::vector,
                                 $11, $12)
                         """,
-                        agent_id, WORKSPACE_ID, PROJECT_ID,
-                        vis, doc, summary, tags,
-                        weight, access_count, emb_literal,
-                        EMBEDDING_MODEL_TAG, ts or datetime.now(),
+                        agent_id,
+                        WORKSPACE_ID,
+                        PROJECT_ID,
+                        vis,
+                        doc,
+                        summary,
+                        tags,
+                        weight,
+                        access_count,
+                        emb_literal,
+                        EMBEDDING_MODEL_TAG,
+                        ts or datetime.now(),
                     )
                     inserted += 1
                 except Exception as e:
@@ -289,7 +300,10 @@ async def main(dry_run: bool) -> int:
 
             if (batch_start // EMB_BATCH_SIZE) % 10 == 0:
                 elapsed = time.time() - t_start
-                print(f"  batch {batch_end}/{len(ids)} ({elapsed:.1f}s, inserted={inserted} skipped={skipped})", flush=True)
+                print(
+                    f"  batch {batch_end}/{len(ids)} ({elapsed:.1f}s, inserted={inserted} skipped={skipped})",
+                    flush=True,
+                )
         t1 = time.time()
         print(f"  FASE 1 done: inserted={inserted} skipped={skipped} en {t1 - t_start:.1f}s", flush=True)
 
@@ -318,7 +332,9 @@ async def main(dry_run: bool) -> int:
                           (agent_id, organization_id, version, fragment_idx, content)
                         VALUES ($1, NULL, 1, $2, $3)
                         """,
-                        agent_id, int(orden), doc,
+                        agent_id,
+                        int(orden),
+                        doc,
                     )
                     idy_inserted += 1
                 except Exception as e:

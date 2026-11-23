@@ -11,6 +11,7 @@ Regresión del bug read_cluster(include_members) → HTTP 500 (2026-08-18):
 
 Run desde api/:  python -m pytest tests/test_clusters.py -v
 """
+
 import asyncio
 import os
 import sys
@@ -21,6 +22,7 @@ import asyncpg
 from fastapi.testclient import TestClient
 
 from conftest import TEST_DB_URL
+
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
@@ -75,6 +77,7 @@ def super_jwt(client):
 def cluster_with_metadata():
     """Un cluster REAL con metadata no-nula y miembros — la condición que
     disparaba el 500. Salta el test si el grafo aún no tiene clusters así."""
+
     async def _find():
         conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"])
         try:
@@ -100,6 +103,7 @@ def auth(jwt):
 # ---------------------------------------------------------------------------
 # GET /api/v1/clusters/{id}/members
 # ---------------------------------------------------------------------------
+
 
 def test_members_of_cluster_with_metadata_returns_200(client, super_jwt, cluster_with_metadata):
     """Regresión del 500: metadata JSONB devuelta como str no debe romper el
