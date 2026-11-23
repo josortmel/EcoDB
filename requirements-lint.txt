@@ -1,0 +1,4 @@
+# The code-check tools of the CI (#1362), at exact versions: the same ones at home and in CI.
+#   pip install -r requirements-lint.txt   (or: uvx ruff@0.17.6 ...)
+# Their settings live in pyproject.toml.
+ruff==0.17.6

@@ -32,6 +32,17 @@ jobs:
         id: install
         run: pip install -r api/requirements-test.txt -c api/constraints.txt
 
+      # Code checks: settings in pyproject.toml, versions in requirements-lint.txt. Each check runs even if
+      # another one failed, so one push shows everything that is wrong.
+      - name: Install code-check tools
+        id: lint_tools
+        if: ${{ !cancelled() }}
+        run: pip install -r requirements-lint.txt
+
+      - name: ruff format --check
+        if: ${{ !cancelled() && steps.lint_tools.outcome == 'success' }}
+        run: ruff format --check .
+
       # The compose file asks for these two with ${...:?}; the test database only needs them to exist. Random per
       # run, never written in the repo (the privacy pre-push refuses any password-looking value in clear).
       - name: Start the throwaway test database
