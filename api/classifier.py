@@ -7,8 +7,8 @@ Runs best-effort after memory save. Never blocks save.
 """
 
 import html
-import re
 import logging
+import re
 from collections import Counter
 
 log = logging.getLogger("ecodb.classifier")
@@ -77,6 +77,7 @@ async def classify_with_llm(content: str) -> dict | None:
     Content is truncated to prevent token bombing.
     """
     import json as _json
+
     from llm_provider import get_llm_provider
 
     provider = get_llm_provider()

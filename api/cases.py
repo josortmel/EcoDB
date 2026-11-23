@@ -6,14 +6,12 @@ import json
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, Query
 from pagination import paginate
-from permissions import resolve_agent_for_actor, precompute_read_visibility, check_read_memory
+from permissions import check_read_memory, precompute_read_visibility, resolve_agent_for_actor
 from shared_models import CaseResponse
-
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 

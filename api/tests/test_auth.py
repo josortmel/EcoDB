@@ -16,18 +16,17 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from conftest import TEST_DB_URL
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from main import create_app  # noqa: E402
-from auth import generate_api_key  # noqa: E402
 import asyncpg  # noqa: E402
+from auth import generate_api_key  # noqa: E402
+from main import create_app  # noqa: E402
 
 
 @pytest.fixture(scope="module")

@@ -1,11 +1,12 @@
 """Measure EcoDB search latency across all golden set queries."""
 
-import httpx
-import yaml
-import time
 import os
 import statistics
+import time
 from pathlib import Path
+
+import httpx
+import yaml
 
 API_URL = "http://localhost:8080"
 with open(Path(__file__).parent / "queries.yaml", encoding="utf-8") as f:

@@ -1,4 +1,7 @@
-import asyncio, asyncpg, os
+import asyncio
+import os
+
+import asyncpg
 
 NUEVAS = [
     # PERSONA

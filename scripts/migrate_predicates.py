@@ -14,12 +14,12 @@ Uso:
 """
 
 import asyncio
-import asyncpg
-import httpx
-import json
 import os
 import sys
 from datetime import datetime, timezone
+
+import asyncpg
+import httpx
 
 # #488: sin valor por defecto. localhost:5432 es el Postgres NATIVO de Windows, no EcoDB,
 # y un valor por defecto que apunta a otra base es como se cuelan los accidentes.
@@ -170,7 +170,7 @@ async def main():
     pct_unmapped = ((pending + archived) / total * 100) if total > 0 else 0
 
     print(f"\n{'=' * 60}")
-    print(f"RESULTS")
+    print("RESULTS")
     print(f"{'=' * 60}")
     print(f"  Exact match: {len(results['exact'])}")
     print(f"  Alias match: {len(results['alias'])}")
@@ -181,12 +181,12 @@ async def main():
     print(f"  Unmapped (archived+pending): {archived + pending} ({pct_unmapped:.1f}%)")
 
     if results["embedding"]:
-        print(f"\n  Top embedding matches:")
+        print("\n  Top embedding matches:")
         for orig, canon, cnt, conf in sorted(results["embedding"], key=lambda x: -x[3])[:20]:
             print(f"    '{orig}' → '{canon}' (conf={conf:.3f}, {cnt} triples)")
 
     if results["pending"]:
-        print(f"\n  Pending (top 20 by usage):")
+        print("\n  Pending (top 20 by usage):")
         for orig, _, cnt, _ in sorted(results["pending"], key=lambda x: -x[2])[:20]:
             print(f"    '{orig}' ({cnt} triples)")
 
@@ -198,11 +198,11 @@ async def main():
             await conn.close()
             return
     elif ABORT_OVERRIDE:
-        print(f"\n  --force: abort override for legacy migration (documented in orquestacion.md)")
+        print("\n  --force: abort override for legacy migration (documented in orquestacion.md)")
 
     if execute:
         print(f"\n{'=' * 60}")
-        print(f"EXECUTING MIGRATION...")
+        print("EXECUTING MIGRATION...")
         print(f"{'=' * 60}")
 
         async with conn.transaction():
@@ -286,7 +286,7 @@ async def main():
               AND predicate NOT IN (SELECT predicate FROM pending_predicates)
         """)
 
-        print(f"\nPOST-MIGRATION:")
+        print("\nPOST-MIGRATION:")
         print(f"  Duplicate triples removed before update: {dupes_removed}")
         print(f"  Unique predicates in triples: {new_unique} (was {total})")
         print(f"  Pending predicates: {pending_count}")
@@ -294,7 +294,7 @@ async def main():
         print(f"  CE-3 {'PASS' if outside == 0 else 'FAIL'}: {outside} outside")
         print(f"\nMigration completed: {datetime.now(timezone.utc).isoformat()}")
     else:
-        print(f"\n--- DRY RUN: nothing changed. Run with --execute to migrate. ---")
+        print("\n--- DRY RUN: nothing changed. Run with --execute to migrate. ---")
 
     await conn.close()
 

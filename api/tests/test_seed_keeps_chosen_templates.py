@@ -5,7 +5,6 @@ Pepe: «lo concreto se conserva», 3283-3285), sin tocar updated_at. Ahora la si
 plantilla de origen («CellAgent Higher Consolidation») o en ninguna. Corre contra la base de PRUEBAS (conftest)."""
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 

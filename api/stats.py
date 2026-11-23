@@ -6,12 +6,11 @@ from datetime import datetime
 from typing import Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Query
 from permissions import visible_project_ids
+from pydantic import BaseModel, Field
 from settings import EMBEDDINGS_URL
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -186,7 +185,7 @@ async def stats_agents(
         # searches from search_log — filter by visible project_ids
         if not is_super:
             search_rows = await conn.fetch(
-                f"""
+                """
                 SELECT a.identifier, COUNT(sl.id) AS searches
                 FROM agents a
                 LEFT JOIN search_log sl ON sl.agent_id = a.id
@@ -199,7 +198,7 @@ async def stats_agents(
             )
         else:
             search_rows = await conn.fetch(
-                f"""
+                """
                 SELECT a.identifier, COUNT(sl.id) AS searches
                 FROM agents a
                 LEFT JOIN search_log sl ON sl.agent_id = a.id

@@ -7,6 +7,7 @@ def test_reranker_disabled_by_env():
     """RERANKER_ENABLED=false → rerank returns input unchanged."""
     with patch.dict("os.environ", {"RERANKER_ENABLED": "false"}):
         import importlib
+
         import reranker
 
         importlib.reload(reranker)
@@ -20,6 +21,7 @@ def test_rerank_graceful_on_load_failure():
     """If model fails to load, rerank returns input unchanged with WARNING."""
     with patch.dict("os.environ", {"RERANKER_ENABLED": "true", "RERANKER_MODEL": "nonexistent/model"}):
         import importlib
+
         import reranker
 
         importlib.reload(reranker)

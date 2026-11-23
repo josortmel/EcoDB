@@ -9,7 +9,6 @@ import logging
 from abc import ABC, abstractmethod
 
 import httpx
-
 import settings
 
 log = logging.getLogger("ecodb.llm")

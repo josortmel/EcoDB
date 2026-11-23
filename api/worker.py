@@ -6,19 +6,18 @@ Entrypoint: python worker.py
 Docker: docker compose --profile with-ingestion up
 """
 
-import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 import asyncio
 import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import time
+from pathlib import Path
 
 import asyncpg
 import httpx
-
+import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 from background import run_governance_cycle
 
 log = logging.getLogger("ecodb.worker")
@@ -56,7 +55,7 @@ GLINER_TIMEOUT = int(os.environ.get("GLINER_TIMEOUT", "60"))
 WHISPER_TIMEOUT = int(os.environ.get("WHISPER_TIMEOUT", "1800"))
 
 # Circuit breaker for embeddings
-from settings import CB_THRESHOLD, CB_WINDOW, CB_COOLDOWN
+from settings import CB_COOLDOWN, CB_THRESHOLD, CB_WINDOW
 
 _cb_failures: list[float] = []
 _cb_open_until: float = 0.0

@@ -10,11 +10,11 @@ import asyncio
 import json
 import os
 import sys
-import yaml
 from pathlib import Path
 
 import asyncpg
 import httpx
+import yaml
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 EMBEDDINGS_URL = os.environ.get("EMBEDDINGS_URL", "http://embeddings:8090")

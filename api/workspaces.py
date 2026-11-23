@@ -38,18 +38,16 @@ from datetime import datetime
 from typing import Optional
 
 from asyncpg.exceptions import ForeignKeyViolationError, UniqueViolationError
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException
 from permissions import (
     user_can_create_workspace,
     user_can_delete_workspace,
     user_can_modify_workspace,
     validate_name_strip_blank,
 )
-
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Limite de tamaño coherente con resto de la API + DoS prevention.
 MAX_NAME_LEN = 200

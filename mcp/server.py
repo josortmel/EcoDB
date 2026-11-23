@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re as _re
 import shutil
 import sys
 import threading
@@ -41,7 +42,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-import re as _re
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -752,9 +752,10 @@ def search(
     graph_context; contradictions (pares de alta similitud, NO verificadas); related_clusters/merged_results
     segun cluster_mode; warnings (leelos si hay 0 resultados).
     """
-    from mcp.types import TextContent, ImageContent
     import base64 as _b64
     from pathlib import Path as _Path
+
+    from mcp.types import ImageContent, TextContent
 
     if query_text is None and query_image is None:
         return [
@@ -940,9 +941,10 @@ def search_recent(
     La respuesta incluye `warnings` (lista, vacía si nada que avisar): avisa de
     ventanas de fecha de anchura cero o de fecha_hasta a medianoche sin resultados.
     """
-    from mcp.types import TextContent, ImageContent
     import base64 as _b64
     from pathlib import Path as _Path
+
+    from mcp.types import ImageContent, TextContent
 
     params: dict = {"limit": limit, "expand_scope": expand_scope}
     if workspace_id is not None:
@@ -1127,9 +1129,10 @@ def read_memory(memory_id: str, expand_scope: bool = False) -> list:
         el creador en el árbol del workspace/project, expand_scope=true permite
         leerla. Audit log obligatorio. Default false (comportamiento estricto).
     """
-    from mcp.types import TextContent, ImageContent
     import base64 as _b64
     from pathlib import Path as _Path
+
+    from mcp.types import ImageContent, TextContent
 
     # VS2-MCP fix: memory_id va quoted en el path (anti path traversal).
     params = {"expand_scope": expand_scope} if expand_scope else None
@@ -1399,7 +1402,7 @@ def view_image(memory_id: str) -> Image:
         raise ValueError(f"memory {memory_id} has no media_path")
     p = Path(os.path.realpath(media_path))
     if not p.is_relative_to(MEDIA_STORE_DIR):
-        raise ValueError(f"media_path outside of media store")
+        raise ValueError("media_path outside of media store")
     if not p.exists():
         raise ValueError(f"image file not found: {media_path}")
     return Image(path=str(p))

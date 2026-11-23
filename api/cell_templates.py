@@ -12,11 +12,10 @@ from datetime import datetime
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/cells/templates", tags=["cells"])
 

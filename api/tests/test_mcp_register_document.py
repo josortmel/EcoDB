@@ -8,7 +8,6 @@ Offline: httpx mocked with respx, no API, no DB.
 """
 
 import importlib.util
-import os
 from pathlib import Path
 
 import httpx
@@ -109,10 +108,10 @@ def test_upload_rejects_unknown_doc_type_before_writing(tmp_path, monkeypatch):
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
     import documents
     from auth import get_current_user
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
 
     monkeypatch.setattr(documents, "_MEDIA_STORE", str(tmp_path / "store"))
     app = FastAPI()

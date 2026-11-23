@@ -6,12 +6,13 @@ import os
 import time
 from collections import defaultdict
 
+import settings
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from settings import RATE_LIMIT_DEFAULT as DEFAULT_LIMIT
+from settings import RATE_LIMIT_SEARCH as SEARCH_LIMIT
+from settings import RATE_LIMIT_WINDOW as WINDOW
 from starlette.middleware.base import BaseHTTPMiddleware
-
-import settings
-from settings import RATE_LIMIT_SEARCH as SEARCH_LIMIT, RATE_LIMIT_DEFAULT as DEFAULT_LIMIT, RATE_LIMIT_WINDOW as WINDOW
 
 RATE_LIMITS: dict[tuple[str, str], int] = {
     ("POST", "/memories/preview"): int(os.getenv("RATE_LIMIT_PREVIEW", "10")),

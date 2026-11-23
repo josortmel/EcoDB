@@ -8,7 +8,6 @@ Standalone Docker process. 3 cells in one service:
 Monthly/quarterly/yearly consolidation stacks on top of weeklies.
 """
 
-import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 import asyncio
 import hashlib
 import json
@@ -19,11 +18,11 @@ from datetime import date, datetime, timedelta, timezone
 import asyncpg
 import httpx
 import numpy as np
+import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
+import settings
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import cosine as cosine_dist
 from scipy.stats import rankdata
-
-import settings
 
 log = logging.getLogger("ecodb.cell")
 
@@ -466,7 +465,8 @@ async def _llm_call(system_prompt: str, user_prompt: str) -> str:
     global _CELL_LLM
     if _CELL_LLM is None:
         try:
-            from ecodb_langchain.cell_agent import make_cell_llm, acell_llm_call as _acell
+            from ecodb_langchain.cell_agent import acell_llm_call as _acell
+            from ecodb_langchain.cell_agent import make_cell_llm
 
             _CELL_LLM = make_cell_llm()
             _llm_call._acell = _acell
@@ -2711,7 +2711,7 @@ async def _run_generic_cell(pool, config, agent_id):
                 ws_id,
                 agent_id,
                 result[:16000],
-                [f"cell:{cell_type}", f"cell_generated"],
+                [f"cell:{cell_type}", "cell_generated"],
                 await _embed_for_memory(result[:16000]),
             )
 

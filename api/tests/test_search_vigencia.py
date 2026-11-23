@@ -5,7 +5,6 @@ Pepe, 16-oct: se avisa, no se esconde. Contra la Postgres de pruebas (5436); emb
 """
 
 import asyncio
-import json
 import os
 import sys
 import uuid
@@ -13,9 +12,8 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from fastapi.testclient import TestClient
-
 from conftest import TEST_DB_URL
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
 os.environ.setdefault("ENVIRONMENT", "development")

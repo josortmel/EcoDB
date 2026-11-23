@@ -32,11 +32,9 @@ import time
 from typing import Optional
 
 import jwt
-from fastapi import Depends, Header, HTTPException, Request
-
 import settings
 from db import get_pool
-
+from fastapi import Depends, Header, HTTPException, Request
 
 # ---------------------------------------------------------------------------
 # API key generation + hashing

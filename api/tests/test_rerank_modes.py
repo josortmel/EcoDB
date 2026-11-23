@@ -105,7 +105,9 @@ def test_request_fields_and_settings_default():
 
 def test_server_default_is_blend_0_7(monkeypatch):
     """#243: settings default chosen by the benchmark (env unset)."""
-    import importlib, settings as st
+    import importlib
+
+    import settings as st
 
     monkeypatch.delenv("RERANK_MODE", raising=False)
     monkeypatch.delenv("RERANK_BLEND_ALPHA", raising=False)

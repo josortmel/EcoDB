@@ -1,4 +1,7 @@
-import asyncio, asyncpg, os
+import asyncio
+import os
+
+import asyncpg
 
 PREDICATES = [
     # Cluster A — Arquitectura e Infraestructura Tecnica (11)

@@ -36,10 +36,9 @@ Rollback if failed: TRUNCATE memories + agent_identity in EcoDB. ChromaDB is nev
 
 from __future__ import annotations
 
-import os
 import argparse
 import asyncio
-import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -148,12 +147,12 @@ async def main(dry_run: bool) -> int:
 
     n_dest_memories = await dest.fetchval("SELECT COUNT(*) FROM memories")
     n_dest_identity = await dest.fetchval("SELECT COUNT(*) FROM agent_identity")
-    print(f"DESTINO ecodb (5435):", flush=True)
+    print("DESTINO ecodb (5435):", flush=True)
     print(f"  memories: {n_dest_memories}, agent_identity: {n_dest_identity}", flush=True)
-    print(f"ORIGEN ChromaDB:", flush=True)
+    print("ORIGEN ChromaDB:", flush=True)
     print(f"  eco_memory: {n_memory}", flush=True)
     print(f"  eco_identity: {n_identity}", flush=True)
-    print(f"  (eco_memory_papelera collection skipped)", flush=True)
+    print("  (eco_memory_papelera collection skipped)", flush=True)
     print()
 
     if n_dest_memories != 0 or n_dest_identity != 0:
@@ -175,14 +174,14 @@ async def main(dry_run: bool) -> int:
         else:
             if con_autor_min_ts is None or ts < con_autor_min_ts:
                 con_autor_min_ts = ts
-    print(f"Invariante temporal:", flush=True)
+    print("Invariante temporal:", flush=True)
     print(f"  sin-autor max timestamp: {sin_autor_max_ts}", flush=True)
     print(f"  con-autor min timestamp: {con_autor_min_ts}", flush=True)
     if sin_autor_max_ts and con_autor_min_ts:
         if sin_autor_max_ts < con_autor_min_ts:
-            print(f"  OK — sin-autor estrictamente anteriores. Hotfix → Eco aplicable.", flush=True)
+            print("  OK — sin-autor estrictamente anteriores. Hotfix → Eco aplicable.", flush=True)
         else:
-            print(f"  ALARMA — sin-autor solapa con con-autor. NO aplicar hotfix automatico. ABORT.", flush=True)
+            print("  ALARMA — sin-autor solapa con con-autor. NO aplicar hotfix automatico. ABORT.", flush=True)
             await dest.close()
             return 1
     print()
@@ -192,7 +191,7 @@ async def main(dry_run: bool) -> int:
     for m in all_memory["metadatas"]:
         a = resolve_author(m.get("autor"))
         autor_stats[a] = autor_stats.get(a, 0) + 1
-    print(f"Author distribution after remapping:", flush=True)
+    print("Author distribution after remapping:", flush=True)
     for a, n in sorted(autor_stats.items(), key=lambda x: -x[1]):
         vis = visibility_for(a)
         in_seed = a in agent_id_by_name
@@ -208,7 +207,7 @@ async def main(dry_run: bool) -> int:
 
     if dry_run:
         # Sample 2 memorias
-        print(f"=== DRY RUN ===", flush=True)
+        print("=== DRY RUN ===", flush=True)
         sample = col_memory.get(limit=2, include=["metadatas", "documents"])
         for i in range(len(sample["ids"])):
             m = sample["metadatas"][i]
@@ -223,7 +222,7 @@ async def main(dry_run: bool) -> int:
             print()
 
         # Identidad sample
-        print(f"=== eco_identity dry sample ===", flush=True)
+        print("=== eco_identity dry sample ===", flush=True)
         idy = col_identity.get(limit=2, include=["metadatas", "documents"])
         for i in range(len(idy["ids"])):
             m = idy["metadatas"][i]
@@ -344,7 +343,7 @@ async def main(dry_run: bool) -> int:
         print(f"  FASE 2 done: inserted={idy_inserted} skipped={idy_skipped} en {t2 - t1:.1f}s", flush=True)
 
     # === Verificacion final ===
-    print(f"\n=== VERIFICACION FINAL ===", flush=True)
+    print("\n=== VERIFICACION FINAL ===", flush=True)
     n_memories_final = await dest.fetchval("SELECT COUNT(*) FROM memories")
     n_identity_final = await dest.fetchval("SELECT COUNT(*) FROM agent_identity")
     n_emb_null = await dest.fetchval("SELECT COUNT(*) FROM memories WHERE embedding IS NULL")
@@ -362,11 +361,11 @@ async def main(dry_run: bool) -> int:
     print(f"  memories: {n_memories_final} (esperado {n_memory}, skipped {skipped})", flush=True)
     print(f"  memories con embedding: {n_memories_final - n_emb_null} / {n_memories_final}", flush=True)
     print(f"  memories visibility: private={n_private} public={n_public}", flush=True)
-    print(f"  memories por autor:", flush=True)
+    print("  memories por autor:", flush=True)
     for r in by_author:
         print(f"    {r['identifier']}: {r['n']}", flush=True)
     print(f"  agent_identity: {n_identity_final} (esperado {n_identity}, skipped {idy_skipped})", flush=True)
-    print(f"  agent_identity por agente:", flush=True)
+    print("  agent_identity por agente:", flush=True)
     for r in by_identity:
         print(f"    {r['identifier']}: {r['n']}", flush=True)
     print(f"\nTOTAL elapsed: {time.time() - t_start:.1f}s", flush=True)

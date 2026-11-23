@@ -16,7 +16,6 @@ from __future__ import annotations
 from typing import Optional
 
 import asyncpg
-
 import settings
 
 _pool: Optional[asyncpg.Pool] = None

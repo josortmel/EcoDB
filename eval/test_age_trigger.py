@@ -1,4 +1,9 @@
-import asyncio, asyncpg, os, json, sys
+import asyncio
+import json
+import os
+import sys
+
+import asyncpg
 
 sys.path.insert(0, "/app")
 

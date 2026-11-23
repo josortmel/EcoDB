@@ -23,18 +23,16 @@ Pendiente (deuda anotada):
 - VS9 → rate limiting (slowapi) antes de VPS.
 """
 
-import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
 from contextlib import asynccontextmanager
 
+import auth as auth_module
+import pillow_guard  # noqa: F401  — #811: FlashPix out before anything can open an image
+import settings
+from db import close_pool, get_pool
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-
-import settings
-import auth as auth_module
-from db import close_pool, get_pool
-
 
 # ---------------------------------------------------------------------------
 # SecurityHeadersMiddleware ASGI puro.
@@ -132,6 +130,7 @@ async def lifespan(app: FastAPI):
     # always empty — so last_accessed was never written by search (5741/5838 NULL) and the
     # governance decay dormanted memories in daily use. The API flushes its own buffer.
     import asyncio as _asyncio
+
     from search import flush_accessed_buffer
 
     async def _access_flush_loop():
@@ -197,8 +196,8 @@ def create_app(environment: str = None) -> FastAPI:
     app.add_middleware(RateLimitMiddleware)
 
     import json as _json
-    import httpx as _httpx
 
+    import httpx as _httpx
     from settings import EMBEDDINGS_URL as _EMBEDDINGS_URL_SETTING
 
     _EMBEDDINGS_HEALTH_URL = _EMBEDDINGS_URL_SETTING + "/health"

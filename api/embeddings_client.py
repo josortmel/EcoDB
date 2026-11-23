@@ -23,8 +23,7 @@ from typing import Literal
 
 import httpx
 from fastapi import HTTPException
-
-from settings import EMBEDDINGS_URL, EMBEDDINGS_TIMEOUT, EMBEDDING_DIM
+from settings import EMBEDDING_DIM, EMBEDDINGS_TIMEOUT, EMBEDDINGS_URL
 
 
 def _format_vec(vec: list) -> str:

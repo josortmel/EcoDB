@@ -7,21 +7,20 @@ from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user
 from db import get_pool
 from embeddings_client import embed_text
 from events import broadcast_event
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pagination import paginate
-from search import _bm25_tsvector
 from permissions import (
-    precompute_read_visibility,
     check_read_memory,
+    precompute_read_visibility,
     resolve_agent_for_actor,
     resolve_cluster_for_actor,
 )
+from pydantic import BaseModel, ConfigDict, Field
+from search import _bm25_tsvector
 
 _log = logging.getLogger("ecodb.clusters")
 

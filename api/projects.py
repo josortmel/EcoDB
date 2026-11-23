@@ -40,11 +40,9 @@ import json
 from datetime import datetime
 
 from asyncpg.exceptions import ForeignKeyViolationError, UniqueViolationError
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException
 from permissions import (
     user_can_create_project_in_ws,
     user_can_delete_project,
@@ -52,7 +50,7 @@ from permissions import (
     user_can_modify_project,
     validate_name_strip_blank,
 )
-
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Coherente con workspaces.py + DoS prevention.
 MAX_NAME_LEN = 200

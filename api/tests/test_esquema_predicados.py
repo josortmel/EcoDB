@@ -15,8 +15,8 @@ import pytest
 
 API = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(API))
-from conftest import TEST_DB_URL  # noqa: E402
 import migrations  # noqa: E402
+from conftest import TEST_DB_URL  # noqa: E402
 
 TABLES = ("predicates_canonical", "predicate_aliases", "pending_predicates")
 

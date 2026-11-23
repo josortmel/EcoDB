@@ -6,7 +6,6 @@ Ordering is exactly the reranker's, as before. Pure: reranker stubbed.
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

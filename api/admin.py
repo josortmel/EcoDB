@@ -26,14 +26,10 @@ from datetime import datetime
 from typing import Literal, Optional
 
 import asyncpg
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user, require_super, require_super_or_ceo
 from db import get_pool
-from permissions import resolve_entity_org_ids, user_can_admin_operation
 from entity_normalization import is_valid_entity_type, normalize_name
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 # import top-level de gliner_service
 # documentado. graph.py usa lazy import por aislamiento de testing (mocking),
@@ -43,7 +39,8 @@ from entity_normalization import is_valid_entity_type, normalize_name
 # (constantes + funciones helper, sin ML). Mantenemos top-level para que el
 # f-string en Field description (linea 272) funcione en class-definition time.
 from gliner_service import DEFAULT_LABELS, MODEL_NAME, extract_entities, load_dictionary_to_cache
-
+from permissions import resolve_entity_org_ids, user_can_admin_operation
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -137,14 +134,14 @@ async def _inbox_query(
         org_mem_d = f"AND m.project_id IN {_org_sub % '$3'}"
         org_doc_c = f"AND d.project_id IN {_org_sub % '$1'}"
         org_doc_d = f"AND d.project_id IN {_org_sub % '$3'}"
-        org_alias_c = f"""AND eac.id IN (
+        org_alias_c = """AND eac.id IN (
             SELECT eac2.id FROM entity_alias_candidates eac2
             JOIN entity_links el ON el.entity = eac2.source_name
             JOIN memories mm ON mm.id = el.memory_id
             JOIN projects pp ON pp.id = mm.project_id
             JOIN workspaces ww ON ww.id = pp.workspace_id
             WHERE ww.organization_id = $1)"""
-        org_alias_d = f"""AND eac.id IN (
+        org_alias_d = """AND eac.id IN (
             SELECT eac2.id FROM entity_alias_candidates eac2
             JOIN entity_links el ON el.entity = eac2.source_name
             JOIN memories mm ON mm.id = el.memory_id
@@ -656,7 +653,7 @@ async def update_dictionary_entry(
         sets.append(f"notes = ${idx}")
         params.append(body.notes)
         idx += 1
-    sets.append(f"updated_at = now()")
+    sets.append("updated_at = now()")
     params.append(entry_id)
 
     pool = await get_pool()

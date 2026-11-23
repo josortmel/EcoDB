@@ -10,12 +10,10 @@ los vértices. Solo contra ecodb-test-pg (5436).
 
 import asyncio
 import json
-import sys
 import uuid
 from pathlib import Path
 
 import asyncpg
-
 from conftest import TEST_DB_URL
 
 SQL = Path(__file__).resolve().parents[2] / "sql" / "trigger_age_sync.sql"

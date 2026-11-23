@@ -49,14 +49,12 @@ from typing import Optional
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field
-
 from auth import get_current_user
 from db import get_pool
-from permissions import can_write_memory, precompute_read_visibility, check_read_memory
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from permissions import can_write_memory, check_read_memory, precompute_read_visibility
+from pydantic import BaseModel, ConfigDict, Field
 from shared_models import TensionAction
-
 
 # Límites duros (DoS prevention + sanity).
 MAX_FRAGMENT_SIZE = 32_000  # 32KB por fragmento individual.

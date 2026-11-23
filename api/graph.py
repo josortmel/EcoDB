@@ -34,13 +34,11 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
-
 from auth import get_current_user, require_super
 from db import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Query
 from permissions import no_null_bytes as _no_null_bytes
-
+from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
@@ -283,8 +281,9 @@ async def link_entities_from_content(conn, memory_id, content: str, pool=None) -
     """
     # Import lazy para no acoplar graph.py a gliner_service en imports top-level
     # — facilita testing y desacoplamiento.
-    from gliner_service import extract_entities, detect_alias_candidates
     import logging
+
+    from gliner_service import detect_alias_candidates, extract_entities
 
     _log = logging.getLogger("ecodb.gliner_link")
 

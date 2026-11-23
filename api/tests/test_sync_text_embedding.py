@@ -8,8 +8,6 @@ import uuid
 from pathlib import Path
 
 import asyncpg
-import pytest
-
 from conftest import TEST_DB_URL
 
 SQL = Path(__file__).resolve().parents[2] / "sql" / "migrate_5.5.0_sync_text_embedding.sql"

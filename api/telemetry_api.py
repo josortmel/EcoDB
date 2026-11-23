@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-
 import settings
 from auth import get_current_user
 from db import get_pool
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from telemetry import compute_use_score_llm, evaluate_injection, record_injection
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])

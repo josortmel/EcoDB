@@ -13,7 +13,6 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-
 from conftest import TEST_DB_URL
 
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)

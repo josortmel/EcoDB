@@ -200,7 +200,7 @@ def print_metrics(all_results: list[dict], label: str):
         vals = metrics_accum[key]
         print(f"  {key}: {sum(vals) / len(vals):.4f}")
 
-    print(f"\nBy category:")
+    print("\nBy category:")
     for cat_name in ["single-hop", "temporal", "multi-hop", "open-domain", "adversarial"]:
         if cat_name not in by_category:
             continue
@@ -245,7 +245,7 @@ def main():
             print(f"  Loaded {len(session_mapping)}/{len(session_keys)} sessions")
 
             if len(session_mapping) == 0:
-                print(f"  SKIPPING -- no sessions loaded")
+                print("  SKIPPING -- no sessions loaded")
                 continue
 
             print(f"  Running {qa_count} queries...")

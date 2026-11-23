@@ -12,7 +12,6 @@ from __future__ import annotations
 import unicodedata
 from typing import Literal
 
-
 # Allowlist de entity_type permitidos en el sistema EcoDB.
 # Entity type allowlist (6 categories):
 # - 6 categorias que GLiNER puede clasificar decentemente Y aportan valor unico

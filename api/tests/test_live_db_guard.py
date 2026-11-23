@@ -5,9 +5,8 @@ the wrapped originals are replaced by stubs.
 """
 
 import asyncpg
-import pytest
-
 import conftest
+import pytest
 
 LIVE = "postgresql://ecodb:pw@localhost:5435/ecodb"
 THROWAWAY = "postgresql://ecodb:pw@localhost:5436/ecodb"

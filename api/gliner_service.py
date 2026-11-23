@@ -44,10 +44,8 @@ from typing import Optional
 
 import asyncpg
 import httpx
-
 from entity_normalization import normalize_name
 from settings import NER_SERVICE_URL
-
 
 logger = logging.getLogger(__name__)
 
