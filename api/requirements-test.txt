@@ -1,0 +1,25 @@
+# What the api and mcp test suites need (#1362), WITHOUT the heavy model libraries (torch, gliner, docling,
+# whisper, sentence-transformers): the API only imports those inside the functions that use them, and the
+# tests replace the embeddings/NER services with api/tests/servicios_falsos.py.
+# Always installed with the production pins:
+#   pip install -r api/requirements-test.txt -c api/constraints.txt
+# Measured 23-nov: same results test by test as the 10.7 GB production image, in 63 s of install.
+fastapi
+uvicorn[standard]
+python-multipart
+pyjwt
+asyncpg
+pydantic
+httpx
+tiktoken
+numpy
+scipy
+croniter
+cryptography
+pillow
+# Test tools. respx and mcp are not in the api image, so the mcp tests never ran there.
+pytest==9.0.3
+pytest-asyncio==1.4.0
+respx==0.23.1
+# The MCP server (mcp/server.py) runs from the host with this version (ecodb-mcp:1.8.0 has the same).
+mcp[cli]==1.30.0

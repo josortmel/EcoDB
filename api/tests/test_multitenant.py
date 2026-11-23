@@ -26,6 +26,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from main import create_app  # noqa: E402
 from auth import generate_api_key  # noqa: E402
 import asyncpg  # noqa: E402
+from servicios_falsos import vector_for  # noqa: E402
+
+MEM_A_TEXT = "Secret data org A"
+MEM_B_TEXT = "Secret data org B"
+
+
+def _vec(text: str) -> str:
+    return "[" + ",".join(repr(v) for v in vector_for(text)) + "]"
 
 
 # ---------------------------------------------------------------------------
@@ -146,16 +154,19 @@ def two_orgs():
             )
             keys["super"] = plain_super
 
-            # Seed a memory in each org
+            # Seed a memory in each org. #1362: WITH an embedding. Search only takes memories that have one as
+            # candidates, so without it nobody found them, and «worker A cannot see B's memory» passed because
+            # worker A could not see anything. The vector is the fake service's vector for the memory's own
+            # text, so searching that exact text finds it whenever the searcher is allowed to see it.
             mem_a_id = await conn.fetchval(
-                """INSERT INTO memories (user_id, workspace_id, project_id, type, content, visibility)
-                VALUES ($1, $2, $3, 'tecnico', 'Secret data org A', 'public') RETURNING id""",
-                worker_a_id, ws_a_id, proj_a_id,
+                """INSERT INTO memories (user_id, workspace_id, project_id, type, content, visibility, embedding)
+                VALUES ($1, $2, $3, 'tecnico', $4, 'public', $5::vector) RETURNING id""",
+                worker_a_id, ws_a_id, proj_a_id, MEM_A_TEXT, _vec(MEM_A_TEXT),
             )
             mem_b_id = await conn.fetchval(
-                """INSERT INTO memories (user_id, workspace_id, project_id, type, content, visibility)
-                VALUES ($1, $2, $3, 'tecnico', 'Secret data org B', 'public') RETURNING id""",
-                worker_b_id, ws_b_id, proj_b_id,
+                """INSERT INTO memories (user_id, workspace_id, project_id, type, content, visibility, embedding)
+                VALUES ($1, $2, $3, 'tecnico', $4, 'public', $5::vector) RETURNING id""",
+                worker_b_id, ws_b_id, proj_b_id, MEM_B_TEXT, _vec(MEM_B_TEXT),
             )
 
             return {
@@ -243,37 +254,39 @@ def test_super_jwt_has_null_org_id(client, two_orgs):
 # Search isolation
 # ---------------------------------------------------------------------------
 
+def _search_ids(client, key: str, text: str) -> list[str]:
+    resp = client.post("/search", json={"query_text": text}, headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    return [r["id"] for r in resp.json().get("results", [])]
+
+
+# Each «cannot see» goes with a «sees its own» using the SAME kind of search: a search that finds nothing would
+# make the isolation tests pass for the wrong reason (#1362: it did, since June).
+
+def test_worker_a_sees_its_own_org_memory(client, two_orgs):
+    assert two_orgs["mem_a"] in _search_ids(client, two_orgs["keys"]["worker_a"], MEM_A_TEXT)
+
+
+def test_worker_b_sees_its_own_org_memory(client, two_orgs):
+    assert two_orgs["mem_b"] in _search_ids(client, two_orgs["keys"]["worker_b"], MEM_B_TEXT)
+
+
 def test_worker_a_cannot_see_org_b_memories(client, two_orgs):
-    resp = client.post("/search", json={"query_text": "Secret data org B"},
-                       headers=_auth(two_orgs["keys"]["worker_a"]))
-    assert resp.status_code == 200
-    ids = [r["id"] for r in resp.json().get("results", [])]
-    assert two_orgs["mem_b"] not in ids
+    assert two_orgs["mem_b"] not in _search_ids(client, two_orgs["keys"]["worker_a"], MEM_B_TEXT)
 
 
 def test_worker_b_cannot_see_org_a_memories(client, two_orgs):
-    resp = client.post("/search", json={"query_text": "Secret data org A"},
-                       headers=_auth(two_orgs["keys"]["worker_b"]))
-    assert resp.status_code == 200
-    ids = [r["id"] for r in resp.json().get("results", [])]
-    assert two_orgs["mem_a"] not in ids
+    assert two_orgs["mem_a"] not in _search_ids(client, two_orgs["keys"]["worker_b"], MEM_A_TEXT)
 
 
 def test_ceo_a_sees_own_org_only(client, two_orgs):
-    resp = client.post("/search", json={"query_text": "Secret data"},
-                       headers=_auth(two_orgs["keys"]["ceo_a"]))
-    assert resp.status_code == 200
-    ids = [r["id"] for r in resp.json().get("results", [])]
-    assert two_orgs["mem_b"] not in ids
+    assert two_orgs["mem_a"] in _search_ids(client, two_orgs["keys"]["ceo_a"], MEM_A_TEXT)
+    assert two_orgs["mem_b"] not in _search_ids(client, two_orgs["keys"]["ceo_a"], MEM_B_TEXT)
 
 
 def test_super_sees_all(client, two_orgs):
-    resp = client.post("/search", json={"query_text": "Secret data"},
-                       headers=_auth(two_orgs["keys"]["super"]))
-    assert resp.status_code == 200
-    ids = [r["id"] for r in resp.json().get("results", [])]
-    assert two_orgs["mem_a"] in ids
-    assert two_orgs["mem_b"] in ids
+    assert two_orgs["mem_a"] in _search_ids(client, two_orgs["keys"]["super"], MEM_A_TEXT)
+    assert two_orgs["mem_b"] in _search_ids(client, two_orgs["keys"]["super"], MEM_B_TEXT)
 
 
 # ---------------------------------------------------------------------------
