@@ -46,7 +46,9 @@ def main() -> int:
         changelog.write_text(text, encoding="utf-8")
 
     print(f"{old} → {new}: api/version.py, 3 etiquetas de ecodb-api en docker-compose.yml y CHANGELOG.md.")
-    print("Escribe el apartado del CHANGELOG, abre el PR release/" + new + " y construye la imagen después de fusionar.")
+    print(
+        "Escribe el apartado del CHANGELOG, abre el PR release/" + new + " y construye la imagen después de fusionar."
+    )
     return 0
 
 
