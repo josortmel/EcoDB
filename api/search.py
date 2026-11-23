@@ -466,7 +466,11 @@ EXPAND_GRAPH_HOP2 = os.environ.get("EXPAND_GRAPH_HOP2", "1").strip().lower() not
 # bonificación en la puntuación), no en EcoDB: neighbors, path_between, search_nodes y save_triple siguen. El NER y
 # la búsqueda por palabras de las entidades no son el grafo y no se tocan. EXPAND_GRAPH=0 lo apaga en todo el
 # servicio; el campo `graph` de la petición lo sobrescribe en una llamada, para medir encendido y apagado intercalados.
-EXPAND_GRAPH = os.environ.get("EXPAND_GRAPH", "1").strip().lower() not in ("0", "false", "off", "no")
+# APAGADO POR DEFECTO (#1160, medido por Prima el 11-nov con su vara v5: 51 consultas con objetivo, sobre NUESTRAS
+# memorias): P@1 0,255 con y sin grafo; MRR 0,351 con y 0,358 sin; recall@20 0,667 los dos; mediana 6.677 ms con y
+# 3.024 ms sin. No se quita: es un interruptor, EXPAND_GRAPH=1 lo enciende. El mismo valor que el compose
+# (test_grafo_por_defecto.py lo vigila): no es una medida en datos de otros.
+EXPAND_GRAPH = os.environ.get("EXPAND_GRAPH", "0").strip().lower() not in ("0", "false", "off", "no")
 
 
 def _usa_grafo(graph: Optional[bool] = None) -> bool:
