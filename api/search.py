@@ -459,7 +459,11 @@ async def _fetch_doc_expansion(
 # #1144 (parche del grafo, Pepe 11-nov: «parche ya + arreglo después»): el salto 2 por cypher agota su tiempo
 # (5 s) en casi todas las búsquedas (#486). EXPAND_GRAPH_HOP2=0 lo apaga en todo el servicio; el campo
 # graph_hop2 de la petición lo sobrescribe en una llamada, para medir encendido y apagado intercalados.
-EXPAND_GRAPH_HOP2 = os.environ.get("EXPAND_GRAPH_HOP2", "1").strip().lower() not in ("0", "false", "off", "no")
+# APAGADO POR DEFECTO (#1147, medido por Prima el 11-nov en su vara v5: 65 consultas, 3 llamadas intercaladas): con
+# el salto 2 cambian 2 de 65 respuestas y en ninguna cambia si se encuentra el objetivo ni en qué puesto; mediana
+# 11.768 ms con salto 2 frente a 6.715 ms sin. Pepe lo apagó en la sesión del grafo del 11-nov. Nadie lo ha medido a
+# favor: el «con grafo» del #1160 ya iba sin salto 2. EXPAND_GRAPH_HOP2=1 lo enciende (test_grafo_por_defecto.py).
+EXPAND_GRAPH_HOP2 = os.environ.get("EXPAND_GRAPH_HOP2", "0").strip().lower() not in ("0", "false", "off", "no")
 
 
 # #1144 (Pepe, 11-nov, en la sesión del grafo): apagar el grafo ENTERO en la búsqueda (los dos saltos y su

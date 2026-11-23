@@ -18,9 +18,11 @@ def _search(monkeypatch, valor=None):
     return importlib.reload(search)
 
 
-def test_por_defecto_hace_los_dos_saltos_como_hoy(monkeypatch):
+def test_por_defecto_solo_el_salto_1_desde_1147(monkeypatch):
+    # #1144 lo dejó encendido «como hoy»; la medida de Prima (#1147) y Pepe (11-nov) lo apagaron, y #1362 lo llevó al
+    # código y al compose. Encenderlo sigue siendo EXPAND_GRAPH_HOP2=1 (abajo).
     s = _search(monkeypatch)
-    assert s._saltos() == (1, 2)
+    assert s._saltos() == (1,)
     assert s.SearchRequest(query_text="hola mundo").graph_hop2 is None
 
 

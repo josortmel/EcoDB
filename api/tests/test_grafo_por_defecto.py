@@ -31,6 +31,19 @@ def test_the_code_defaults_the_graph_to_off(monkeypatch):
     assert search._usa_grafo(None) is False
 
 
+def test_the_hop_2_is_off_by_default_too_in_compose_and_code(monkeypatch):
+    # #1147: measured by Prima (65 queries): 2 answers change, none for the better, ~5 s more. Same two places.
+    compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
+    defaults = re.findall(r"^\s*EXPAND_GRAPH_HOP2:\s*\$\{EXPAND_GRAPH_HOP2:-([^}]*)\}", compose, re.M)
+    assert defaults == ["0"]
+    monkeypatch.delenv("EXPAND_GRAPH_HOP2", raising=False)
+    import search
+
+    importlib.reload(search)
+    assert search.EXPAND_GRAPH_HOP2 is False
+    assert search._saltos(None) == (1,)
+
+
 def test_it_is_a_switch_not_a_removal(monkeypatch):
     monkeypatch.setenv("EXPAND_GRAPH", "1")
     import search
