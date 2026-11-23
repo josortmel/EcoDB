@@ -1,3 +1,6 @@
-# Los scripts de shell van siempre con LF: con CRLF (checkout de Windows con autocrlf) bash falla con
-# «set: pipefail: invalid option name» (hallado en la repetición del experimento desde cero, 9-nov).
+# Todo el texto va con LF en el repo y en la copia de trabajo (#1362): con core.autocrlf=true, Windows deja CRLF en
+# casa, el formateador del CI (Linux) ve LF, y el mismo fichero «está mal formateado» solo en uno de los dos sitios.
+* text=auto eol=lf
+# Los scripts de shell, además, nunca con CRLF: bash falla con «set: pipefail: invalid option name» (hallado en la
+# repetición del experimento desde cero, 9-nov).
 *.sh text eol=lf
