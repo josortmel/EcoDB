@@ -19,8 +19,8 @@ RUN groupadd --system --gid 1000 apiuser \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt constraints.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 # El modelo se monta como volume desde host (~/.cache/huggingface) o se descarga
 # al primer arranque del container. NO se incluye en la imagen para mantener
