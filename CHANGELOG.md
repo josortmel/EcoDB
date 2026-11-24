@@ -2,7 +2,43 @@
 
 All notable changes to EcoDB are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**Version numbering (from 23-nov-2026).** EcoDB has one version: `api/version.py`, the same as the `ecodb-api` image tag and what `/health` reports. It continues from **0.25.0**, the image that was running in production. The `v1.x` tags and releases below used an older, separate numbering and are kept as history; `v1.3.2` sorts above `v0.26.0` but is older. Raise the version with `scripts/subir_version.py`; when a `## [X.Y.Z]` section reaches `main`, CI publishes the release.
+**Version numbering (from 1.4.0).** EcoDB has one version: `api/version.py`, the same as the `ecodb-api` image tag, what `/health` reports and the release tag. It follows the public `v1.x` releases. Up to 1.3.2 the `ecodb-api` image carried its own internal tag (`0.2x`; production ran `0.25.0`), separate from the releases; from 1.4.0 they are one number. Raise the version with `scripts/subir_version.py`; when a `## [X.Y.Z]` section reaches `main`, CI publishes the release.
+
+## [1.4.0] — 2026-11-24
+
+Everything on `main` since 1.3.2 (July to November 2026), grouped by area.
+
+### Release process
+- **One version** in `api/version.py`, read by settings and `/health`; `test_version.py` fails if the three `ecodb-api` image tags in `docker-compose.yml` disagree. `scripts/subir_version.py X.Y.Z` raises it everywhere (now keeps LF line endings and prints on a Windows console).
+- **CI on every PR and push to `main`**: the API test suite on a fresh database, one process per test file; `ruff format --check`, `ruff check`, `vulture` (blocking at 80 % confidence), `gitleaks`; and a `release` job that publishes `vX.Y.Z` from its CHANGELOG section.
+
+### Security
+- **Read-only API keys** (`api_keys.read_only`, migration 5.6.0): they only reach an explicit list of read routes, matched on the real path; `/events/broadcast` respects them too.
+- **Pillow**: FlashPix decoding is removed when every container starts (GHSA-5x8w-8jj5-q52h); while the api is on Pillow < 13 (docling pins it), TIFF is removed as well (GHSA-wqgw-9xfh-qf2g, GHSA-xcvg-w56q-r89m). The embeddings service moves to Pillow 13.0.0.
+- API, MCP and NER ports bound to loopback only. Dependency security bumps (fastapi, starlette, PyJWT, multipart, mcp and the patch releases of the scan).
+- No private data or default passwords in the repository.
+
+### Search and memory
+- **Current decisions** (`decisiones_vigentes`): its own candidate path (vector + text by RRF, no graph), a per-half threshold and per-row scores; a superseding decision found before the one it replaces keeps the chain.
+- **Graph expansion off by default** (`EXPAND_GRAPH=0`, `EXPAND_GRAPH_HOP2=0`), as a switch with the measurement next to it, not a removal.
+- Reranker modes `replace | blend | off` (default `blend`, alpha 0.7); results carry `reranker_score`; the final order is always the composite score.
+- Dormancy: a tag or date filter warns how many dormant matches it hid; returned memories wake up; access is recorded in the API process.
+- Entity dictionary and node search match without accents; `search_nodes` returns active nodes only; `save_memory` honours stop entities.
+- A `save_memory` during an outage is queued by the MCP with its final id and time, and re-sending it is a no-op; a re-send of a deleted memory is a 409, not a resurrection.
+
+### Memory engine (cell)
+- Every memory of a week lands in exactly one weekly cluster; a week can be rebuilt; a busy week is no longer split when the answer is cut; a rollup without narrative is retried, never stored empty.
+- Monthly clusters take whole weeks and each level waits for its last source; the period's decisions feed the compression; consolidations do not reveal which model wrote them unless asked.
+- Owners can re-narrate monthly and quarterly clusters (up to 32 000 characters).
+
+### Graph
+- AGE is the canonical projection of the SQL triples; AGE sync triggers pass values as `agtype` parameters; the predicate the agent asked for is stored and reported.
+- **Migration 5.7.0**: a fresh install creates the predicate vocabulary tables (`predicates_canonical`, `predicate_aliases`, `pending_predicates`), which only existed in the original database.
+
+### Operations
+- Migrations run once per version of their file.
+- `ecodb-api` dependencies pinned to production with `api/constraints.txt` and the base image pinned by digest; `ecodb-embeddings` gets the same (`embeddings/constraints.txt`, image `0.2.6`).
+- Tests refuse to run against the live database and pass on a freshly created one, each file on its own.
 
 ## [1.3.2] — 2026-07-01
 
@@ -145,7 +181,7 @@ The metacognition engine (v2.0) produced clusters, narratives, foresights and sk
 - Ownership bypass on NULL-owner agents (any user could create memories for system agents like SIN_AUTOR).
 - IDOR cross-agent tension mutation (Lead could dismiss tensions of other agents in same workspace).
 - Prompt injection in identity fragments fed to LLM (sanitization + data/instruction delimiters).
-- Null bytes in metadata passing validation (json.dumps escapes \x00 as  , check never fired).
+- Null bytes in metadata passing validation (json.dumps escapes \x00 as \u0000, check never fired).
 - Stale loop variable in SSE cluster.created broadcasts (all events reported last cluster's member_count).
 - Ambiguous `created_at` column in cells.py cursor pagination JOIN query.
 - `foresight_end` without upper bound allowed permanent foresights (now capped at 2 years).
