@@ -18,6 +18,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")  # Windows: la consola en cp1252 no imprime «→»
     if len(sys.argv) != 2 or not re.fullmatch(r"\d+\.\d+\.\d+", sys.argv[1]):
         sys.exit("uso: python scripts/subir_version.py X.Y.Z")
     new = sys.argv[1]
@@ -27,7 +28,9 @@ def main() -> int:
     old = re.search(r'^__version__ = "([^"]+)"$', text, re.M).group(1)
     if tuple(map(int, new.split("."))) <= tuple(map(int, old.split("."))):
         sys.exit(f"{new} no es mayor que la versión actual {old}")
-    version_py.write_text(text.replace(f'__version__ = "{old}"', f'__version__ = "{new}"'), encoding="utf-8")
+    version_py.write_text(
+        text.replace(f'__version__ = "{old}"', f'__version__ = "{new}"'), encoding="utf-8", newline=""
+    )
 
     compose = REPO / "docker-compose.yml"
     text = compose.read_text(encoding="utf-8")
@@ -35,7 +38,7 @@ def main() -> int:
     text, n = pattern.subn(rf"\g<1>{new}\g<2>", text)
     if n != 3:
         sys.exit(f"esperaba 3 «image: ecodb-api:{old}» en docker-compose.yml y hay {n}: no toco nada más")
-    compose.write_text(text, encoding="utf-8")
+    compose.write_text(text, encoding="utf-8", newline="")
 
     changelog = REPO / "CHANGELOG.md"
     text = changelog.read_text(encoding="utf-8")
@@ -43,7 +46,7 @@ def main() -> int:
         first = text.index("\n## [")
         today = datetime.date.today().isoformat()
         text = text[: first + 1] + f"## [{new}] — {today}\n\n- (qué cambia en esta versión)\n\n" + text[first + 1 :]
-        changelog.write_text(text, encoding="utf-8")
+        changelog.write_text(text, encoding="utf-8", newline="")
 
     print(f"{old} → {new}: api/version.py, 3 etiquetas de ecodb-api en docker-compose.yml y CHANGELOG.md.")
     print(
