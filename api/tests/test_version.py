@@ -31,7 +31,9 @@ def test_every_ecodb_api_image_in_compose_carries_the_version():
     assert set(tags) == {__version__}
 
 
-def test_the_changelog_says_the_old_numbering_is_history():
+def test_the_changelog_explains_the_numbering():
+    # From 1.4.0 the public v1.x releases and the image tag are one number; the old internal 0.2x is explained.
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "api/version.py" in changelog
     assert "v1.x" in changelog
+    assert "0.25.0" in changelog
