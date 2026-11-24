@@ -60,7 +60,7 @@ services:
   embeddings:
     build:
       context: ./embeddings
-    image: ecodb-embeddings:0.2.5
+    image: ecodb-embeddings:0.2.6
     container_name: ecodb-embeddings
     environment:
       MODEL_NAME: jinaai/jina-embeddings-v4
