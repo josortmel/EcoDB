@@ -4,10 +4,9 @@ registered. Everything is loaded once (init) and FPX is removed: init() doesn't 
 Imported FIRST by every entry point (main, worker, cell_worker) and by parsers, so no image is ever
 opened while FPX is still registered (#811: before, only importing parsers removed it).
 
-#1316: GHSA-wqgw-9xfh-qf2g (opening a 144 KB TIFF eats 1.6 GiB) and GHSA-xcvg-w56q-r89m (saving a
-TIFF with libtiff), also fixed in Pillow 13. The api can't install 13 yet (docling-slim 2.120.3 pins
-pillow<13; 2.142.0 allows it), so while Pillow < 13 TIFF is removed from open and save too. EcoDB has
-never stored a TIFF (0 on 24-nov); visual-search images are decoded by embeddings, already on 13."""
+#1316/#1437: the two TIFF advisories (GHSA-wqgw-9xfh-qf2g, GHSA-xcvg-w56q-r89m) are fixed in Pillow 13,
+which the api runs since 1.4.1 (docling 2.142.1 allows it). TIFF was removed here while the api was on
+Pillow < 13; test_pillow_13.py now fails if the api ever goes back below 13."""
 
 
 def remove_flashpix() -> None:
@@ -19,12 +18,6 @@ def remove_flashpix() -> None:
     Image.OPEN.pop("FPX", None)
     if "FPX" in Image.ID:
         Image.ID.remove("FPX")
-    if int(Image.__version__.split(".")[0]) < 13:
-        Image.OPEN.pop("TIFF", None)
-        Image.SAVE.pop("TIFF", None)
-        Image.SAVE_ALL.pop("TIFF", None)
-        if "TIFF" in Image.ID:
-            Image.ID.remove("TIFF")
 
 
 remove_flashpix()
