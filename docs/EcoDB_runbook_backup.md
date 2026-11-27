@@ -68,7 +68,7 @@ The two sections above assume your `.env` survived. This one is for the day it d
 | Keep this | Why | Where |
 |---|---|---|
 | The backup (`.dump` or `.sql.gz` from `scripts/backup.sh`) | It is your memory. Everything else can be rebuilt. | Off the machine: another disk, a private repo, cloud storage. |
-| The keys of your **external providers** (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `CELL_LLM_KEY`, and any provider key you saved in EcoDB) | EcoDB cannot regenerate them: they belong to your provider account. | Your password manager. |
+| The keys of your **external providers** (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `CELL_LLM_KEY`, `TELEGRAM_BOT_TOKEN` if you use the alerting override, and any provider key you saved in EcoDB) | EcoDB cannot regenerate them: they belong to your provider account (the Telegram token, to your bot in BotFather). | Your password manager. |
 | *Optional:* the list of files where your clients keep their EcoDB key (MCP configs, scripts) | `restore.sh --key-targets` rewrites them for you. | One path per line, outside the repo. |
 
 You do **not** need to keep the `.env`. Its secrets are regenerated (next section). Keeping it in the same place as the backup would be worse: whoever gets the backup would also get the keys.
