@@ -6,7 +6,6 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
-from uuid import UUID
 
 from auth import get_current_user
 from db import get_pool
@@ -23,22 +22,6 @@ router = APIRouter(prefix="/cells", tags=["cells"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
-
-
-class CellRunSummary(BaseModel):
-    run_id: UUID
-    cell_type: str
-    agent_identifier: Optional[str] = None
-    model: str
-    prompt_version: Optional[str] = None
-    started_at: datetime
-    finished_at: Optional[datetime] = None
-    status: str
-    tokens_used: Optional[int] = None
-    cost_usd: Optional[float] = None
-    items_created: int
-    errors: list = Field(default_factory=list)
-    metrics: dict = Field(default_factory=dict)
 
 
 class CellHealthResponse(BaseModel):

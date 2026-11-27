@@ -7,8 +7,7 @@ Convencion de uso desde endpoints:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT ...")
 
-El pool se crea perezosamente al primer acquire (lifecycle del API). En tests
-con TestClient se puede inyectar un pool propio via override_pool().
+El pool se crea perezosamente al primer acquire (lifecycle del API).
 """
 
 from __future__ import annotations
@@ -40,9 +39,3 @@ async def close_pool() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
-
-
-def override_pool(pool: Optional[asyncpg.Pool]) -> None:
-    """Inyectar un pool ad-hoc (uso en tests). Pasar None para restaurar el lazy."""
-    global _pool
-    _pool = pool

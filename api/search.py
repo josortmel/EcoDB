@@ -100,13 +100,6 @@ MAX_CONTRADICTION_PAIRS = 10
 _GRAPH_ENTITY_NORM = 3.0
 CHUNK_SCORE_FACTOR = float(os.environ.get("CHUNK_SCORE_FACTOR", "0.7"))
 
-GAMR_WEIGHTS: dict[str, dict[str, float]] = {
-    "factual": {"semantic": 0.35, "graph": 0.15, "weight": 0.20, "freshness": 0.30},
-    "historical": {"semantic": 0.40, "graph": 0.20, "weight": 0.30, "freshness": 0.10},
-    "analytical": {"semantic": 0.30, "graph": 0.30, "weight": 0.25, "freshness": 0.15},
-    "contextual": {"semantic": 0.35, "graph": 0.25, "weight": 0.25, "freshness": 0.15},
-}
-
 _QUERY_PATTERNS: dict[str, list[re.Pattern]] = {
     "cross_modal": [
         re.compile(r"\bfoto[s]?\b", re.I),

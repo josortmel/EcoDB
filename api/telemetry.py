@@ -1,82 +1,14 @@
-"""Injection telemetry — NER-based use detection without LLM."""
+"""Injection telemetry: record each context injection and whether the agent used it.
+
+The use score comes from the client (POST /telemetry/evaluate) or from the LLM (compute_use_score_llm).
+The keyword-based scorer that was here since v1.0 was never called, and was removed (#1389).
+"""
 
 import hashlib
 import html
 import logging
-import re
-from collections import Counter
 
 log = logging.getLogger("ecodb.telemetry")
-
-
-def _extract_keywords(text: str, top_n: int = 15) -> set[str]:
-    """Extract top-n keywords by frequency (simple TF approach)."""
-    words = re.findall(r"\b[a-záéíóúñü]{4,}\b", text.lower())
-    counts = Counter(words)
-    stops = {
-        "para",
-        "como",
-        "este",
-        "esta",
-        "pero",
-        "cuando",
-        "donde",
-        "tiene",
-        "hacer",
-        "puede",
-        "cada",
-        "desde",
-        "entre",
-        "sobre",
-        "después",
-        "también",
-        "todo",
-        "todos",
-        "otra",
-        "otro",
-        "sido",
-        "está",
-        "están",
-    }
-    return set(list({w for w, _ in counts.most_common(top_n + len(stops)) if w not in stops})[:top_n])
-
-
-def compute_use_score(
-    injection_entity_names: set[str],
-    prompt_text: str,
-    response_text: str,
-    injection_ids: list[str],
-) -> tuple[float, list[str]]:
-    """Score how likely the agent used the injected context.
-
-    Returns (score, novel_entities).
-    score > 0.3 → 'used', else 'ignored'.
-    """
-    prompt_lower = prompt_text.lower()
-    response_lower = response_text.lower()
-
-    # Signal 1: Entity overlap (weight 0.50) — word boundaries to avoid "eco" matching "ecosystem"
-    novel = []
-    for entity in injection_entity_names:
-        e_lower = entity.lower()
-        if re.search(r"\b" + re.escape(e_lower) + r"\b", response_lower) and not re.search(
-            r"\b" + re.escape(e_lower) + r"\b", prompt_lower
-        ):
-            novel.append(entity)
-    entity_score = min(len(novel) / max(len(injection_entity_names), 1), 1.0)
-
-    # Signal 2: Keyword overlap (weight 0.30) — entity names only, not response (would be circular)
-    injection_kw = _extract_keywords(" ".join(injection_entity_names), 20)
-    prompt_kw = _extract_keywords(prompt_text, 20)
-    response_kw = _extract_keywords(response_text, 20)
-    novel_kw = response_kw & injection_kw - prompt_kw
-    keyword_score = min(len(novel_kw) / max(len(injection_kw), 1), 1.0)
-
-    # Signal 3: Citation ID check (weight 0.20)
-    citation_found = any(f"[EcoDB:{iid}]" in response_text for iid in injection_ids)
-
-    score = 0.50 * entity_score + 0.30 * keyword_score + 0.20 * float(citation_found)
-    return round(score, 3), novel
 
 
 async def compute_use_score_llm(injection_text: str, response_text: str) -> dict | None:
