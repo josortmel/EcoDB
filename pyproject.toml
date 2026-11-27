@@ -8,7 +8,9 @@ target-version = "py312"
 # commit into an unreadable diff for no gain (same decision as FarOS, #1361).
 line-length = 120
 # ecodb-langchain is its own package with its own pyproject; archive/ is frozen history.
-extend-exclude = ["archive", "ecodb-langchain", "models", "media", "backups", "dashboard"]
+# vulture_whitelist.py is not code: vulture only reads it (#1389), and its `_.name` lines are what ruff calls
+# undefined names and useless expressions.
+extend-exclude = ["archive", "ecodb-langchain", "models", "media", "backups", "dashboard", "vulture_whitelist.py"]
 
 [tool.ruff.lint]
 # Written out, not ruff's defaults (ruff 0.17 turned on many more by default: 1.386 findings here, most of them
