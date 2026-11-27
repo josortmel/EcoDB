@@ -19,8 +19,11 @@ def _claves_externas_del_script():
 
 
 def _fila_de_claves_externas():
-    filas = [l for l in RUNBOOK.read_text(encoding="utf-8").splitlines()
-             if l.startswith("|") and "external providers" in l]
+    filas = [
+        linea
+        for linea in RUNBOOK.read_text(encoding="utf-8").splitlines()
+        if linea.startswith("|") and "external providers" in linea
+    ]
     assert len(filas) == 1, "no encuentro una sola fila de claves externas en «What to keep»"
     return filas[0]
 
