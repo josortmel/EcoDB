@@ -10,7 +10,6 @@ Funciones puras, unit-testeables sin dependencias ML.
 from __future__ import annotations
 
 import unicodedata
-from typing import Literal
 
 # Allowlist de entity_type permitidos en el sistema EcoDB.
 # Entity type allowlist (6 categories):
@@ -20,21 +19,7 @@ from typing import Literal
 # - proyecto = projects and platforms (e.g. EcoDB).
 # - organizacion = companies and organizations (e.g. Anthropic) — even if they
 #   construimos por dentro, son entidades empresariales con NIF.
-EntityType = Literal[
-    "persona",
-    "agente_ia",
-    "organizacion",
-    "lugar",
-    "producto",
-    "proyecto",
-    "tecnologia",
-    "concepto",
-    "evento",
-    "artefacto",
-    "modelo_ia",
-    "metodologia",
-]
-
+# Una sola lista: el Literal EntityType que la repetía no lo leía nadie (#1389).
 ALLOWED_ENTITY_TYPES: frozenset[str] = frozenset(
     {
         "persona",
@@ -81,7 +66,7 @@ def normalize_name(name: str) -> str:
 
 
 def is_valid_entity_type(entity_type: str) -> bool:
-    """True si el tipo esta en la allowlist EntityType.
+    """True si el tipo esta en la allowlist ALLOWED_ENTITY_TYPES.
 
     Usado por endpoints REST /admin/entity-dictionary para rechazar typos
     como "persoana" con 422 (matiz adv-code 2026-05-09).

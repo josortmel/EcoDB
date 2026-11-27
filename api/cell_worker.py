@@ -46,7 +46,6 @@ CELL_LLM_MAX_TOKENS = int(os.environ.get("CELL_LLM_MAX_TOKENS", "32768"))
 ALPHA = float(os.environ.get("CONSOLIDATION_ALPHA", "0.70"))
 BETA1 = float(os.environ.get("CONSOLIDATION_BETA1", "0.50"))
 BETA2 = float(os.environ.get("CONSOLIDATION_BETA2", "0.50"))
-BETA3 = float(os.environ.get("CONSOLIDATION_BETA3", "0.0"))
 THRESHOLD_NARRATIVE = float(os.environ.get("THRESHOLD_NARRATIVE", "0.45"))
 THRESHOLD_WORK = float(os.environ.get("THRESHOLD_WORK", "0.55"))
 MIN_CLUSTER_SIZE = int(os.environ.get("MIN_CLUSTER_SIZE", "2"))
@@ -1412,7 +1411,6 @@ async def _distill_skill(task_type, cases_content):
 # ---------------------------------------------------------------------------
 
 MAX_NEW_TENSIONS_PER_RUN = 1
-TENSION_COOLDOWN_DAYS = 30
 # #816: only the week that just closed gets a tension. Rebuilding old weeks (the #702 regeneration)
 # wrote one per rebuilt week, all dated today: 101 that crowded every boot's recent days.
 TENSION_LIVE_WEEK_DAYS = 8

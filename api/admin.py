@@ -527,7 +527,7 @@ class EntityDictionaryCreate(BaseModel):
         min_length=1,
         max_length=50,
         pattern=r"^[a-z_]+$",
-        description="Tipo. Lowercase + underscore. Validado contra allowlist EntityType.",
+        description="Tipo. Lowercase + underscore. Validado contra allowlist ALLOWED_ENTITY_TYPES.",
     )
     notes: Optional[str] = Field(None, max_length=500)
 
@@ -561,7 +561,7 @@ async def create_dictionary_entry(
     """Crea entrada en entity_dictionary. Super-only.
 
     Validaciones:
-    - entity_type contra allowlist EntityType (matiz adv-code: typo "persoana"
+    - entity_type contra allowlist ALLOWED_ENTITY_TYPES (matiz adv-code: typo "persoana"
       → 422 antes que corromper graph_context silenciosamente).
     - Pattern Pydantic en name + entity_type (matiz adv-seg: anti emoji y
       caracteres extraños).

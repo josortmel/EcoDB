@@ -20,7 +20,6 @@ from version import __version__
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
-IS_DEVELOPMENT = ENVIRONMENT == "development"
 
 # #1362: was os.environ.get("API_VERSION", "0.9.0"), a third version that nobody updated. Now the one in version.py.
 API_VERSION = __version__
@@ -178,16 +177,10 @@ ENABLE_WEIGHT_DYNAMIC = _env_bool("ENABLE_WEIGHT_DYNAMIC")
 ENABLE_TRUST_TIERS = _env_bool("ENABLE_TRUST_TIERS")
 ENABLE_STOP_ENTITIES_DYNAMIC = _env_bool("ENABLE_STOP_ENTITIES_DYNAMIC")
 ENABLE_TENSION_DETECTION = _env_bool("ENABLE_TENSION_DETECTION")
-ENABLE_CONTEXT_INJECTION = _env_bool("ENABLE_CONTEXT_INJECTION")
 ENABLE_BM25_EXPANSION = _env_bool("ENABLE_BM25_EXPANSION")
 ENABLE_HYDE = _env_bool("ENABLE_HYDE")
 ENABLE_POST_HOC_CLASSIFIER = _env_bool("ENABLE_POST_HOC_CLASSIFIER")
 ENABLE_LLM_TELEMETRY = _env_bool("ENABLE_LLM_TELEMETRY")
-
-# Weight multiplicative floor: weight signal is attenuated by semantic relevance.
-# weight_term = w["weight"] * memory_weight * (WEIGHT_ALPHA + (1-WEIGHT_ALPHA) * semantic_score)
-# At WEIGHT_ALPHA=0.25: a decision (weight=0.9) with low semantic (0.2) → 0.9 × 0.40 = 0.36 instead of 0.9.
-WEIGHT_ALPHA = float(os.environ.get("WEIGHT_ALPHA", "0.30"))
 
 COOCCURRENCE_THRESHOLD = int(os.environ.get("COOCCURRENCE_THRESHOLD", "3"))
 
@@ -200,7 +193,6 @@ GAMR_WEIGHTS_BM25: dict[str, dict[str, float]] = {
     "contextual": {"semantic": 0.70, "graph": 0.05, "weight": 0.07, "freshness": 0.08, "bm25": 0.10},
 }
 
-RERANK_FETCH_K = int(os.environ.get("RERANK_FETCH_K", "50"))
 MAX_FETCH_K = int(os.environ.get("MAX_FETCH_K", "200"))
 
 RERANKER_MODEL_ALLOWLIST = {
@@ -222,27 +214,6 @@ DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", DEFAULT_LLM_MODEL)
 DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com")
 MAX_LLM_TOKENS = int(os.environ.get("MAX_LLM_TOKENS", "512"))
 
-# --- Cell worker configuration ---
-CELL_LLM_PROVIDER = os.environ.get("CELL_LLM_PROVIDER", "deepseek")
-CELL_LLM_URL = os.environ.get("CELL_LLM_URL", "https://api.deepseek.com")
-CELL_LLM_KEY = os.environ.get("CELL_LLM_KEY", "")
-CELL_LLM_MODEL = os.environ.get("CELL_LLM_MODEL", DEFAULT_LLM_MODEL)
-
-# --- Consolidation parameters ---
-CONSOLIDATION_ALPHA = float(os.environ.get("CONSOLIDATION_ALPHA", "0.70"))
-CONSOLIDATION_BETA1 = float(os.environ.get("CONSOLIDATION_BETA1", "0.50"))
-CONSOLIDATION_BETA2 = float(os.environ.get("CONSOLIDATION_BETA2", "0.50"))
-CONSOLIDATION_BETA3 = float(os.environ.get("CONSOLIDATION_BETA3", "0.0"))
-THRESHOLD_NARRATIVE = float(os.environ.get("THRESHOLD_NARRATIVE", "0.45"))
-THRESHOLD_WORK = float(os.environ.get("THRESHOLD_WORK", "0.55"))
-MIN_CLUSTER_SIZE = int(os.environ.get("MIN_CLUSTER_SIZE", "2"))
-MAX_MEMORIES_PER_WINDOW = int(os.environ.get("MAX_MEMORIES_PER_WINDOW", "500"))
-
-# --- Foresight extraction ---
-FORESIGHT_CONFIDENCE_THRESHOLD = float(os.environ.get("FORESIGHT_CONFIDENCE_THRESHOLD", "0.70"))
-FORESIGHT_SCAN_HOURS = int(os.environ.get("FORESIGHT_SCAN_HOURS", "48"))
-
-# --- Skill distillation ---
-SKILL_MIN_CASES = int(os.environ.get("SKILL_MIN_CASES", "3"))
-SKILL_MIN_SUCCESS_RATE = float(os.environ.get("SKILL_MIN_SUCCESS_RATE", "0.60"))
-SKILL_STALE_THRESHOLD = float(os.environ.get("SKILL_STALE_THRESHOLD", "0.30"))
+# The cell worker (cell_worker.py) reads its own settings from the environment: CELL_LLM_*,
+# CONSOLIDATION_*, THRESHOLD_*, MIN_CLUSTER_SIZE, MAX_MEMORIES_PER_WINDOW, FORESIGHT_* and SKILL_*.
+# They were also copied here with the same defaults and nobody read the copies (#1389).
